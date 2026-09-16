@@ -32,7 +32,7 @@ app.post('/api/create-web-call', async (req, res) => {
         agent_id: agentId,
         retell_llm_dynamic_variables: {
           customer_name: req.body.customerName || 'Gast',
-          location: req.body.location || 'Berlin',
+          location: req.body.location || '',
         },
       }),
     });
