@@ -19,7 +19,13 @@ app.get('/', (req, res) => {
  * Endpunkt 1: Erstellt einen Web Call für den Voice Agenten
  */
 app.post('/api/create-web-call', async (req, res) => {
+  console.log('📥 ===== NEUE ANFRAGE =====');
+  console.log('📥 customerName:', req.body.customerName);
+  console.log('📥 location:', req.body.location);
+  console.log('📥 ========================');
+
   try {
+    // ⚠️ HIER DEINE NEUE AGENT-ID EINTRAGEN!
     const agentId = 'agent_9e28b1c05bca3d19addb419027';
 
     const response = await fetch('https://api.retellai.com/v2/create-web-call', {
@@ -39,10 +45,12 @@ app.post('/api/create-web-call', async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('❌ Retell API Fehler:', response.status, errorText);
       return res.status(500).json({ error: 'Failed', details: errorText });
     }
 
     const call = await response.json();
+    console.log('✅ Web Call erstellt:', call.call_id);
     res.json({
       accessToken: call.access_token,
       callId: call.call_id,
@@ -60,8 +68,22 @@ app.post('/api/search-restaurant', async (req, res) => {
   try {
     const { cuisine, location, min_rating } = req.body;
 
+    console.log('🔍 ===== RESTAURANT-SUCHE =====');
+    console.log('🔍 cuisine:', cuisine);
+    console.log('🔍 location:', location);
+    console.log('🔍 =============================');
+
+    // ⬇️ Ort prüfen
+    if (!location || location.trim() === '') {
+      console.log('⚠️ Kein Ort angegeben – Suche abgebrochen');
+      return res.status(400).json({
+        error: 'Location required',
+        message: 'Bitte gib einen Ort an, damit ich Restaurants finden kann.',
+      });
+    }
+
     // Suchbegriff bauen
-    const query = `${cuisine || 'Restaurant'} in ${location || 'Berlin'}`;
+    const query = `${cuisine || 'Restaurant'} in ${location}`;
     console.log('🔍 Suche Restaurants:', query);
 
     // Google Places API (NEW) aufrufen
@@ -144,8 +166,4 @@ function normalizePhone(phone) {
 // Server starten
 app.listen(PORT, () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
-
 });
-
-
-
