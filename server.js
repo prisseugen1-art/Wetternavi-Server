@@ -144,8 +144,8 @@ function normalizePhone(phone) {
 // Server starten
 app.listen(PORT, () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
-<<<<<<< HEAD:server.js
+
 });
-=======
-});
->>>>>>> 791cf3e274795c013f25b2f57b1697e0282248b7:index.js
+
+
+
