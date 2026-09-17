@@ -25,7 +25,7 @@ app.post('/api/create-web-call', async (req, res) => {
   console.log('📥 ========================');
 
   try {
-    // ⚠️ HIER DEINE NEUE AGENT-ID EINTRAGEN!
+    // Agent-ID
     const agentId = 'agent_74a4972eb9f76b3e76c9291302';
 
     const response = await fetch('https://api.retellai.com/v2/create-web-call', {
@@ -63,17 +63,22 @@ app.post('/api/create-web-call', async (req, res) => {
 
 /**
  * Endpunkt 2: Sucht Restaurants über Google Places API (NEW)
+ * Location kommt aus dem Query-Parameter (?location=...)
+ * Cuisine kommt aus dem Body
  */
 app.post('/api/search-restaurant', async (req, res) => {
   try {
-    const { cuisine, location, min_rating } = req.body;
+    // ⬇️ Location aus Query-Parameter lesen!
+    const location = req.query.location || '';
+    const cuisine = req.body.cuisine || 'Restaurant';
+    const min_rating = req.body.min_rating;
 
     console.log('🔍 ===== RESTAURANT-SUCHE =====');
-    console.log('🔍 cuisine:', cuisine);
-    console.log('🔍 location:', location);
+    console.log('🔍 cuisine (aus Body):', cuisine);
+    console.log('🔍 location (aus Query):', location);
     console.log('🔍 =============================');
 
-    // ⬇️ Ort prüfen
+    // Ort prüfen
     if (!location || location.trim() === '') {
       console.log('⚠️ Kein Ort angegeben – Suche abgebrochen');
       return res.status(400).json({
@@ -83,7 +88,7 @@ app.post('/api/search-restaurant', async (req, res) => {
     }
 
     // Suchbegriff bauen
-    const query = `${cuisine || 'Restaurant'} in ${location}`;
+    const query = `${cuisine} in ${location}`;
     console.log('🔍 Suche Restaurants:', query);
 
     // Google Places API (NEW) aufrufen
