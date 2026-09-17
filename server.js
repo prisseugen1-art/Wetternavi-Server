@@ -26,7 +26,7 @@ app.post('/api/create-web-call', async (req, res) => {
 
   try {
     // ⚠️ HIER DEINE NEUE AGENT-ID EINTRAGEN!
-    const agentId = 'agent_b7f099f478b253bef067b14e28';
+    const agentId = 'agent_74a4972eb9f76b3e76c9291302';
 
     const response = await fetch('https://api.retellai.com/v2/create-web-call', {
       method: 'POST',
