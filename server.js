@@ -114,7 +114,7 @@ app.post('/api/create-web-call', async (req, res) => {
       body: JSON.stringify({
         agent_id: agentId,
         retell_llm_dynamic_variables: {
-          customer_name: req.body.customerName || 'Gast',
+          customer_name:  'Jackson',
           location: req.body.location || '',
         },
       }),
