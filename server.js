@@ -175,6 +175,15 @@ app.post('/api/search-restaurant', async (req, res) => {
  */
 app.post('/api/get-weather', async (req, res) => {
   try {
+     // DIAGNOSE
+    console.log('🔬 === DEBUG get-weather ===');
+    console.log('🔬 Content-Type:', req.headers['content-type']);
+    console.log('🔬 req.body:', JSON.stringify(req.body));
+    console.log('🔬 req.body.location:', req.body?.location);
+    console.log('🔬 req.body.arguments:', JSON.stringify(req.body?.arguments));
+    console.log('🔬 req.query.location:', req.query.location);
+    console.log('🔬 =======================');
+    
     const location = resolveLocation(req);
     const timeframe = req.body.timeframe || 'aktuell';
 
