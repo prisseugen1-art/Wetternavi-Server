@@ -103,6 +103,7 @@ app.post('/api/search-restaurant', async (req, res) => {
           'places.rating',
           'places.userRatingCount',
           'places.nationalPhoneNumber',
+          'places.internationalPhoneNumber',
           'places.regularOpeningHours',
           'places.priceLevel',
         ].join(','),
@@ -136,7 +137,7 @@ app.post('/api/search-restaurant', async (req, res) => {
       address: p.formattedAddress || '',
       rating: p.rating || 0,
       reviews: p.userRatingCount || 0,
-      phone: normalizePhone(p.nationalPhoneNumber || ''),
+      phone: p.internationalPhoneNumber || normalizePhone(p.nationalPhoneNumber || ''),
       openNow: p.regularOpeningHours?.openNow ?? null,
       openingHours: p.regularOpeningHours?.weekdayDescriptions || [],
       priceLevel: p.priceLevel || null,
@@ -152,6 +153,155 @@ app.post('/api/search-restaurant', async (req, res) => {
   } catch (error) {
     console.error('❌ Server-Fehler:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Endpunkt 3: Wetter für einen Ort abrufen
+ * Location kommt aus Query-Parameter (?location=...)
+ * Timeframe kommt aus Body: 'aktuell' | 'heute' | 'morgen' | '3tage'
+ */
+app.post('/api/get-weather', async (req, res) => {
+  try {
+    const location = req.query.location || '';
+    const timeframe = req.body.timeframe || 'aktuell';
+
+    console.log('🌤️ ===== WETTER-ABFRAGE =====');
+    console.log('🌤️ location (aus Query):', location);
+    console.log('🌤️ timeframe (aus Body):', timeframe);
+    console.log('🌤️ =============================');
+
+    if (!location || location.trim() === '') {
+      console.log('⚠️ Kein Ort angegeben – Wetter-Abfrage abgebrochen');
+      return res.status(400).json({
+        error: 'Location required',
+        message: 'Bitte gib einen Ort an, damit ich das Wetter abrufen kann.',
+      });
+    }
+
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+    if (!apiKey) {
+      console.error('❌ OPENWEATHER_API_KEY nicht gesetzt!');
+      return res.status(500).json({ error: 'OpenWeatherMap API key missing' });
+    }
+
+    // 1. Geocoding: Ort → lat/lon
+    const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${apiKey}`;
+    const geoRes = await fetch(geoUrl);
+    const geoData = await geoRes.json();
+
+    if (!geoData || geoData.length === 0) {
+      console.log('⚠️ Ort nicht gefunden:', location);
+      return res.status(404).json({
+        error: 'Location not found',
+        message: `Ort "${location}" nicht gefunden.`,
+      });
+    }
+
+    const { lat, lon, name, country } = geoData[0];
+    console.log(`🌤️ Ort: ${name}, ${country} → ${lat}, ${lon}`);
+
+    // 2. Aktuelles Wetter
+    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de`;
+    const currentRes = await fetch(currentUrl);
+    const currentData = await currentRes.json();
+
+    if (!currentData || !currentData.main) {
+      console.error('❌ Aktuelles Wetter fehlgeschlagen:', currentData);
+      return res.status(500).json({ error: 'Weather fetch failed' });
+    }
+
+    // 3. Forecast (5 Tage / 3 Stunden)
+    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de`;
+    const forecastRes = await fetch(forecastUrl);
+    const forecastData = await forecastRes.json();
+
+    // 4. Daten aggregieren
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+
+    const windDir = (deg) => {
+      const dirs = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
+      return dirs[Math.round(deg / 45) % 8];
+    };
+
+    const current = {
+      temp: Math.round(currentData.main.temp),
+      feels_like: Math.round(currentData.main.feels_like),
+      description: currentData.weather[0].description,
+      humidity: currentData.main.humidity,
+      wind_speed: Math.round(currentData.wind.speed * 3.6),
+      wind_dir: windDir(currentData.wind.deg || 0),
+    };
+
+    const byDay = {};
+    if (forecastData && forecastData.list) {
+      for (const entry of forecastData.list) {
+        const dt = new Date(entry.dt * 1000);
+        const dayKey = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        if (!byDay[dayKey]) byDay[dayKey] = [];
+        byDay[dayKey].push(entry);
+      }
+    }
+
+    const dayKeyToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const dayKeyTomorrow = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+
+    const aggregate = (entries) => {
+      if (!entries || entries.length === 0) return null;
+      const temps = entries.map((e) => e.main.temp);
+      const min = Math.round(Math.min(...temps));
+      const max = Math.round(Math.max(...temps));
+      const descCount = {};
+      let maxPop = 0;
+      for (const e of entries) {
+        const d = e.weather[0].description;
+        descCount[d] = (descCount[d] || 0) + 1;
+        if (e.pop > maxPop) maxPop = e.pop;
+      }
+      const description = Object.entries(descCount).sort((a, b) => b[1] - a[1])[0][0];
+      return {
+        min,
+        max,
+        description,
+        rain_chance: Math.round(maxPop * 100),
+      };
+    };
+
+    const todayData = aggregate(byDay[dayKeyToday]);
+    const tomorrowData = aggregate(byDay[dayKeyTomorrow]);
+
+    const nextDays = Object.keys(byDay)
+      .filter((k) => k !== dayKeyToday && k !== dayKeyTomorrow)
+      .sort()
+      .slice(0, 3)
+      .map((k) => {
+        const agg = aggregate(byDay[k]);
+        const dt = new Date(k);
+        return {
+          date: k,
+          weekday: dt.toLocaleDateString('de-DE', { weekday: 'long' }),
+          ...agg,
+        };
+      });
+
+    const result = {
+      location: name,
+      country,
+      timeframe,
+      current,
+      today: todayData,
+      tomorrow: tomorrowData,
+      next_days: nextDays,
+    };
+
+    console.log('✅ Wetter abgerufen für', name);
+    res.json(result);
+
+  } catch (error) {
+    console.error('❌ Wetter-Fehler:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
