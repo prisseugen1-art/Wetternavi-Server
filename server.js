@@ -15,6 +15,27 @@ app.get('/', (req, res) => {
   res.send('Server läuft erfolgreich!');
 });
 
+// ========== HELPER: Location aus Query/Body sauber auslesen ==========
+function resolveLocation(req, bodyKey = 'location') {
+  // Priorität: body.location (falls Agent explizit genannt) > query.location (App-Standort)
+  const bodyLoc = req.body && req.body[bodyKey];
+  const queryLoc = req.query.location;
+  
+  let raw;
+  if (bodyLoc && typeof bodyLoc === 'string' && bodyLoc.trim() !== '') {
+    raw = bodyLoc;
+    console.log('📍 Location-Quelle: BODY (vom Agent)');
+  } else {
+    raw = queryLoc;
+    console.log('📍 Location-Quelle: QUERY (App-Standort)');
+  }
+  
+  // Array-Handling (falls Parameter doppelt ankommt)
+  if (Array.isArray(raw)) raw = raw[0] || '';
+  if (typeof raw !== 'string') raw = String(raw || '');
+  return raw.trim();
+}
+
 /**
  * Endpunkt 1: Erstellt einen Web Call für den Voice Agenten
  */
@@ -25,7 +46,6 @@ app.post('/api/create-web-call', async (req, res) => {
   console.log('📥 ========================');
 
   try {
-    // Agent-ID
     const agentId = 'agent_74a4972eb9f76b3e76c9291302';
 
     const response = await fetch('https://api.retellai.com/v2/create-web-call', {
@@ -63,23 +83,19 @@ app.post('/api/create-web-call', async (req, res) => {
 
 /**
  * Endpunkt 2: Sucht Restaurants über Google Places API (NEW)
- * Location kommt aus dem Query-Parameter (?location=...)
- * Cuisine kommt aus dem Body
  */
 app.post('/api/search-restaurant', async (req, res) => {
   try {
-    // ⬇️ Location aus Query-Parameter lesen!
-    const location = req.query.location || '';
+    const location = resolveLocation(req);
     const cuisine = req.body.cuisine || 'Restaurant';
     const min_rating = req.body.min_rating;
 
     console.log('🔍 ===== RESTAURANT-SUCHE =====');
     console.log('🔍 cuisine (aus Body):', cuisine);
-    console.log('🔍 location (aus Query):', location);
+    console.log('🔍 location:', location);
     console.log('🔍 =============================');
 
-    // Ort prüfen
-    if (!location || location.trim() === '') {
+    if (!location) {
       console.log('⚠️ Kein Ort angegeben – Suche abgebrochen');
       return res.status(400).json({
         error: 'Location required',
@@ -87,11 +103,9 @@ app.post('/api/search-restaurant', async (req, res) => {
       });
     }
 
-    // Suchbegriff bauen
     const query = `${cuisine} in ${location}`;
     console.log('🔍 Suche Restaurants:', query);
 
-    // Google Places API (NEW) aufrufen
     const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
@@ -124,14 +138,12 @@ app.post('/api/search-restaurant', async (req, res) => {
     const data = await response.json();
     const places = data.places || [];
 
-    // Filtern und sortieren
     const minRating = parseFloat(min_rating) || 4.0;
     const filtered = places
       .filter((p) => (p.rating || 0) >= minRating)
       .sort((a, b) => (b.rating || 0) - (a.rating || 0))
       .slice(0, 3);
 
-    // Formatieren für den Agenten
     const results = filtered.map((p) => ({
       name: p.displayName?.text || 'Unbekannt',
       address: p.formattedAddress || '',
@@ -158,20 +170,20 @@ app.post('/api/search-restaurant', async (req, res) => {
 
 /**
  * Endpunkt 3: Wetter für einen Ort abrufen
- * Location kommt aus Query-Parameter (?location=...)
- * Timeframe kommt aus Body: 'aktuell' | 'heute' | 'morgen' | '3tage'
+ * Location-Priorität: body.location (Nutzer nennt Stadt) > query.location (App-Standort)
+ * Timeframe: 'aktuell' | 'heute' | 'morgen' | '3tage'
  */
 app.post('/api/get-weather', async (req, res) => {
   try {
-    const location = req.query.location || '';
+    const location = resolveLocation(req);
     const timeframe = req.body.timeframe || 'aktuell';
 
     console.log('🌤️ ===== WETTER-ABFRAGE =====');
-    console.log('🌤️ location (aus Query):', location);
-    console.log('🌤️ timeframe (aus Body):', timeframe);
+    console.log('🌤️ location:', location);
+    console.log('🌤️ timeframe:', timeframe);
     console.log('🌤️ =============================');
 
-    if (!location || location.trim() === '') {
+    if (!location) {
       console.log('⚠️ Kein Ort angegeben – Wetter-Abfrage abgebrochen');
       return res.status(400).json({
         error: 'Location required',
@@ -307,7 +319,6 @@ app.post('/api/get-weather', async (req, res) => {
 
 /**
  * Hilfsfunktion: Telefonnummer ins internationale Format bringen
- * "030 32303532" → "+493032303532"
  */
 function normalizePhone(phone) {
   if (!phone) return '';
