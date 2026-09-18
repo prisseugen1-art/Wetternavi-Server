@@ -15,26 +15,83 @@ app.get('/', (req, res) => {
   res.send('Server läuft erfolgreich!');
 });
 
-// ========== HELPER: Location aus Query/Body sauber auslesen ==========
+// ========== HELPER ==========
+
+/**
+ * Liest die Location aus dem Request.
+ * Retell sendet die Function-Argumente in req.body.args.location
+ * Fallback: req.body.location (falls mal direkt gesendet)
+ * Fallback: req.query.location (App-Standort)
+ */
 function resolveLocation(req, bodyKey = 'location') {
-  // Priorität: body.location (falls Agent explizit genannt) > query.location (App-Standort)
-  const bodyLoc = req.body && req.body[bodyKey];
-  const queryLoc = req.query.location;
-  
   let raw;
-  if (bodyLoc && typeof bodyLoc === 'string' && bodyLoc.trim() !== '') {
-    raw = bodyLoc;
-    console.log('📍 Location-Quelle: BODY (vom Agent)');
-  } else {
-    raw = queryLoc;
-    console.log('📍 Location-Quelle: QUERY (App-Standort)');
+  let quelle;
+
+  // 1. Retell-Format: req.body.args.location
+  const args = req.body?.args;
+  if (args && args[bodyKey]) {
+    raw = args[bodyKey];
+    quelle = 'ARGS (vom Agent)';
   }
-  
-  // Array-Handling (falls Parameter doppelt ankommt)
+  // 2. Direkt im Body
+  else if (req.body?.[bodyKey]) {
+    raw = req.body[bodyKey];
+    quelle = 'BODY (direkt)';
+  }
+  // 3. Query-Parameter (App-Standort) – ignorieren wenn literal "{{location}}"
+  else {
+    const queryLoc = req.query.location;
+    if (queryLoc && queryLoc !== '{{location}}') {
+      raw = queryLoc;
+      quelle = 'QUERY (App-Standort)';
+    } else {
+      raw = '';
+      quelle = 'LEER';
+    }
+  }
+
+  // Array-Handling
   if (Array.isArray(raw)) raw = raw[0] || '';
   if (typeof raw !== 'string') raw = String(raw || '');
+  const result = raw.trim();
+
+  console.log(`📍 Location-Quelle: ${quelle} → "${result}"`);
+  return result;
+}
+
+/**
+ * Liest das Timeframe aus dem Request.
+ */
+function resolveTimeframe(req, defaultVal = 'aktuell') {
+  const args = req.body?.args;
+  let raw = args?.timeframe || req.body?.timeframe || defaultVal;
+  if (typeof raw !== 'string') raw = String(raw || defaultVal);
   return raw.trim();
 }
+
+/**
+ * Liest die Cuisine aus dem Request.
+ */
+function resolveCuisine(req, defaultVal = 'Restaurant') {
+  const args = req.body?.args;
+  let raw = args?.cuisine || req.body?.cuisine || defaultVal;
+  if (typeof raw !== 'string') raw = String(raw || defaultVal);
+  return raw.trim();
+}
+
+/**
+ * Telefonnummer ins internationale Format bringen
+ */
+function normalizePhone(phone) {
+  if (!phone) return '';
+  const cleaned = phone.replace(/[\s\-\(\)\/]/g, '');
+  if (cleaned.startsWith('+')) return cleaned;
+  if (cleaned.startsWith('00')) return '+' + cleaned.slice(2);
+  if (cleaned.startsWith('0')) return '+49' + cleaned.slice(1);
+  return cleaned;
+}
+
+// ========== ENDPUNKTE ==========
 
 /**
  * Endpunkt 1: Erstellt einen Web Call für den Voice Agenten
@@ -87,11 +144,11 @@ app.post('/api/create-web-call', async (req, res) => {
 app.post('/api/search-restaurant', async (req, res) => {
   try {
     const location = resolveLocation(req);
-    const cuisine = req.body.cuisine || 'Restaurant';
-    const min_rating = req.body.min_rating;
+    const cuisine = resolveCuisine(req);
+    const min_rating = req.body?.args?.min_rating || req.body?.min_rating;
 
     console.log('🔍 ===== RESTAURANT-SUCHE =====');
-    console.log('🔍 cuisine (aus Body):', cuisine);
+    console.log('🔍 cuisine:', cuisine);
     console.log('🔍 location:', location);
     console.log('🔍 =============================');
 
@@ -169,23 +226,14 @@ app.post('/api/search-restaurant', async (req, res) => {
 });
 
 /**
- * Endpunkt 3: Wetter für einen Ort abrufen
- * Location-Priorität: body.location (Nutzer nennt Stadt) > query.location (App-Standort)
- * Timeframe: 'aktuell' | 'heute' | 'morgen' | '3tage'
+ * Endpunkt 3: Wetter für einen Ort abrufen (OneCall 3.0, bis zu 8 Tage)
+ * Location-Priorität: args.location (Agent) > body.location > query.location (App-Standort)
+ * Timeframe: 'aktuell' | 'heute' | 'morgen' | '8tage'
  */
 app.post('/api/get-weather', async (req, res) => {
   try {
-     // DIAGNOSE
-    console.log('🔬 === DEBUG get-weather ===');
-    console.log('🔬 Content-Type:', req.headers['content-type']);
-    console.log('🔬 req.body:', JSON.stringify(req.body));
-    console.log('🔬 req.body.location:', req.body?.location);
-    console.log('🔬 req.body.arguments:', JSON.stringify(req.body?.arguments));
-    console.log('🔬 req.query.location:', req.query.location);
-    console.log('🔬 =======================');
-    
     const location = resolveLocation(req);
-    const timeframe = req.body.timeframe || 'aktuell';
+    const timeframe = resolveTimeframe(req);
 
     console.log('🌤️ ===== WETTER-ABFRAGE =====');
     console.log('🌤️ location:', location);
@@ -222,102 +270,64 @@ app.post('/api/get-weather', async (req, res) => {
     const { lat, lon, name, country } = geoData[0];
     console.log(`🌤️ Ort: ${name}, ${country} → ${lat}, ${lon}`);
 
-    // 2. Aktuelles Wetter
-    const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de`;
-    const currentRes = await fetch(currentUrl);
-    const currentData = await currentRes.json();
+    // 2. OneCall 3.0
+    const oneCallUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de&exclude=minutely,hourly`;
+    const oneCallRes = await fetch(oneCallUrl);
+    const oneCallData = await oneCallRes.json();
 
-    if (!currentData || !currentData.main) {
-      console.error('❌ Aktuelles Wetter fehlgeschlagen:', currentData);
-      return res.status(500).json({ error: 'Weather fetch failed' });
+    if (!oneCallData || !oneCallData.current) {
+      console.error('❌ OneCall fehlgeschlagen:', oneCallData);
+      return res.status(500).json({ error: 'Weather fetch failed', details: oneCallData });
     }
-
-    // 3. Forecast (5 Tage / 3 Stunden)
-    const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de`;
-    const forecastRes = await fetch(forecastUrl);
-    const forecastData = await forecastRes.json();
-
-    // 4. Daten aggregieren
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
 
     const windDir = (deg) => {
       const dirs = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
-      return dirs[Math.round(deg / 45) % 8];
+      return dirs[Math.round((deg || 0) / 45) % 8];
     };
 
+    // 3. Aktuelles Wetter
     const current = {
-      temp: Math.round(currentData.main.temp),
-      feels_like: Math.round(currentData.main.feels_like),
-      description: currentData.weather[0].description,
-      humidity: currentData.main.humidity,
-      wind_speed: Math.round(currentData.wind.speed * 3.6),
-      wind_dir: windDir(currentData.wind.deg || 0),
+      temp: Math.round(oneCallData.current.temp),
+      feels_like: Math.round(oneCallData.current.feels_like),
+      description: oneCallData.current.weather[0].description,
+      humidity: oneCallData.current.humidity,
+      wind_speed: Math.round(oneCallData.current.wind_speed * 3.6),
+      wind_dir: windDir(oneCallData.current.wind_deg),
+      rain_1h: oneCallData.current.rain ? oneCallData.current.rain['1h'] : 0,
     };
 
-    const byDay = {};
-    if (forecastData && forecastData.list) {
-      for (const entry of forecastData.list) {
-        const dt = new Date(entry.dt * 1000);
-        const dayKey = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-        if (!byDay[dayKey]) byDay[dayKey] = [];
-        byDay[dayKey].push(entry);
-      }
-    }
-
-    const dayKeyToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const dayKeyTomorrow = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
-
-    const aggregate = (entries) => {
-      if (!entries || entries.length === 0) return null;
-      const temps = entries.map((e) => e.main.temp);
-      const min = Math.round(Math.min(...temps));
-      const max = Math.round(Math.max(...temps));
-      const descCount = {};
-      let maxPop = 0;
-      for (const e of entries) {
-        const d = e.weather[0].description;
-        descCount[d] = (descCount[d] || 0) + 1;
-        if (e.pop > maxPop) maxPop = e.pop;
-      }
-      const description = Object.entries(descCount).sort((a, b) => b[1] - a[1])[0][0];
+    // 4. Tagesdaten aus daily[] (bis zu 8 Tage)
+    const daily = oneCallData.daily || [];
+    const days = daily.slice(0, 8).map((day) => {
+      const dt = new Date(day.dt * 1000);
       return {
-        min,
-        max,
-        description,
-        rain_chance: Math.round(maxPop * 100),
+        date: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`,
+        weekday: dt.toLocaleDateString('de-DE', { weekday: 'long' }),
+        min: Math.round(day.temp.min),
+        max: Math.round(day.temp.max),
+        description: day.weather[0].description,
+        rain_chance: Math.round((day.pop || 0) * 100),
+        wind_speed: Math.round(day.wind_speed * 3.6),
       };
-    };
+    });
 
-    const todayData = aggregate(byDay[dayKeyToday]);
-    const tomorrowData = aggregate(byDay[dayKeyTomorrow]);
-
-    const nextDays = Object.keys(byDay)
-      .filter((k) => k !== dayKeyToday && k !== dayKeyTomorrow)
-      .sort()
-      .slice(0, 3)
-      .map((k) => {
-        const agg = aggregate(byDay[k]);
-        const dt = new Date(k);
-        return {
-          date: k,
-          weekday: dt.toLocaleDateString('de-DE', { weekday: 'long' }),
-          ...agg,
-        };
-      });
+    const today = days[0] || null;
+    const tomorrow = days[1] || null;
+    const next_days = days.slice(2);
+    const all_days = days;
 
     const result = {
       location: name,
       country,
       timeframe,
       current,
-      today: todayData,
-      tomorrow: tomorrowData,
-      next_days: nextDays,
+      today,
+      tomorrow,
+      next_days,
+      all_days,
     };
 
-    console.log('✅ Wetter abgerufen für', name);
+    console.log(`✅ Wetter abgerufen für ${name} (${days.length} Tage)`);
     res.json(result);
 
   } catch (error) {
@@ -325,18 +335,6 @@ app.post('/api/get-weather', async (req, res) => {
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
-
-/**
- * Hilfsfunktion: Telefonnummer ins internationale Format bringen
- */
-function normalizePhone(phone) {
-  if (!phone) return '';
-  const cleaned = phone.replace(/[\s\-\(\)\/]/g, '');
-  if (cleaned.startsWith('+')) return cleaned;
-  if (cleaned.startsWith('00')) return '+' + cleaned.slice(2);
-  if (cleaned.startsWith('0')) return '+49' + cleaned.slice(1);
-  return cleaned;
-}
 
 // Server starten
 app.listen(PORT, () => {
