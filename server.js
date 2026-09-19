@@ -1,14 +1,67 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import pg from 'pg';
 
 dotenv.config();
 
+const { Pool } = pg;
 const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 app.use(express.json());
+
+// ========== DATENBANK ==========
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_data (
+        user_id TEXT PRIMARY KEY,
+        data JSONB NOT NULL DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ Datenbank-Tabelle bereit');
+  } catch (error) {
+    console.error('❌ DB-Init-Fehler:', error);
+  }
+}
+
+async function getUserData(userId) {
+  if (!userId) return {};
+  try {
+    const result = await pool.query(
+      'SELECT data FROM user_data WHERE user_id = $1',
+      [userId]
+    );
+    return result.rows[0]?.data || {};
+  } catch (error) {
+    console.error('❌ Lade-Fehler:', error);
+    return {};
+  }
+}
+
+async function saveUserPref(userId, key, value) {
+  try {
+    await pool.query(`
+      INSERT INTO user_data (user_id, data)
+      VALUES ($1, jsonb_build_object($2::text, $3::text))
+      ON CONFLICT (user_id) DO UPDATE
+      SET data = user_data.data || jsonb_build_object($2::text, $3::text),
+          updated_at = NOW()
+    `, [userId, key, value]);
+    return true;
+  } catch (error) {
+    console.error('❌ Speicher-Fehler:', error);
+    return false;
+  }
+}
 
 // Startseite / Health Check
 app.get('/', (req, res) => {
@@ -17,29 +70,18 @@ app.get('/', (req, res) => {
 
 // ========== HELPER ==========
 
-/**
- * Liest die Location aus dem Request.
- * Retell sendet die Function-Argumente in req.body.args.location
- * Fallback: req.body.location (falls mal direkt gesendet)
- * Fallback: req.query.location (App-Standort)
- */
 function resolveLocation(req, bodyKey = 'location') {
   let raw;
   let quelle;
 
-  // 1. Retell-Format: req.body.args.location
   const args = req.body?.args;
   if (args && args[bodyKey]) {
     raw = args[bodyKey];
     quelle = 'ARGS (vom Agent)';
-  }
-  // 2. Direkt im Body
-  else if (req.body?.[bodyKey]) {
+  } else if (req.body?.[bodyKey]) {
     raw = req.body[bodyKey];
     quelle = 'BODY (direkt)';
-  }
-  // 3. Query-Parameter (App-Standort) – ignorieren wenn literal "{{location}}"
-  else {
+  } else {
     const queryLoc = req.query.location;
     if (queryLoc && queryLoc !== '{{location}}') {
       raw = queryLoc;
@@ -50,7 +92,6 @@ function resolveLocation(req, bodyKey = 'location') {
     }
   }
 
-  // Array-Handling
   if (Array.isArray(raw)) raw = raw[0] || '';
   if (typeof raw !== 'string') raw = String(raw || '');
   const result = raw.trim();
@@ -59,9 +100,6 @@ function resolveLocation(req, bodyKey = 'location') {
   return result;
 }
 
-/**
- * Liest das Timeframe aus dem Request.
- */
 function resolveTimeframe(req, defaultVal = 'aktuell') {
   const args = req.body?.args;
   let raw = args?.timeframe || req.body?.timeframe || defaultVal;
@@ -69,9 +107,6 @@ function resolveTimeframe(req, defaultVal = 'aktuell') {
   return raw.trim();
 }
 
-/**
- * Liest die Cuisine aus dem Request.
- */
 function resolveCuisine(req, defaultVal = 'Restaurant') {
   const args = req.body?.args;
   let raw = args?.cuisine || req.body?.cuisine || defaultVal;
@@ -79,9 +114,6 @@ function resolveCuisine(req, defaultVal = 'Restaurant') {
   return raw.trim();
 }
 
-/**
- * Telefonnummer ins internationale Format bringen
- */
 function normalizePhone(phone) {
   if (!phone) return '';
   const cleaned = phone.replace(/[\s\-\(\)\/]/g, '');
@@ -94,16 +126,22 @@ function normalizePhone(phone) {
 // ========== ENDPUNKTE ==========
 
 /**
- * Endpunkt 1: Erstellt einen Web Call für den Voice Agenten
+ * Endpunkt 1: Web Call erstellen (mit User-Gedächtnis)
  */
 app.post('/api/create-web-call', async (req, res) => {
   console.log('📥 ===== NEUE ANFRAGE =====');
   console.log('📥 customerName:', req.body.customerName);
   console.log('📥 location:', req.body.location);
+  console.log('📥 user_id:', req.body.user_id);
   console.log('📥 ========================');
 
   try {
+    const userId = req.body.user_id;
     const agentId = 'agent_74a4972eb9f76b3e76c9291302';
+
+    // User-Daten aus DB laden
+    const userData = userId ? await getUserData(userId) : {};
+    console.log('📦 Geladene User-Daten:', JSON.stringify(userData));
 
     const response = await fetch('https://api.retellai.com/v2/create-web-call', {
       method: 'POST',
@@ -114,8 +152,14 @@ app.post('/api/create-web-call', async (req, res) => {
       body: JSON.stringify({
         agent_id: agentId,
         retell_llm_dynamic_variables: {
-          customer_name:  'Jackson',
+          user_id: userId || '',
+          customer_name: userData.name || req.body.customerName || 'Gast',
           location: req.body.location || '',
+          user_hobby: userData.hobby || '',
+          user_food: userData.favorite_food || '',
+          user_notes: userData.notes || '',
+          user_family: userData.family || '',
+          user_dislikes: userData.dislikes || '',
         },
       }),
     });
@@ -139,7 +183,7 @@ app.post('/api/create-web-call', async (req, res) => {
 });
 
 /**
- * Endpunkt 2: Sucht Restaurants über Google Places API (NEW)
+ * Endpunkt 2: Restaurant-Suche
  */
 app.post('/api/search-restaurant', async (req, res) => {
   try {
@@ -153,10 +197,9 @@ app.post('/api/search-restaurant', async (req, res) => {
     console.log('🔍 =============================');
 
     if (!location) {
-      console.log('⚠️ Kein Ort angegeben – Suche abgebrochen');
       return res.status(400).json({
         error: 'Location required',
-        message: 'Bitte gib einen Ort an, damit ich Restaurants finden kann.',
+        message: 'Bitte gib einen Ort an.',
       });
     }
 
@@ -226,9 +269,7 @@ app.post('/api/search-restaurant', async (req, res) => {
 });
 
 /**
- * Endpunkt 3: Wetter für einen Ort abrufen (OneCall 3.0, bis zu 8 Tage)
- * Location-Priorität: args.location (Agent) > body.location > query.location (App-Standort)
- * Timeframe: 'aktuell' | 'heute' | 'morgen' | '8tage'
+ * Endpunkt 3: Wetter abrufen
  */
 app.post('/api/get-weather', async (req, res) => {
   try {
@@ -241,10 +282,9 @@ app.post('/api/get-weather', async (req, res) => {
     console.log('🌤️ =============================');
 
     if (!location) {
-      console.log('⚠️ Kein Ort angegeben – Wetter-Abfrage abgebrochen');
       return res.status(400).json({
         error: 'Location required',
-        message: 'Bitte gib einen Ort an, damit ich das Wetter abrufen kann.',
+        message: 'Bitte gib einen Ort an.',
       });
     }
 
@@ -254,13 +294,11 @@ app.post('/api/get-weather', async (req, res) => {
       return res.status(500).json({ error: 'OpenWeatherMap API key missing' });
     }
 
-    // 1. Geocoding: Ort → lat/lon
     const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${apiKey}`;
     const geoRes = await fetch(geoUrl);
     const geoData = await geoRes.json();
 
     if (!geoData || geoData.length === 0) {
-      console.log('⚠️ Ort nicht gefunden:', location);
       return res.status(404).json({
         error: 'Location not found',
         message: `Ort "${location}" nicht gefunden.`,
@@ -270,7 +308,6 @@ app.post('/api/get-weather', async (req, res) => {
     const { lat, lon, name, country } = geoData[0];
     console.log(`🌤️ Ort: ${name}, ${country} → ${lat}, ${lon}`);
 
-    // 2. OneCall 3.0
     const oneCallUrl = `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=de&exclude=minutely,hourly`;
     const oneCallRes = await fetch(oneCallUrl);
     const oneCallData = await oneCallRes.json();
@@ -285,7 +322,6 @@ app.post('/api/get-weather', async (req, res) => {
       return dirs[Math.round((deg || 0) / 45) % 8];
     };
 
-    // 3. Aktuelles Wetter
     const current = {
       temp: Math.round(oneCallData.current.temp),
       feels_like: Math.round(oneCallData.current.feels_like),
@@ -296,7 +332,6 @@ app.post('/api/get-weather', async (req, res) => {
       rain_1h: oneCallData.current.rain ? oneCallData.current.rain['1h'] : 0,
     };
 
-    // 4. Tagesdaten aus daily[] (bis zu 8 Tage)
     const daily = oneCallData.daily || [];
     const days = daily.slice(0, 8).map((day) => {
       const dt = new Date(day.dt * 1000);
@@ -336,7 +371,68 @@ app.post('/api/get-weather', async (req, res) => {
   }
 });
 
+/**
+ * Endpunkt 4: Präferenz speichern (Retell-Function)
+ */
+app.post('/api/save-preference', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const userId = args.user_id;
+    const key = args.key;
+    const value = args.value;
+
+    console.log('💾 ===== PRÄFERENZ SPEICHERN =====');
+    console.log('💾 user_id:', userId);
+    console.log('💾 key:', key);
+    console.log('💾 value:', value);
+    console.log('💾 ===============================');
+
+    if (!userId || !key || value === undefined) {
+      return res.status(400).json({
+        error: 'Missing fields',
+        message: 'user_id, key und value sind erforderlich.',
+      });
+    }
+
+    const success = await saveUserPref(userId, key, String(value));
+
+    if (success) {
+      console.log(`✅ Gespeichert: ${key} = ${value}`);
+      res.json({ success: true, message: `Ich habe mir gemerkt: ${key} = ${value}` });
+    } else {
+      res.status(500).json({ error: 'Save failed' });
+    }
+  } catch (error) {
+    console.error('❌ Speicher-Fehler:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Endpunkt 5: Alle User-Daten löschen (DSGVO)
+ */
+app.post('/api/delete-user-data', async (req, res) => {
+  try {
+    const userId = req.body?.user_id || req.body?.args?.user_id;
+
+    console.log('🗑️ ===== USER-DATEN LÖSCHEN =====');
+    console.log('🗑️ user_id:', userId);
+
+    if (!userId) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+
+    await pool.query('DELETE FROM user_data WHERE user_id = $1', [userId]);
+    console.log(`✅ Daten gelöscht für ${userId}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Lösch-Fehler:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Server starten
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
+  await initDb();
 });
