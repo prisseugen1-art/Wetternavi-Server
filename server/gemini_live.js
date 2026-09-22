@@ -37,6 +37,19 @@ export async function createGeminiSession(clientWs, userProfile) {
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       tools: buildTools(),
+
+      // ═══════════════════════════════════════════════
+      // VAD-OPTIMIERUNG: Schnellere Antworten
+      // ═══════════════════════════════════════════════
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          disabled: false,
+          startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
+          endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
+          prefixPaddingMs: 20,
+          silenceDurationMs: 500,
+        },
+      },
     },
     callbacks: {
       onopen: () => {
@@ -70,11 +83,14 @@ export async function createGeminiSession(clientWs, userProfile) {
 function handleGeminiMessage(clientWs, message) {
   const serverContent = message.serverContent;
 
+  // Audio-Ausgabe + Latenz-Tracking
   if (serverContent?.modelTurn?.parts) {
     if (!global._firstResponseTime && global._firstAudioTime) {
       global._firstResponseTime = Date.now();
       const latency = global._firstResponseTime - global._firstAudioTime;
-      console.log(`⏱️ LATENZ: ${latency}ms`);
+      if (latency < 30000) {
+        console.log('⏱️ LATENZ: ' + latency + 'ms');
+      }
       global._firstAudioTime = null;
       global._firstResponseTime = null;
     }
@@ -204,7 +220,9 @@ function buildSystemInstruction(profile) {
     '- Freundlich, neugierig, warm – wie ein guter Freund',
     '- Sprich locker und natürlich, nicht wie ein Assistent',
     '- Variiere deine Antworten – wiederhole dich NIEMALS',
-    '- Antworte in 1-2 kurzen Sätzen',
+    '- Antworte MAXIMAL in 1-2 kurzen Sätzen',
+    '- KEINE Rückfragen mit mehreren Teilfragen',
+    '- Wenn du eine Frage stellst, dann nur EINE',
     '',
     '═══════════════════════════════════════════',
     'GESPRÄCHS-REGELN',
