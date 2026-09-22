@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import pg from 'pg';
+import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 
 dotenv.config();
 
@@ -62,11 +63,6 @@ async function saveUserPref(userId, key, value) {
     return false;
   }
 }
-
-// Startseite / Health Check
-app.get('/', (req, res) => {
-  res.send('Server läuft erfolgreich!');
-});
 
 // ========== HELPER ==========
 
@@ -153,13 +149,59 @@ app.post('/api/create-web-call', async (req, res) => {
         agent_id: agentId,
         retell_llm_dynamic_variables: {
           user_id: userId || '',
+          // Identität
           customer_name: userData.name || req.body.customerName || 'Gast',
+          user_nickname: userData.nickname || '',
           location: req.body.location || '',
-          user_hobby: userData.hobby || '',
-          user_food: userData.favorite_food || '',
-          user_notes: userData.notes || '',
+          user_age: userData.age || '',
+          user_hometown: userData.hometown || '',
+          user_job: userData.job || '',
+          user_birthday: userData.birthday || '',
+          // Familie
           user_family: userData.family || '',
+          user_family_tree: userData.family_tree || '',
+          user_family_father: userData.family_father || '',
+          user_family_mother: userData.family_mother || '',
+          user_family_wife: userData.family_wife || '',
+          user_family_husband: userData.family_husband || '',
+          user_family_son_1: userData.family_son_1 || '',
+          user_family_son_2: userData.family_son_2 || '',
+          user_family_daughter_1: userData.family_daughter_1 || '',
+          user_family_brother_1: userData.family_brother_1 || '',
+          user_family_sister_1: userData.family_sister_1 || '',
+          user_child_1: userData.child_1 || '',
+          user_child_2: userData.child_2 || '',
+          user_son_1: userData.son_1 || '',
+          user_son_2: userData.son_2 || '',
+          user_i_am: userData.i_am || '',
+          user_person_type: userData.person_type || '',
+          user_family_group: userData.family_group || '',
+          // Haustiere
+          user_pet_dog: userData.pet_dog || '',
+          user_pet_dogs: userData.pet_dogs || userData.pet_dog || '',
+          user_pet_cat: userData.pet_cat || '',
+          user_pet_cats: userData.pet_cats || userData.pet_cat || '',
+          user_pet_bird: userData.pet_bird || '',
+          user_pet_other: userData.pet_other || '',
+          // Vorlieben
+          user_food: userData.favorite_food || '',
+          user_foods: userData.favorite_foods || userData.favorite_food || '',
+          user_drink: userData.favorite_drink || '',
+          user_drinks: userData.favorite_drinks || userData.favorite_drink || '',
+          user_cuisine: userData.favorite_cuisine || '',
+          user_music: userData.favorite_music || '',
+          user_movie: userData.favorite_movie || '',
+          // Abneigungen
           user_dislikes: userData.dislikes || '',
+          user_allergy: userData.allergy || '',
+          user_diet: userData.diet || '',
+          // Hobbys
+          user_hobby: userData.hobby || '',
+          user_sport: userData.sport || '',
+          user_team: userData.team || '',
+          // Sonstiges
+          user_car: userData.car || '',
+          user_notes: userData.notes || '',
         },
       }),
     });
@@ -269,7 +311,7 @@ app.post('/api/search-restaurant', async (req, res) => {
 });
 
 /**
- * Endpunkt 3: Wetter abrufen
+ * Endpunkt 3: Wetter abrufen (OneCall 3.0, bis zu 8 Tage)
  */
 app.post('/api/get-weather', async (req, res) => {
   try {
@@ -430,6 +472,19 @@ app.post('/api/delete-user-data', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ========== SENSOR-BUS ==========
+const sensorBus = new SensorBus();
+sensorBus.onEvent((e) => {
+  console.log('📡 SENSOR-EVENT:', JSON.stringify(e.toJSON()));
+});
+
+// TEST: Sensor-Event
+sensorBus.push(SensorEvent.location({
+  lat: 49.2397,
+  lon: 9.2555,
+  source: SensorSource.PHONE,
+}));
 
 // Server starten
 app.listen(PORT, async () => {
