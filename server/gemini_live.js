@@ -155,12 +155,12 @@ function buildTools() {
         },
         {
           name: 'save_user_preference',
-          description: 'Speichert eine persönliche Info über den Nutzer.',
+          description: 'Speichert eine NEUE persönliche Info über den Nutzer. NICHT nutzen zum Überschreiben oder für Platzhalter.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              key: { type: 'STRING', description: 'z.B. favorite_food, hobby, partner_name' },
-              value: { type: 'STRING', description: 'z.B. Pizza, Angeln, Anna' },
+              key: { type: 'STRING', description: 'Fester Key, siehe Prompt (z.B. name, hobby, pet_dog)' },
+              value: { type: 'STRING', description: 'Der echte Wert, z.B. Eugen, Angeln, Bello' },
             },
             required: ['key', 'value'],
           },
@@ -263,13 +263,21 @@ async function fetchRestaurants(location, cuisine = 'Restaurant') {
 
 async function saveUserPreference(userId, key, value) {
   if (!userId) return { error: 'no user_id' };
+
+  // Filter: keine Platzhalter, keine leeren Werte
+  const valueStr = String(value || '').trim();
+  if (!valueStr || valueStr === 'User Name' || valueStr === 'undefined') {
+    console.log('⚠️ Ungültiger Wert verworfen:', valueStr);
+    return { success: false, message: 'Invalid value' };
+  }
+
   const res = await fetch(SELF_URL + '/api/save-preference', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: userId, key, value }),
+    body: JSON.stringify({ user_id: userId, key, value: valueStr }),
   });
   if (!res.ok) throw new Error('Speicher-Fehler: ' + res.status);
-  return { success: true, key, value };
+  return { success: true, key, value: valueStr };
 }
 
 async function getUserPreferences(userId) {
@@ -310,16 +318,55 @@ function buildSystemInstruction(profile) {
     'Du hast ein Langzeitgedächtnis über den Nutzer.',
     '',
     'Bei Fragen wie "Wie heiße ich?", "Wie viele Söhne habe ich?",',
-    '"Was weißt du über mich?":',
+    '"Was weißt du über mich?", "Kennst du meinen Namen?":',
     '→ Rufe IMMER get_user_preferences auf!',
     '→ Dann antworte mit den ECHTEN Daten aus dem Gedächtnis.',
     '→ Erfinde NICHTS. Wenn nichts da ist: "Das hast du mir noch nicht erzählt."',
     '',
-    'Wenn der Nutzer NEUE persönliche Fakten erzählt:',
+    'Bei NEUEN persönlichen Fakten (Nutzer erzählt von sich):',
     '→ Rufe save_user_preference auf (STILL, ohne Ankündigung).',
     '',
-    'WICHTIG: Speichere NIEMALS Platzhalter wie "User Name".',
-    'Wenn du den Namen nicht verstehst, frag nach.',
+    'VERBOTEN:',
+    '- Bestehende Fakten überschreiben',
+    '- Platzhalter wie "User Name" speichern',
+    '- Werte speichern, die der Nutzer nicht gesagt hat',
+    '',
+    'KEY-REGELN (IMMER diese Keys nutzen!):',
+    '- Name → key="name"',
+    '- Spitzname → key="nickname"',
+    '- Alter → key="age"',
+    '- Wohnort → key="hometown"',
+    '- Beruf → key="job"',
+    '- Partner → key="partner_name"',
+    '- Sohn → key="son_1", key="son_2", ...',
+    '- Tochter → key="daughter_1", key="daughter_2", ...',
+    '- Hund → key="pet_dog"',
+    '- Katze → key="pet_cat"',
+    '- Hobby → key="hobby"',
+    '- Lieblingsessen → key="favorite_food"',
+    '- Allergie → key="allergy"',
+    '- Auto → key="car"',
+    '',
+    'BEISPIELE:',
+    'Nutzer: "Wie heiße ich?"',
+    '→ get_user_preferences aufrufen',
+    '→ "Du heißt ' + name + '!" (oder was in DB steht)',
+    '',
+    'Nutzer: "Ich heiße Thomas"',
+    '→ STILL: save_user_preference(key="name", value="Thomas")',
+    '→ "Freut mich, Thomas!"',
+    '',
+    'Nutzer: "Ändere meinen Namen zu Test"',
+    '→ save_user_preference(key="name", value="Test")',
+    '→ "Okay, ich merke mir Test."',
+    '',
+    'Nutzer: "Wie viele Söhne habe ich?"',
+    '→ get_user_preferences aufrufen',
+    '→ "Du hast zwei Söhne: Konstantin und Niklas."',
+    '',
+    'Nutzer: "Ich habe einen Hund namens Bello."',
+    '→ "Schön! Wie alt ist Bello?"',
+    '→ STILL: save_user_preference(key="pet_dog", value="Bello")',
     '',
     '═══════════════════════════════════════════',
     'WETTER & RESTAURANTS',
@@ -336,26 +383,7 @@ function buildSystemInstruction(profile) {
     '- Immer derselbe Begrüßungssatz',
     '- Nach jedem Satz eine neue Frage',
     '- Direkte Fragen wie "Wie alt bist du?"',
-    '',
-    '═══════════════════════════════════════════',
-    'BEISPIELE',
-    '═══════════════════════════════════════════',
-    '',
-    'Nutzer: "Wie heiße ich?"',
-    '→ get_user_preferences aufrufen',
-    '→ "Du heißt ' + name + '!" (oder was in DB steht)',
-    '',
-    'Nutzer: "Wie viele Söhne habe ich?"',
-    '→ get_user_preferences aufrufen',
-    '→ "Du hast zwei Söhne: Konstantin und Niklas."',
-    '',
-    'Nutzer: "Ich habe einen Hund namens Bello."',
-    '→ "Schön! Wie alt ist Bello?"',
-    '→ STILL: save_user_preference(key=pet_dog, value=Bello)',
-    '',
-    'Nutzer: "Wie wird das Wetter morgen?"',
-    '→ get_weather aufrufen',
-    '→ "Morgen 15 bis 22 Grad, meist sonnig."',
+    '- Platzhalter oder erfundene Werte speichern',
   ].join('\n');
 }
 
