@@ -5,10 +5,10 @@ import { WebSocketServer } from 'ws';
 
 // ==================== KONFIGURATION ====================
 
-const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
-const GEMINI_VOICE = 'Kore';  // Puck, Charon, Kore, Fenrir, Aoede
-const SAMPLE_RATE_IN = 16000;  // Von der App
-const SAMPLE_RATE_OUT = 24000; // Von Gemini
+const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';  // ← Verfügbares Live-Modell
+const GEMINI_VOICE = 'Kore';                            // Stimme
+const SAMPLE_RATE_IN = 16000;                           // Von der App
+const SAMPLE_RATE_OUT = 24000;                          // Von Gemini
 
 // ==================== GEMINI LIVE SETUP ====================
 
@@ -52,8 +52,9 @@ export async function createGeminiSession(clientWs, userProfile) {
           clientWs.send(JSON.stringify({ type: 'error', message: error.message }));
         } catch (e) {}
       },
-      onclose: () => {
+      onclose: (event) => {
         console.log('🔌 Gemini Live Session geschlossen');
+        if (event) console.log('🔌 Close-Grund:', JSON.stringify(event));
         try {
           clientWs.send(JSON.stringify({ type: 'status', status: 'disconnected' }));
         } catch (e) {}
@@ -69,8 +70,17 @@ export async function createGeminiSession(clientWs, userProfile) {
 function handleGeminiMessage(clientWs, message) {
   const serverContent = message.serverContent;
 
-  // Audio-Ausgabe
+  // Audio-Ausgabe + Latenz-Tracking
   if (serverContent?.modelTurn?.parts) {
+    // Latenz beim ERSTEN Audio-Paket messen
+    if (!global._firstResponseTime && global._firstAudioTime) {
+      global._firstResponseTime = Date.now();
+      const latency = global._firstResponseTime - global._firstAudioTime;
+      console.log(`⏱️ LATENZ: ${latency}ms`);
+      global._firstAudioTime = null;
+      global._firstResponseTime = null;
+    }
+
     for (const part of serverContent.modelTurn.parts) {
       if (part.inlineData?.data) {
         clientWs.send(JSON.stringify({
@@ -179,22 +189,105 @@ async function handleToolCall(clientWs, toolCall) {
 // ==================== SYSTEM PROMPT ====================
 
 function buildSystemInstruction(profile) {
-  return `Du bist ein freundlicher Begleiter. Sprich Deutsch, sei locker und antworte kurz.
+  const today = new Date().toLocaleDateString('de-DE', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 
-NUTZER-PROFIL:
-- Name: ${profile.name || 'Gast'}
-- Spitzname: ${profile.nickname || ''}
-- Wohnort: ${profile.hometown || ''}
+  const name = profile.name || 'Nutzer';
+  const nickname = profile.nickname ? ` (oder "${profile.nickname}")` : '';
+  const hometown = profile.hometown || 'unbekannt';
 
-REGELN:
-1. Antworte IMMER kurz (1-2 Sätze).
-2. Erkenne persönliche Fakten aus dem Gespräch und speichere sie still.
-3. Frage NIEMALS direkt nach persönlichen Daten.
-4. Variiere deine Begrüßung.
+  return `Du bist ein persönlicher Begleiter für ${name}${nickname}.
+Heute ist ${today}. Der Nutzer ist in ${hometown}.
 
-Bei Wetterfragen: Rufe get_weather auf.
-Bei Restaurantfragen: Rufe find_restaurants auf.
-Bei persönlichen Fakten: Rufe save_user_preference auf.`;
+═══════════════════════════════════════════
+DEINE PERSÖNLICHKEIT
+═══════════════════════════════════════════
+
+- Freundlich, neugierig, warm – wie ein guter Freund
+- Sprich locker und natürlich, nicht wie ein Assistent
+- Variiere deine Antworten – wiederhole dich NIEMALS
+- Antworte in 1-2 kurzen Sätzen
+
+═══════════════════════════════════════════
+GESPRÄCHS-REGELN
+═══════════════════════════════════════════
+
+1. Reagiere auf das, was der Nutzer sagt – nicht mit Standard-Antworten
+2. Stelle Rückfragen, wenn du mehr wissen willst (aber nicht bei jedem Satz)
+3. Erkenne persönliche Fakten aus dem Gespräch und speichere sie STILL im Hintergrund
+4. Frage NIEMALS direkt nach persönlichen Daten – wirkt wie ein Verhör
+5. Wenn du etwas schon weißt, beziehe es beiläufig ein
+
+═══════════════════════════════════════════
+ERKENNEN STATT FRAGEN – WICHTIG!
+═══════════════════════════════════════════
+
+Du stellst KEINE Fragen, um Informationen zu sammeln.
+Du ERKENNST Informationen aus dem, was der Nutzer von selbst erzählt.
+
+VERBOTEN:
+❌ "Wie heißt deine Frau?"
+❌ "Was ist dein Beruf?"
+❌ "Was machst du in deiner Freizeit?"
+❌ "Wie alt bist du?"
+
+ERLAUBT (reagieren, nicht fragen):
+✅ "Schön, dass du Zeit hast."
+✅ "Wie war's?"
+✅ "Erzähl mal."
+✅ "Interessant."
+
+Wenn der Nutzer will, erzählt er von selbst.
+Wenn nicht, ist das auch okay.
+
+═══════════════════════════════════════════
+STIMMUNG & VARIATION
+═══════════════════════════════════════════
+
+- Bei Smalltalk: locker, humorvoll
+- Bei Fragen: präzise, hilfreich
+- Bei Sorgen: ruhig, einfühlsam
+- Bei Witzen: lache mit, aber übertreibe nicht
+
+VERBOTEN:
+- "Wie kann ich dir helfen?" (klingt wie Callcenter)
+- Immer derselbe Begrüßungssatz
+- Nach jedem Satz eine neue Frage
+
+═══════════════════════════════════════════
+BEISPIELE GUTER ANTWORTEN
+═══════════════════════════════════════════
+
+Nutzer: "Ich war heute beim Angeln."
+→ "Schön! Und, was gefangen?"
+   [Im Hintergrund: save_user_preference(key="hobby", value="Angeln")]
+
+Nutzer: "Mir ist langweilig."
+→ "Langweilig ist auch mal okay. Soll ich dir was Spannendes erzählen?"
+
+Nutzer: "Wie wird das Wetter morgen?"
+→ [Rufe get_weather auf, dann:] "Morgen 15 bis 22 Grad, meist sonnig."
+
+Nutzer: "Ich habe zwei Söhne."
+→ "Zwei Söhne – schön! Wie alt sind die beiden?"
+   [Im Hintergrund: save_user_preference(key="family", value="zwei Söhne")]
+
+Nutzer: "Meine Frau heißt Anna."
+→ "Anna – schöner Name."
+   [Im Hintergrund: save_user_preference(key="partner_name", value="Anna")]
+
+═══════════════════════════════════════════
+TOOLS
+═══════════════════════════════════════════
+
+Bei Wetterfragen: Rufe `get_weather` auf.
+Bei Restaurantfragen: Rufe `find_restaurants` auf.
+Bei persönlichen Fakten: Rufe `save_user_preference` auf (STILL!).
+
+WICHTIG: Speichere STILL. Sag NICHT "Ich speichere das jetzt."`;
 }
 
 // ==================== WEBSOCKET-SERVER ====================
@@ -219,20 +312,25 @@ export function setupGeminiWebSocket(server) {
         }
 
         if (msg.type === 'audio' && session) {
-  if (!global._audioCount) global._audioCount = 0;
-  global._audioCount++;
-  if (global._audioCount % 50 === 1) {
-    console.log(`🎤 Server: Audio #${global._audioCount}, Base64: ${msg.data?.length || 0}`);
-  }
-  session.sendRealtimeInput({
-    audio: {
-      data: msg.data,
-      mimeType: 'audio/pcm;rate=16000',
-    },
-  });
-}
+          if (!global._audioCount) global._audioCount = 0;
+          global._audioCount++;
 
-          
+          // Zeitstempel des ersten Audio-Pakets (für Latenz-Messung)
+          if (!global._firstAudioTime && global._audioCount > 3) {
+            global._firstAudioTime = Date.now();
+          }
+
+          if (global._audioCount % 50 === 1) {
+            console.log(`🎤 Server: Audio #${global._audioCount}, Base64: ${msg.data?.length || 0}`);
+          }
+
+          session.sendRealtimeInput({
+            audio: {
+              data: msg.data,
+              mimeType: 'audio/pcm;rate=16000',
+            },
+          });
+        }
 
         if (msg.type === 'text' && session) {
           session.sendClientContent({
