@@ -5,10 +5,10 @@ import { WebSocketServer } from 'ws';
 
 // ==================== KONFIGURATION ====================
 
-const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';  // ← Verfügbares Live-Modell
-const GEMINI_VOICE = 'Kore';                            // Stimme
-const SAMPLE_RATE_IN = 16000;                           // Von der App
-const SAMPLE_RATE_OUT = 24000;                          // Von Gemini
+const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
+const GEMINI_VOICE = 'Kore';
+const SAMPLE_RATE_IN = 16000;
+const SAMPLE_RATE_OUT = 24000;
 
 // ==================== GEMINI LIVE SETUP ====================
 
@@ -70,9 +70,7 @@ export async function createGeminiSession(clientWs, userProfile) {
 function handleGeminiMessage(clientWs, message) {
   const serverContent = message.serverContent;
 
-  // Audio-Ausgabe + Latenz-Tracking
   if (serverContent?.modelTurn?.parts) {
-    // Latenz beim ERSTEN Audio-Paket messen
     if (!global._firstResponseTime && global._firstAudioTime) {
       global._firstResponseTime = Date.now();
       const latency = global._firstResponseTime - global._firstAudioTime;
@@ -92,7 +90,6 @@ function handleGeminiMessage(clientWs, message) {
     }
   }
 
-  // Eingabe-Transkription
   if (serverContent?.inputTranscription?.text) {
     console.log('🎤 Nutzer:', serverContent.inputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -102,7 +99,6 @@ function handleGeminiMessage(clientWs, message) {
     }));
   }
 
-  // Ausgabe-Transkription
   if (serverContent?.outputTranscription?.text) {
     console.log('🤖 Gemini:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -112,12 +108,10 @@ function handleGeminiMessage(clientWs, message) {
     }));
   }
 
-  // Function Calls
   if (message.toolCall) {
     handleToolCall(clientWs, message.toolCall);
   }
 
-  // Turn abgeschlossen
   if (serverContent?.turnComplete) {
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
@@ -135,7 +129,7 @@ function buildTools() {
           parameters: {
             type: 'OBJECT',
             properties: {
-              location: { type: 'STRING', description: 'Der Ort, z.B. "Berlin"' },
+              location: { type: 'STRING', description: 'Der Ort, z.B. Berlin' },
               timeframe: {
                 type: 'STRING',
                 description: 'Zeitrahmen: aktuell, heute, morgen, 8tage',
@@ -151,7 +145,7 @@ function buildTools() {
             type: 'OBJECT',
             properties: {
               location: { type: 'STRING', description: 'Der Ort' },
-              cuisine: { type: 'STRING', description: 'Küche, z.B. "Pizza"' },
+              cuisine: { type: 'STRING', description: 'Küche, z.B. Pizza' },
             },
             required: ['location'],
           },
@@ -162,8 +156,8 @@ function buildTools() {
           parameters: {
             type: 'OBJECT',
             properties: {
-              key: { type: 'STRING', description: 'z.B. "favorite_food"' },
-              value: { type: 'STRING', description: 'z.B. "Pizza"' },
+              key: { type: 'STRING', description: 'z.B. favorite_food' },
+              value: { type: 'STRING', description: 'z.B. Pizza' },
             },
             required: ['key', 'value'],
           },
@@ -176,7 +170,7 @@ function buildTools() {
 async function handleToolCall(clientWs, toolCall) {
   const functionCalls = toolCall.functionCalls;
   for (const fc of functionCalls) {
-    console.log(`🔧 Tool Call: ${fc.name}`, fc.args);
+    console.log('🔧 Tool Call:', fc.name, fc.args);
     clientWs.send(JSON.stringify({
       type: 'tool_call',
       id: fc.id,
@@ -196,98 +190,97 @@ function buildSystemInstruction(profile) {
   });
 
   const name = profile.name || 'Nutzer';
-  const nickname = profile.nickname ? ` (oder "${profile.nickname}")` : '';
+  const nickname = profile.nickname ? ' (oder ' + profile.nickname + ')' : '';
   const hometown = profile.hometown || 'unbekannt';
 
-  return `Du bist ein persönlicher Begleiter für ${name}${nickname}.
-Heute ist ${today}. Der Nutzer ist in ${hometown}.
-
-═══════════════════════════════════════════
-DEINE PERSÖNLICHKEIT
-═══════════════════════════════════════════
-
-- Freundlich, neugierig, warm – wie ein guter Freund
-- Sprich locker und natürlich, nicht wie ein Assistent
-- Variiere deine Antworten – wiederhole dich NIEMALS
-- Antworte in 1-2 kurzen Sätzen
-
-═══════════════════════════════════════════
-GESPRÄCHS-REGELN
-═══════════════════════════════════════════
-
-1. Reagiere auf das, was der Nutzer sagt – nicht mit Standard-Antworten
-2. Stelle Rückfragen, wenn du mehr wissen willst (aber nicht bei jedem Satz)
-3. Erkenne persönliche Fakten aus dem Gespräch und speichere sie STILL im Hintergrund
-4. Frage NIEMALS direkt nach persönlichen Daten – wirkt wie ein Verhör
-5. Wenn du etwas schon weißt, beziehe es beiläufig ein
-
-═══════════════════════════════════════════
-ERKENNEN STATT FRAGEN – WICHTIG!
-═══════════════════════════════════════════
-
-Du stellst KEINE Fragen, um Informationen zu sammeln.
-Du ERKENNST Informationen aus dem, was der Nutzer von selbst erzählt.
-
-VERBOTEN:
-❌ "Wie heißt deine Frau?"
-❌ "Was ist dein Beruf?"
-❌ "Was machst du in deiner Freizeit?"
-❌ "Wie alt bist du?"
-
-ERLAUBT (reagieren, nicht fragen):
-✅ "Schön, dass du Zeit hast."
-✅ "Wie war's?"
-✅ "Erzähl mal."
-✅ "Interessant."
-
-Wenn der Nutzer will, erzählt er von selbst.
-Wenn nicht, ist das auch okay.
-
-═══════════════════════════════════════════
-STIMMUNG & VARIATION
-═══════════════════════════════════════════
-
-- Bei Smalltalk: locker, humorvoll
-- Bei Fragen: präzise, hilfreich
-- Bei Sorgen: ruhig, einfühlsam
-- Bei Witzen: lache mit, aber übertreibe nicht
-
-VERBOTEN:
-- "Wie kann ich dir helfen?" (klingt wie Callcenter)
-- Immer derselbe Begrüßungssatz
-- Nach jedem Satz eine neue Frage
-
-═══════════════════════════════════════════
-BEISPIELE GUTER ANTWORTEN
-═══════════════════════════════════════════
-
-Nutzer: "Ich war heute beim Angeln."
-→ "Schön! Und, was gefangen?"
-   [Im Hintergrund: save_user_preference(key="hobby", value="Angeln")]
-
-Nutzer: "Mir ist langweilig."
-→ "Langweilig ist auch mal okay. Soll ich dir was Spannendes erzählen?"
-
-Nutzer: "Wie wird das Wetter morgen?"
-→ [Rufe get_weather auf, dann:] "Morgen 15 bis 22 Grad, meist sonnig."
-
-Nutzer: "Ich habe zwei Söhne."
-→ "Zwei Söhne – schön! Wie alt sind die beiden?"
-   [Im Hintergrund: save_user_preference(key="family", value="zwei Söhne")]
-
-Nutzer: "Meine Frau heißt Anna."
-→ "Anna – schöner Name."
-   [Im Hintergrund: save_user_preference(key="partner_name", value="Anna")]
-
-═══════════════════════════════════════════
-TOOLS
-═══════════════════════════════════════════
-
-Bei Wetterfragen: Rufe `get_weather` auf.
-Bei Restaurantfragen: Rufe `find_restaurants` auf.
-Bei persönlichen Fakten: Rufe `save_user_preference` auf (STILL!).
-
-WICHTIG: Speichere STILL. Sag NICHT "Ich speichere das jetzt."`;
+  return [
+    'Du bist ein persönlicher Begleiter für ' + name + nickname + '.',
+    'Heute ist ' + today + '. Der Nutzer ist in ' + hometown + '.',
+    '',
+    '═══════════════════════════════════════════',
+    'DEINE PERSÖNLICHKEIT',
+    '═══════════════════════════════════════════',
+    '',
+    '- Freundlich, neugierig, warm – wie ein guter Freund',
+    '- Sprich locker und natürlich, nicht wie ein Assistent',
+    '- Variiere deine Antworten – wiederhole dich NIEMALS',
+    '- Antworte in 1-2 kurzen Sätzen',
+    '',
+    '═══════════════════════════════════════════',
+    'GESPRÄCHS-REGELN',
+    '═══════════════════════════════════════════',
+    '',
+    '1. Reagiere auf das, was der Nutzer sagt – nicht mit Standard-Antworten',
+    '2. Stelle Rückfragen, wenn du mehr wissen willst (aber nicht bei jedem Satz)',
+    '3. Erkenne persönliche Fakten aus dem Gespräch und speichere sie STILL',
+    '4. Frage NIEMALS direkt nach persönlichen Daten – wirkt wie ein Verhör',
+    '5. Wenn du etwas schon weißt, beziehe es beiläufig ein',
+    '',
+    '═══════════════════════════════════════════',
+    'ERKENNEN STATT FRAGEN – WICHTIG!',
+    '═══════════════════════════════════════════',
+    '',
+    'Du stellst KEINE Fragen, um Informationen zu sammeln.',
+    'Du ERKENNST Informationen aus dem, was der Nutzer von selbst erzählt.',
+    '',
+    'VERBOTEN:',
+    '- "Wie heißt deine Frau?"',
+    '- "Was ist dein Beruf?"',
+    '- "Was machst du in deiner Freizeit?"',
+    '- "Wie alt bist du?"',
+    '',
+    'ERLAUBT (reagieren, nicht fragen):',
+    '- "Schön, dass du Zeit hast."',
+    '- "Wie war es?"',
+    '- "Erzähl mal."',
+    '- "Interessant."',
+    '',
+    '═══════════════════════════════════════════',
+    'STIMMUNG UND VARIATION',
+    '═══════════════════════════════════════════',
+    '',
+    '- Bei Smalltalk: locker, humorvoll',
+    '- Bei Fragen: präzise, hilfreich',
+    '- Bei Sorgen: ruhig, einfühlsam',
+    '- Bei Witzen: lache mit, aber übertreibe nicht',
+    '',
+    'VERBOTEN:',
+    '- "Wie kann ich dir helfen?" (klingt wie Callcenter)',
+    '- Immer derselbe Begrüßungssatz',
+    '- Nach jedem Satz eine neue Frage',
+    '',
+    '═══════════════════════════════════════════',
+    'BEISPIELE GUTER ANTWORTEN',
+    '═══════════════════════════════════════════',
+    '',
+    'Nutzer: "Ich war heute beim Angeln."',
+    '→ "Schön! Und, was gefangen?"',
+    '   [speichere: hobby = Angeln]',
+    '',
+    'Nutzer: "Mir ist langweilig."',
+    '→ "Langweilig ist auch mal okay. Soll ich dir was Spannendes erzählen?"',
+    '',
+    'Nutzer: "Wie wird das Wetter morgen?"',
+    '→ [Rufe get_weather auf, dann:] "Morgen 15 bis 22 Grad, meist sonnig."',
+    '',
+    'Nutzer: "Ich habe zwei Söhne."',
+    '→ "Zwei Söhne – schön! Wie alt sind die beiden?"',
+    '   [speichere: family = zwei Söhne]',
+    '',
+    'Nutzer: "Meine Frau heißt Anna."',
+    '→ "Anna – schöner Name."',
+    '   [speichere: partner_name = Anna]',
+    '',
+    '═══════════════════════════════════════════',
+    'TOOLS',
+    '═══════════════════════════════════════════',
+    '',
+    'Bei Wetterfragen: Rufe get_weather auf.',
+    'Bei Restaurantfragen: Rufe find_restaurants auf.',
+    'Bei persönlichen Fakten: Rufe save_user_preference auf (STILL!).',
+    '',
+    'WICHTIG: Speichere STILL. Sag NICHT "Ich speichere das jetzt."',
+  ].join('\n');
 }
 
 // ==================== WEBSOCKET-SERVER ====================
@@ -315,13 +308,12 @@ export function setupGeminiWebSocket(server) {
           if (!global._audioCount) global._audioCount = 0;
           global._audioCount++;
 
-          // Zeitstempel des ersten Audio-Pakets (für Latenz-Messung)
           if (!global._firstAudioTime && global._audioCount > 3) {
             global._firstAudioTime = Date.now();
           }
 
           if (global._audioCount % 50 === 1) {
-            console.log(`🎤 Server: Audio #${global._audioCount}, Base64: ${msg.data?.length || 0}`);
+            console.log('🎤 Server: Audio #' + global._audioCount + ', Base64: ' + (msg.data?.length || 0));
           }
 
           session.sendRealtimeInput({
