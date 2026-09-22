@@ -50,7 +50,7 @@ export async function createGeminiSession(clientWs, userProfile) {
           startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
           endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
           prefixPaddingMs: 10,
-          silenceDurationMs: 300,
+          silenceDurationMs: 200,
         },
       },
     },
