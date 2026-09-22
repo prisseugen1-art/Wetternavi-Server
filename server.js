@@ -3,6 +3,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import pg from 'pg';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
+import { setupGeminiWebSocket } from './server/gemini_live.js';
+import http from 'http';
+
 
 dotenv.config();
 
@@ -486,8 +489,13 @@ sensorBus.push(SensorEvent.location({
   source: SensorSource.PHONE,
 }));
 
+
 // Server starten
-app.listen(PORT, async () => {
+const server = http.createServer(app);
+setupGeminiWebSocket(server);
+
+server.listen(PORT, async () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
+  console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
   await initDb();
 });

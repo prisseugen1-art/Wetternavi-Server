@@ -12,9 +12,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "pg": "^8.13.1",
+    "@google/genai": "^2.24.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.13.1",
+    "ws": "^8.21.3"
   }
 }
