@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 
 // ==================== KONFIGURATION ====================
 
-const GEMINI_MODEL = 'gemini-2.0-flash-live-001';  // Live-Modell
+const GEMINI_MODEL = 'gemini-2.5-flash-live';
 const GEMINI_VOICE = 'Kore';  // Puck, Charon, Kore, Fenrir, Aoede
 const SAMPLE_RATE_IN = 16000;  // Von der App
 const SAMPLE_RATE_OUT = 24000; // Von Gemini
@@ -219,13 +219,20 @@ export function setupGeminiWebSocket(server) {
         }
 
         if (msg.type === 'audio' && session) {
-          session.sendRealtimeInput({
-            audio: {
-              data: msg.data,
-              mimeType: 'audio/pcm;rate=16000',
-            },
-          });
-        }
+  if (!global._audioCount) global._audioCount = 0;
+  global._audioCount++;
+  if (global._audioCount % 50 === 1) {
+    console.log(`🎤 Server: Audio #${global._audioCount}, Base64: ${msg.data?.length || 0}`);
+  }
+  session.sendRealtimeInput({
+    audio: {
+      data: msg.data,
+      mimeType: 'audio/pcm;rate=16000',
+    },
+  });
+}
+
+          
 
         if (msg.type === 'text' && session) {
           session.sendClientContent({
