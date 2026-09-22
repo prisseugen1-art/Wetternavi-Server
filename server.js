@@ -375,3 +375,28 @@ server.listen(PORT, async () => {
   console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
   await initDb();
 });
+/**
+ * Debug: Löscht einen bestimmten Key aus dem Profil
+ * ⚠️ NUR FÜR ENTWICKLUNG!
+ */
+app.post('/api/debug/delete-key', async (req, res) => {
+  try {
+    const { user_id, key } = req.body;
+    if (!user_id || !key) {
+      return res.status(400).json({ error: 'user_id and key required' });
+    }
+
+    await pool.query(`
+      UPDATE user_data
+      SET data = data - $2::text,
+          updated_at = NOW()
+      WHERE user_id = $1
+    `, [user_id, key]);
+
+    console.log(`🗑️ Key "${key}" gelöscht für ${user_id}`);
+    res.json({ success: true, deleted_key: key });
+  } catch (error) {
+    console.error('❌ Delete-Key Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
