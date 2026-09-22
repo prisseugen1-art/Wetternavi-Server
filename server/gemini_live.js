@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 
 // ==================== KONFIGURATION ====================
 
-const GEMINI_MODEL = 'gemini-2.5-flash-live';
+const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
 const GEMINI_VOICE = 'Kore';  // Puck, Charon, Kore, Fenrir, Aoede
 const SAMPLE_RATE_IN = 16000;  // Von der App
 const SAMPLE_RATE_OUT = 24000; // Von Gemini
