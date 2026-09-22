@@ -3,8 +3,6 @@
 import { GoogleGenAI, Modality } from '@google/genai';
 import { WebSocketServer } from 'ws';
 
-// ==================== KONFIGURATION ====================
-
 const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
 const GEMINI_VOICE = 'Kore';
 const SAMPLE_RATE_IN = 16000;
@@ -31,26 +29,20 @@ export async function createGeminiSession(clientWs, userProfile) {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName: GEMINI_VOICE,
-          },
+          prebuiltVoiceConfig: { voiceName: GEMINI_VOICE },
         },
       },
-      systemInstruction: {
-        parts: [{ text: systemInstruction }],
-      },
+      systemInstruction: { parts: [{ text: systemInstruction }] },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       tools: buildTools(),
-
-      // VAD-OPTIMIERUNG: schnellere Antworten
       realtimeInputConfig: {
         automaticActivityDetection: {
           disabled: false,
           startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
           endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
           prefixPaddingMs: 10,
-          silenceDurationMs: 200,
+          silenceDurationMs: 300,
         },
       },
     },
@@ -86,14 +78,11 @@ export async function createGeminiSession(clientWs, userProfile) {
 function handleGeminiMessage(clientWs, message, session, userProfile) {
   const serverContent = message.serverContent;
 
-  // Audio-Ausgabe + Latenz-Tracking
   if (serverContent?.modelTurn?.parts) {
     if (!global._firstResponseTime && global._firstAudioTime) {
       global._firstResponseTime = Date.now();
       const latency = global._firstResponseTime - global._firstAudioTime;
-      if (latency < 30000) {
-        console.log('⏱️ LATENZ: ' + latency + 'ms');
-      }
+      if (latency < 30000) console.log('⏱️ LATENZ: ' + latency + 'ms');
       global._firstAudioTime = null;
       global._firstResponseTime = null;
     }
@@ -109,38 +98,32 @@ function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
-  // Eingabe-Transkription
   if (serverContent?.inputTranscription?.text) {
     console.log('🎤 Nutzer:', serverContent.inputTranscription.text);
     clientWs.send(JSON.stringify({
-      type: 'transcript',
-      role: 'user',
+      type: 'transcript', role: 'user',
       text: serverContent.inputTranscription.text,
     }));
   }
 
-  // Ausgabe-Transkription
   if (serverContent?.outputTranscription?.text) {
     console.log('🤖 Gemini:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
-      type: 'transcript',
-      role: 'assistant',
+      type: 'transcript', role: 'assistant',
       text: serverContent.outputTranscription.text,
     }));
   }
 
-  // Function Calls
   if (message.toolCall) {
     handleToolCall(session, userProfile, message.toolCall);
   }
 
-  // Turn abgeschlossen
   if (serverContent?.turnComplete) {
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
 }
 
-// ==================== TOOL CALLING ====================
+// ==================== TOOLS ====================
 
 function buildTools() {
   return [
@@ -153,10 +136,7 @@ function buildTools() {
             type: 'OBJECT',
             properties: {
               location: { type: 'STRING', description: 'Der Ort, z.B. Berlin' },
-              timeframe: {
-                type: 'STRING',
-                description: 'Zeitrahmen: aktuell, heute, morgen, 8tage',
-              },
+              timeframe: { type: 'STRING', description: 'aktuell, heute, morgen, 8tage' },
             },
             required: ['location'],
           },
@@ -175,7 +155,7 @@ function buildTools() {
         },
         {
           name: 'save_user_preference',
-          description: 'Speichert eine persönliche Info über den Nutzer (Name, Hobby, Familie, Vorlieben).',
+          description: 'Speichert eine persönliche Info über den Nutzer.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -183,6 +163,19 @@ function buildTools() {
               value: { type: 'STRING', description: 'z.B. Pizza, Angeln, Anna' },
             },
             required: ['key', 'value'],
+          },
+        },
+        {
+          name: 'get_user_preferences',
+          description: 'Lädt ALLE gespeicherten Infos über den Nutzer aus dem Gedächtnis. Nutze diese Funktion IMMER, wenn der Nutzer fragt "Wie heiße ich?", "Wie viele Söhne habe ich?", "Was weißt du über mich?" oder ähnlich. Lies die Daten dann vor.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              query: {
+                type: 'STRING',
+                description: 'Optionaler Suchbegriff. Leer lassen für ALLE Daten.',
+              },
+            },
           },
         },
       ],
@@ -204,22 +197,16 @@ async function handleToolCall(session, userProfile, toolCall) {
       } else if (fc.name === 'find_restaurants') {
         result = await fetchRestaurants(fc.args.location, fc.args.cuisine);
       } else if (fc.name === 'save_user_preference') {
-        result = await saveUserPreference(
-          userProfile.user_id,
-          fc.args.key,
-          fc.args.value
-        );
+        result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
+      } else if (fc.name === 'get_user_preferences') {
+        result = await getUserPreferences(userProfile.user_id);
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
       result = { error: String(e.message || e) };
     }
 
-    responses.push({
-      id: fc.id,
-      name: fc.name,
-      response: result,
-    });
+    responses.push({ id: fc.id, name: fc.name, response: result });
   }
 
   if (session) {
@@ -236,18 +223,12 @@ async function handleToolCall(session, userProfile, toolCall) {
 
 async function fetchWeather(location, timeframe = 'aktuell') {
   const url = SELF_URL + '/api/get-weather?location=' + encodeURIComponent(location);
-  console.log('🌐 Wetter-Fetch:', url);
-
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ timeframe }),
   });
-
-  if (!res.ok) {
-    throw new Error('Wetter-Fehler: ' + res.status);
-  }
-
+  if (!res.ok) throw new Error('Wetter-Fehler: ' + res.status);
   const data = await res.json();
   return {
     location: data.location,
@@ -265,62 +246,46 @@ async function fetchWeather(location, timeframe = 'aktuell') {
 
 async function fetchRestaurants(location, cuisine = 'Restaurant') {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
-  console.log('🌐 Restaurant-Fetch:', url);
-
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cuisine }),
   });
-
-  if (!res.ok) {
-    throw new Error('Restaurant-Fehler: ' + res.status);
-  }
-
+  if (!res.ok) throw new Error('Restaurant-Fehler: ' + res.status);
   const data = await res.json();
   return {
     count: data.count,
-    restaurants: (data.restaurants || []).map(function(r) {
-      return {
-        name: r.name,
-        rating: r.rating,
-        address: r.address,
-        phone: r.phone,
-      };
-    }),
+    restaurants: (data.restaurants || []).map(r => ({
+      name: r.name, rating: r.rating, address: r.address, phone: r.phone,
+    })),
   };
 }
 
 async function saveUserPreference(userId, key, value) {
-  if (!userId) {
-    return { error: 'no user_id' };
-  }
-
-  const url = SELF_URL + '/api/save-preference';
-  console.log('🌐 Save-Preference:', key, '=', value);
-
-  const res = await fetch(url, {
+  if (!userId) return { error: 'no user_id' };
+  const res = await fetch(SELF_URL + '/api/save-preference', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: userId, key: key, value: value }),
+    body: JSON.stringify({ user_id: userId, key, value }),
   });
+  if (!res.ok) throw new Error('Speicher-Fehler: ' + res.status);
+  return { success: true, key, value };
+}
 
-  if (!res.ok) {
-    throw new Error('Speicher-Fehler: ' + res.status);
-  }
-
-  return { success: true };
+async function getUserPreferences(userId) {
+  if (!userId) return { error: 'no user_id' };
+  const res = await fetch(SELF_URL + '/api/debug/user/' + userId);
+  if (!res.ok) throw new Error('Lade-Fehler: ' + res.status);
+  const data = await res.json();
+  return { preferences: data.data || {} };
 }
 
 // ==================== SYSTEM PROMPT ====================
 
 function buildSystemInstruction(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
+    weekday: 'long', day: 'numeric', month: 'long',
   });
-
   const name = profile.name || 'Nutzer';
   const nickname = profile.nickname ? ' (oder ' + profile.nickname + ')' : '';
   const hometown = profile.hometown || 'unbekannt';
@@ -332,7 +297,6 @@ function buildSystemInstruction(profile) {
     '═══════════════════════════════════════════',
     'DEINE PERSÖNLICHKEIT',
     '═══════════════════════════════════════════',
-    '',
     '- Freundlich, neugierig, warm – wie ein guter Freund',
     '- Sprich locker und natürlich, nicht wie ein Assistent',
     '- Variiere deine Antworten – wiederhole dich NIEMALS',
@@ -340,57 +304,58 @@ function buildSystemInstruction(profile) {
     '- Wenn du eine Frage stellst, dann nur EINE',
     '',
     '═══════════════════════════════════════════',
-    'GESPRÄCHS-REGELN',
+    'GEDÄCHTNIS – WICHTIG!',
     '═══════════════════════════════════════════',
     '',
-    '1. Reagiere auf das, was der Nutzer sagt – nicht mit Standard-Antworten',
-    '2. Erkenne persönliche Fakten und speichere sie STILL',
-    '3. Frage NIEMALS direkt nach persönlichen Daten',
-    '4. Wenn du etwas schon weißt, beziehe es beiläufig ein',
+    'Du hast ein Langzeitgedächtnis über den Nutzer.',
+    '',
+    'Bei Fragen wie "Wie heiße ich?", "Wie viele Söhne habe ich?",',
+    '"Was weißt du über mich?":',
+    '→ Rufe IMMER get_user_preferences auf!',
+    '→ Dann antworte mit den ECHTEN Daten aus dem Gedächtnis.',
+    '→ Erfinde NICHTS. Wenn nichts da ist: "Das hast du mir noch nicht erzählt."',
+    '',
+    'Wenn der Nutzer NEUE persönliche Fakten erzählt:',
+    '→ Rufe save_user_preference auf (STILL, ohne Ankündigung).',
+    '',
+    'WICHTIG: Speichere NIEMALS Platzhalter wie "User Name".',
+    'Wenn du den Namen nicht verstehst, frag nach.',
     '',
     '═══════════════════════════════════════════',
-    'ERKENNEN STATT FRAGEN',
+    'WETTER & RESTAURANTS',
     '═══════════════════════════════════════════',
     '',
-    'Du stellst KEINE Fragen, um Informationen zu sammeln.',
-    'Du ERKENNST Informationen aus dem, was der Nutzer von selbst erzählt.',
-    '',
-    'VERBOTEN: "Wie heißt deine Frau?", "Was ist dein Beruf?", "Wie alt bist du?"',
-    'ERLAUBT: "Schön, dass du Zeit hast.", "Wie war es?", "Erzähl mal."',
+    'Bei Wetterfragen: Rufe get_weather auf, dann lies die ECHTEN Werte vor.',
+    'Bei Restaurantfragen: Rufe find_restaurants auf, dann nenne Top-3.',
+    'NIEMALS erfinden – immer Tool-Antwort nutzen!',
     '',
     '═══════════════════════════════════════════',
-    'WICHTIG – TOOLS NUTZEN',
+    'VERBOTEN',
     '═══════════════════════════════════════════',
-    '',
-    'Bei Wetterfragen: Rufe get_weather auf, dann lies die ECHTEN Daten vor.',
-    '  NIEMALS Wetter erfinden – immer die Tool-Antwort nutzen!',
-    '',
-    'Bei Restaurantfragen: Rufe find_restaurants auf, dann nenne die Top-3.',
-    '  NIEMALS Restaurants erfinden!',
-    '',
-    'Bei persönlichen Fakten: Rufe save_user_preference auf (STILL, ohne Ankündigung).',
+    '- "Wie kann ich dir helfen?" (klingt wie Callcenter)',
+    '- Immer derselbe Begrüßungssatz',
+    '- Nach jedem Satz eine neue Frage',
+    '- Direkte Fragen wie "Wie alt bist du?"',
     '',
     '═══════════════════════════════════════════',
     'BEISPIELE',
     '═══════════════════════════════════════════',
     '',
+    'Nutzer: "Wie heiße ich?"',
+    '→ get_user_preferences aufrufen',
+    '→ "Du heißt ' + name + '!" (oder was in DB steht)',
+    '',
+    'Nutzer: "Wie viele Söhne habe ich?"',
+    '→ get_user_preferences aufrufen',
+    '→ "Du hast zwei Söhne: Konstantin und Niklas."',
+    '',
+    'Nutzer: "Ich habe einen Hund namens Bello."',
+    '→ "Schön! Wie alt ist Bello?"',
+    '→ STILL: save_user_preference(key=pet_dog, value=Bello)',
+    '',
     'Nutzer: "Wie wird das Wetter morgen?"',
-    '→ Rufe get_weather(location=hometown, timeframe=morgen) auf',
-    '→ Antworte mit ECHTEN Werten: "Morgen 15 bis 22 Grad, meist sonnig."',
-    '',
-    'Nutzer: "Ich habe Hunger auf Pizza."',
-    '→ Rufe find_restaurants(location=hometown, cuisine=Pizza) auf',
-    '→ Nenne die Top-3 mit Namen und Bewertung.',
-    '',
-    'Nutzer: "Ich war heute beim Angeln."',
-    '→ "Schön! Und, was gefangen?"',
-    '→ STILL: save_user_preference(key=hobby, value=Angeln)',
-    '',
-    'Nutzer: "Meine Frau heißt Anna."',
-    '→ "Anna – schöner Name."',
-    '→ STILL: save_user_preference(key=partner_name, value=Anna)',
-    '',
-    'WICHTIG: Speichere STILL. Sag NICHT "Ich speichere das jetzt."',
+    '→ get_weather aufrufen',
+    '→ "Morgen 15 bis 22 Grad, meist sonnig."',
   ].join('\n');
 }
 
@@ -418,20 +383,14 @@ export function setupGeminiWebSocket(server) {
         if (msg.type === 'audio' && session) {
           if (!global._audioCount) global._audioCount = 0;
           global._audioCount++;
-
           if (!global._firstAudioTime && global._audioCount > 3) {
             global._firstAudioTime = Date.now();
           }
-
           if (global._audioCount % 50 === 1) {
             console.log('🎤 Server: Audio #' + global._audioCount + ', Base64: ' + (msg.data?.length || 0));
           }
-
           session.sendRealtimeInput({
-            audio: {
-              data: msg.data,
-              mimeType: 'audio/pcm;rate=16000',
-            },
+            audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
