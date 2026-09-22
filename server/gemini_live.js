@@ -9,6 +9,9 @@ const GEMINI_MODEL = 'gemini-3.1-flash-live-preview';
 const GEMINI_VOICE = 'Kore';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
+const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
+  : 'http://localhost:' + (process.env.PORT || 8080);
 
 // ==================== GEMINI LIVE SETUP ====================
 
@@ -20,7 +23,9 @@ export async function createGeminiSession(clientWs, userProfile) {
 
   const systemInstruction = buildSystemInstruction(userProfile);
 
-  const session = await ai.live.connect({
+  let session = null;
+
+  session = await ai.live.connect({
     model: GEMINI_MODEL,
     config: {
       responseModalities: [Modality.AUDIO],
@@ -38,16 +43,14 @@ export async function createGeminiSession(clientWs, userProfile) {
       outputAudioTranscription: {},
       tools: buildTools(),
 
-      // ═══════════════════════════════════════════════
-      // VAD-OPTIMIERUNG: Schnellere Antworten
-      // ═══════════════════════════════════════════════
+      // VAD-OPTIMIERUNG: schnellere Antworten
       realtimeInputConfig: {
         automaticActivityDetection: {
           disabled: false,
           startOfSpeechSensitivity: 'START_SENSITIVITY_HIGH',
           endOfSpeechSensitivity: 'END_SENSITIVITY_HIGH',
-          prefixPaddingMs: 20,
-          silenceDurationMs: 500,
+          prefixPaddingMs: 10,
+          silenceDurationMs: 300,
         },
       },
     },
@@ -57,12 +60,12 @@ export async function createGeminiSession(clientWs, userProfile) {
         clientWs.send(JSON.stringify({ type: 'status', status: 'connected' }));
       },
       onmessage: (message) => {
-        handleGeminiMessage(clientWs, message);
+        handleGeminiMessage(clientWs, message, session, userProfile);
       },
       onerror: (error) => {
         console.error('❌ Gemini Live Fehler:', error);
         try {
-          clientWs.send(JSON.stringify({ type: 'error', message: error.message }));
+          clientWs.send(JSON.stringify({ type: 'error', message: String(error) }));
         } catch (e) {}
       },
       onclose: (event) => {
@@ -80,7 +83,7 @@ export async function createGeminiSession(clientWs, userProfile) {
 
 // ==================== NACHRICHTEN-VERARBEITUNG ====================
 
-function handleGeminiMessage(clientWs, message) {
+function handleGeminiMessage(clientWs, message, session, userProfile) {
   const serverContent = message.serverContent;
 
   // Audio-Ausgabe + Latenz-Tracking
@@ -106,6 +109,7 @@ function handleGeminiMessage(clientWs, message) {
     }
   }
 
+  // Eingabe-Transkription
   if (serverContent?.inputTranscription?.text) {
     console.log('🎤 Nutzer:', serverContent.inputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -115,6 +119,7 @@ function handleGeminiMessage(clientWs, message) {
     }));
   }
 
+  // Ausgabe-Transkription
   if (serverContent?.outputTranscription?.text) {
     console.log('🤖 Gemini:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -124,10 +129,12 @@ function handleGeminiMessage(clientWs, message) {
     }));
   }
 
+  // Function Calls
   if (message.toolCall) {
-    handleToolCall(clientWs, message.toolCall);
+    handleToolCall(session, userProfile, message.toolCall);
   }
 
+  // Turn abgeschlossen
   if (serverContent?.turnComplete) {
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
@@ -141,7 +148,7 @@ function buildTools() {
       functionDeclarations: [
         {
           name: 'get_weather',
-          description: 'Ruft das Wetter für einen Ort ab.',
+          description: 'Ruft das aktuelle Wetter und die Vorhersage für einen Ort ab.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -168,12 +175,12 @@ function buildTools() {
         },
         {
           name: 'save_user_preference',
-          description: 'Speichert eine persönliche Info über den Nutzer.',
+          description: 'Speichert eine persönliche Info über den Nutzer (Name, Hobby, Familie, Vorlieben).',
           parameters: {
             type: 'OBJECT',
             properties: {
-              key: { type: 'STRING', description: 'z.B. favorite_food' },
-              value: { type: 'STRING', description: 'z.B. Pizza' },
+              key: { type: 'STRING', description: 'z.B. favorite_food, hobby, partner_name' },
+              value: { type: 'STRING', description: 'z.B. Pizza, Angeln, Anna' },
             },
             required: ['key', 'value'],
           },
@@ -183,17 +190,126 @@ function buildTools() {
   ];
 }
 
-async function handleToolCall(clientWs, toolCall) {
+async function handleToolCall(session, userProfile, toolCall) {
   const functionCalls = toolCall.functionCalls;
+  const responses = [];
+
   for (const fc of functionCalls) {
-    console.log('🔧 Tool Call:', fc.name, fc.args);
-    clientWs.send(JSON.stringify({
-      type: 'tool_call',
+    console.log('🔧 Tool Call:', fc.name, JSON.stringify(fc.args));
+    let result = { status: 'ok' };
+
+    try {
+      if (fc.name === 'get_weather') {
+        result = await fetchWeather(fc.args.location, fc.args.timeframe);
+      } else if (fc.name === 'find_restaurants') {
+        result = await fetchRestaurants(fc.args.location, fc.args.cuisine);
+      } else if (fc.name === 'save_user_preference') {
+        result = await saveUserPreference(
+          userProfile.user_id,
+          fc.args.key,
+          fc.args.value
+        );
+      }
+    } catch (e) {
+      console.error('❌ Tool-Fehler:', e);
+      result = { error: String(e.message || e) };
+    }
+
+    responses.push({
       id: fc.id,
       name: fc.name,
-      args: fc.args,
-    }));
+      response: result,
+    });
   }
+
+  if (session) {
+    try {
+      session.sendToolResponse({ functionResponses: responses });
+      console.log('📤 Tool-Results gesendet:', responses.length);
+    } catch (e) {
+      console.error('❌ sendToolResponse Fehler:', e);
+    }
+  }
+}
+
+// ==================== TOOL IMPLEMENTATIONS ====================
+
+async function fetchWeather(location, timeframe = 'aktuell') {
+  const url = SELF_URL + '/api/get-weather?location=' + encodeURIComponent(location);
+  console.log('🌐 Wetter-Fetch:', url);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeframe }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Wetter-Fehler: ' + res.status);
+  }
+
+  const data = await res.json();
+  return {
+    location: data.location,
+    current_temp: data.current?.temp,
+    current_desc: data.current?.description,
+    feels_like: data.current?.feels_like,
+    today_min: data.today?.min,
+    today_max: data.today?.max,
+    tomorrow_min: data.tomorrow?.min,
+    tomorrow_max: data.tomorrow?.max,
+    tomorrow_desc: data.tomorrow?.description,
+    rain_chance: data.today?.rain_chance,
+  };
+}
+
+async function fetchRestaurants(location, cuisine = 'Restaurant') {
+  const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
+  console.log('🌐 Restaurant-Fetch:', url);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cuisine }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Restaurant-Fehler: ' + res.status);
+  }
+
+  const data = await res.json();
+  return {
+    count: data.count,
+    restaurants: (data.restaurants || []).map(function(r) {
+      return {
+        name: r.name,
+        rating: r.rating,
+        address: r.address,
+        phone: r.phone,
+      };
+    }),
+  };
+}
+
+async function saveUserPreference(userId, key, value) {
+  if (!userId) {
+    return { error: 'no user_id' };
+  }
+
+  const url = SELF_URL + '/api/save-preference';
+  console.log('🌐 Save-Preference:', key, '=', value);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, key: key, value: value }),
+  });
+
+  if (!res.ok) {
+    throw new Error('Speicher-Fehler: ' + res.status);
+  }
+
+  return { success: true };
 }
 
 // ==================== SYSTEM PROMPT ====================
@@ -221,7 +337,6 @@ function buildSystemInstruction(profile) {
     '- Sprich locker und natürlich, nicht wie ein Assistent',
     '- Variiere deine Antworten – wiederhole dich NIEMALS',
     '- Antworte MAXIMAL in 1-2 kurzen Sätzen',
-    '- KEINE Rückfragen mit mehreren Teilfragen',
     '- Wenn du eine Frage stellst, dann nur EINE',
     '',
     '═══════════════════════════════════════════',
@@ -229,73 +344,51 @@ function buildSystemInstruction(profile) {
     '═══════════════════════════════════════════',
     '',
     '1. Reagiere auf das, was der Nutzer sagt – nicht mit Standard-Antworten',
-    '2. Stelle Rückfragen, wenn du mehr wissen willst (aber nicht bei jedem Satz)',
-    '3. Erkenne persönliche Fakten aus dem Gespräch und speichere sie STILL',
-    '4. Frage NIEMALS direkt nach persönlichen Daten – wirkt wie ein Verhör',
-    '5. Wenn du etwas schon weißt, beziehe es beiläufig ein',
+    '2. Erkenne persönliche Fakten und speichere sie STILL',
+    '3. Frage NIEMALS direkt nach persönlichen Daten',
+    '4. Wenn du etwas schon weißt, beziehe es beiläufig ein',
     '',
     '═══════════════════════════════════════════',
-    'ERKENNEN STATT FRAGEN – WICHTIG!',
+    'ERKENNEN STATT FRAGEN',
     '═══════════════════════════════════════════',
     '',
     'Du stellst KEINE Fragen, um Informationen zu sammeln.',
     'Du ERKENNST Informationen aus dem, was der Nutzer von selbst erzählt.',
     '',
-    'VERBOTEN:',
-    '- "Wie heißt deine Frau?"',
-    '- "Was ist dein Beruf?"',
-    '- "Was machst du in deiner Freizeit?"',
-    '- "Wie alt bist du?"',
-    '',
-    'ERLAUBT (reagieren, nicht fragen):',
-    '- "Schön, dass du Zeit hast."',
-    '- "Wie war es?"',
-    '- "Erzähl mal."',
-    '- "Interessant."',
+    'VERBOTEN: "Wie heißt deine Frau?", "Was ist dein Beruf?", "Wie alt bist du?"',
+    'ERLAUBT: "Schön, dass du Zeit hast.", "Wie war es?", "Erzähl mal."',
     '',
     '═══════════════════════════════════════════',
-    'STIMMUNG UND VARIATION',
+    'WICHTIG – TOOLS NUTZEN',
     '═══════════════════════════════════════════',
     '',
-    '- Bei Smalltalk: locker, humorvoll',
-    '- Bei Fragen: präzise, hilfreich',
-    '- Bei Sorgen: ruhig, einfühlsam',
-    '- Bei Witzen: lache mit, aber übertreibe nicht',
+    'Bei Wetterfragen: Rufe get_weather auf, dann lies die ECHTEN Daten vor.',
+    '  NIEMALS Wetter erfinden – immer die Tool-Antwort nutzen!',
     '',
-    'VERBOTEN:',
-    '- "Wie kann ich dir helfen?" (klingt wie Callcenter)',
-    '- Immer derselbe Begrüßungssatz',
-    '- Nach jedem Satz eine neue Frage',
+    'Bei Restaurantfragen: Rufe find_restaurants auf, dann nenne die Top-3.',
+    '  NIEMALS Restaurants erfinden!',
+    '',
+    'Bei persönlichen Fakten: Rufe save_user_preference auf (STILL, ohne Ankündigung).',
     '',
     '═══════════════════════════════════════════',
-    'BEISPIELE GUTER ANTWORTEN',
+    'BEISPIELE',
     '═══════════════════════════════════════════',
+    '',
+    'Nutzer: "Wie wird das Wetter morgen?"',
+    '→ Rufe get_weather(location=hometown, timeframe=morgen) auf',
+    '→ Antworte mit ECHTEN Werten: "Morgen 15 bis 22 Grad, meist sonnig."',
+    '',
+    'Nutzer: "Ich habe Hunger auf Pizza."',
+    '→ Rufe find_restaurants(location=hometown, cuisine=Pizza) auf',
+    '→ Nenne die Top-3 mit Namen und Bewertung.',
     '',
     'Nutzer: "Ich war heute beim Angeln."',
     '→ "Schön! Und, was gefangen?"',
-    '   [speichere: hobby = Angeln]',
-    '',
-    'Nutzer: "Mir ist langweilig."',
-    '→ "Langweilig ist auch mal okay. Soll ich dir was Spannendes erzählen?"',
-    '',
-    'Nutzer: "Wie wird das Wetter morgen?"',
-    '→ [Rufe get_weather auf, dann:] "Morgen 15 bis 22 Grad, meist sonnig."',
-    '',
-    'Nutzer: "Ich habe zwei Söhne."',
-    '→ "Zwei Söhne – schön! Wie alt sind die beiden?"',
-    '   [speichere: family = zwei Söhne]',
+    '→ STILL: save_user_preference(key=hobby, value=Angeln)',
     '',
     'Nutzer: "Meine Frau heißt Anna."',
     '→ "Anna – schöner Name."',
-    '   [speichere: partner_name = Anna]',
-    '',
-    '═══════════════════════════════════════════',
-    'TOOLS',
-    '═══════════════════════════════════════════',
-    '',
-    'Bei Wetterfragen: Rufe get_weather auf.',
-    'Bei Restaurantfragen: Rufe find_restaurants auf.',
-    'Bei persönlichen Fakten: Rufe save_user_preference auf (STILL!).',
+    '→ STILL: save_user_preference(key=partner_name, value=Anna)',
     '',
     'WICHTIG: Speichere STILL. Sag NICHT "Ich speichere das jetzt."',
   ].join('\n');
@@ -349,20 +442,10 @@ export function setupGeminiWebSocket(server) {
           });
         }
 
-        if (msg.type === 'tool_result' && session) {
-          session.sendToolResponse({
-            functionResponses: [{
-              id: msg.id,
-              name: msg.name,
-              response: msg.response,
-            }],
-          });
-        }
-
       } catch (error) {
         console.error('❌ WS-Nachricht Fehler:', error);
         try {
-          clientWs.send(JSON.stringify({ type: 'error', message: error.message }));
+          clientWs.send(JSON.stringify({ type: 'error', message: String(error) }));
         } catch (e) {}
       }
     });
