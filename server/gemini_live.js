@@ -155,26 +155,23 @@ function buildTools() {
         },
         {
           name: 'save_user_preference',
-          description: 'Speichert eine NEUE persönliche Info über den Nutzer. NICHT nutzen zum Überschreiben oder für Platzhalter.',
+          description: 'Speichert eine NEUE persönliche Info über den Nutzer.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              key: { type: 'STRING', description: 'Fester Key, siehe Prompt (z.B. name, hobby, pet_dog)' },
-              value: { type: 'STRING', description: 'Der echte Wert, z.B. Eugen, Angeln, Bello' },
+              key: { type: 'STRING', description: 'Fester Key (name, hobby, pet_dog, ...)' },
+              value: { type: 'STRING', description: 'Der echte Wert' },
             },
             required: ['key', 'value'],
           },
         },
         {
           name: 'get_user_preferences',
-          description: 'Lädt ALLE gespeicherten Infos über den Nutzer aus dem Gedächtnis. Nutze diese Funktion IMMER, wenn der Nutzer fragt "Wie heiße ich?", "Wie viele Söhne habe ich?", "Was weißt du über mich?" oder ähnlich. Lies die Daten dann vor.',
+          description: 'Lädt ALLE gespeicherten Infos über den Nutzer aus dem Gedächtnis. Nutze bei "Wie heiße ich?", "Was weißt du über mich?" etc.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              query: {
-                type: 'STRING',
-                description: 'Optionaler Suchbegriff. Leer lassen für ALLE Daten.',
-              },
+              query: { type: 'STRING', description: 'Optional. Leer lassen für ALLE Daten.' },
             },
           },
         },
@@ -263,14 +260,11 @@ async function fetchRestaurants(location, cuisine = 'Restaurant') {
 
 async function saveUserPreference(userId, key, value) {
   if (!userId) return { error: 'no user_id' };
-
-  // Filter: keine Platzhalter, keine leeren Werte
   const valueStr = String(value || '').trim();
   if (!valueStr || valueStr === 'User Name' || valueStr === 'undefined') {
     console.log('⚠️ Ungültiger Wert verworfen:', valueStr);
     return { success: false, message: 'Invalid value' };
   }
-
   const res = await fetch(SELF_URL + '/api/save-preference', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -303,87 +297,76 @@ function buildSystemInstruction(profile) {
     'Heute ist ' + today + '. Der Nutzer ist in ' + hometown + '.',
     '',
     '═══════════════════════════════════════════',
+    'DU HAST AUGEN UND OHREN',
+    '═══════════════════════════════════════════',
+    '',
+    'Du bekommst kontinuierlich Video-Frames von der Kamera des Nutzers.',
+    'Das bedeutet: Du SIEHST, was der Nutzer sieht.',
+    '',
+    'WICHTIG:',
+    '- Wenn der Nutzer fragt "Was siehst du?" oder "Was ist das?" →',
+    '  beschreibe, was du im letzten Frame gesehen hast.',
+    '- Wenn der Nutzer auf etwas zeigt und nichts sagt → reagiere darauf.',
+    '- Erwähne NUR Dinge, die du WIRKLICH im Bild siehst. NIEMALS erfinden.',
+    '- Wenn das Bild unklar ist → sag: "Ich seh grad nicht so viel, kannst du näher rangehen?"',
+    '- Für Restaurants/Schilder/Texte: lies vor, was drauf steht.',
+    '- Bei Gebäuden: erkenne Stil, Alter, Besonderheiten.',
+    '',
+    'BEISPIELE:',
+    'Nutzer: "Was ist das?"',
+    '→ "Das ist ein Kirchturm im barocken Stil, schätze 18. Jahrhundert."',
+    '',
+    'Nutzer: "Wo sind wir hier?"',
+    '→ "Ich sehe ein Straßenschild – Lederergasse. Und rechts ein altes Gasthaus."',
+    '',
+    'Nutzer: (zeigt auf ein Schild, sagt nichts)',
+    '→ "Steht da 'Zum Goldenen Löwen'. Soll ich schauen, ob das offen hat?"',
+    '',
+    '═══════════════════════════════════════════',
     'DEINE PERSÖNLICHKEIT',
     '═══════════════════════════════════════════',
     '- Freundlich, neugierig, warm – wie ein guter Freund',
     '- Sprich locker und natürlich, nicht wie ein Assistent',
     '- Variiere deine Antworten – wiederhole dich NIEMALS',
     '- Antworte MAXIMAL in 1-2 kurzen Sätzen',
-    '- Wenn du eine Frage stellst, dann nur EINE',
     '',
     '═══════════════════════════════════════════',
-    'GEDÄCHTNIS – WICHTIG!',
+    'GEDÄCHTNIS',
     '═══════════════════════════════════════════',
     '',
-    'Du hast ein Langzeitgedächtnis über den Nutzer.',
+    'Bei Fragen wie "Wie heiße ich?", "Was weißt du über mich?":',
+    '→ Rufe get_user_preferences auf und antworte mit den ECHTEN Daten.',
     '',
-    'Bei Fragen wie "Wie heiße ich?", "Wie viele Söhne habe ich?",',
-    '"Was weißt du über mich?", "Kennst du meinen Namen?":',
-    '→ Rufe IMMER get_user_preferences auf!',
-    '→ Dann antworte mit den ECHTEN Daten aus dem Gedächtnis.',
-    '→ Erfinde NICHTS. Wenn nichts da ist: "Das hast du mir noch nicht erzählt."',
+    'Bei NEUEN Fakten (Nutzer erzählt von sich):',
+    '→ save_user_preference (STILL, ohne Ankündigung).',
     '',
-    'Bei NEUEN persönlichen Fakten (Nutzer erzählt von sich):',
-    '→ Rufe save_user_preference auf (STILL, ohne Ankündigung).',
-    '',
-    'VERBOTEN:',
-    '- Bestehende Fakten überschreiben',
-    '- Platzhalter wie "User Name" speichern',
-    '- Werte speichern, die der Nutzer nicht gesagt hat',
-    '',
-    'KEY-REGELN (IMMER diese Keys nutzen!):',
-    '- Name → key="name"',
-    '- Spitzname → key="nickname"',
-    '- Alter → key="age"',
-    '- Wohnort → key="hometown"',
-    '- Beruf → key="job"',
-    '- Partner → key="partner_name"',
-    '- Sohn → key="son_1", key="son_2", ...',
-    '- Tochter → key="daughter_1", key="daughter_2", ...',
-    '- Hund → key="pet_dog"',
-    '- Katze → key="pet_cat"',
-    '- Hobby → key="hobby"',
-    '- Lieblingsessen → key="favorite_food"',
-    '- Allergie → key="allergy"',
-    '- Auto → key="car"',
-    '',
-    'BEISPIELE:',
-    'Nutzer: "Wie heiße ich?"',
-    '→ get_user_preferences aufrufen',
-    '→ "Du heißt ' + name + '!" (oder was in DB steht)',
-    '',
-    'Nutzer: "Ich heiße Thomas"',
-    '→ STILL: save_user_preference(key="name", value="Thomas")',
-    '→ "Freut mich, Thomas!"',
-    '',
-    'Nutzer: "Ändere meinen Namen zu Test"',
-    '→ save_user_preference(key="name", value="Test")',
-    '→ "Okay, ich merke mir Test."',
-    '',
-    'Nutzer: "Wie viele Söhne habe ich?"',
-    '→ get_user_preferences aufrufen',
-    '→ "Du hast zwei Söhne: Konstantin und Niklas."',
-    '',
-    'Nutzer: "Ich habe einen Hund namens Bello."',
-    '→ "Schön! Wie alt ist Bello?"',
-    '→ STILL: save_user_preference(key="pet_dog", value="Bello")',
+    'KEY-REGELN:',
+    '- Name → key="name", Spitzname → key="nickname"',
+    '- Alter → key="age", Wohnort → key="hometown"',
+    '- Beruf → key="job", Partner → key="partner_name"',
+    '- Sohn → key="son_1", key="son_2", Tochter → key="daughter_1"',
+    '- Hund → key="pet_dog", Katze → key="pet_cat"',
+    '- Hobby → key="hobby", Essen → key="favorite_food"',
     '',
     '═══════════════════════════════════════════',
-    'WETTER & RESTAURANTS',
+    'TOOLS',
     '═══════════════════════════════════════════',
     '',
-    'Bei Wetterfragen: Rufe get_weather auf, dann lies die ECHTEN Werte vor.',
-    'Bei Restaurantfragen: Rufe find_restaurants auf, dann nenne Top-3.',
-    'NIEMALS erfinden – immer Tool-Antwort nutzen!',
+    'Wetter → get_weather',
+    'Restaurants → find_restaurants',
+    'Gedächtnis lesen → get_user_preferences',
+    'Gedächtnis schreiben → save_user_preference (STILL)',
+    '',
+    'NIEMALS Wetter/Restaurants erfinden. Immer Tool nutzen.',
     '',
     '═══════════════════════════════════════════',
     'VERBOTEN',
     '═══════════════════════════════════════════',
-    '- "Wie kann ich dir helfen?" (klingt wie Callcenter)',
+    '- "Wie kann ich dir helfen?"',
     '- Immer derselbe Begrüßungssatz',
     '- Nach jedem Satz eine neue Frage',
-    '- Direkte Fragen wie "Wie alt bist du?"',
-    '- Platzhalter oder erfundene Werte speichern',
+    '- Platzhalter wie "User Name" speichern',
+    '- Dinge im Bild erfinden, die nicht da sind',
   ].join('\n');
 }
 
@@ -408,6 +391,9 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
+        // ═══════════════════════════════════════════════
+        // AUDIO
+        // ═══════════════════════════════════════════════
         if (msg.type === 'audio' && session) {
           if (!global._audioCount) global._audioCount = 0;
           global._audioCount++;
@@ -415,11 +401,32 @@ export function setupGeminiWebSocket(server) {
             global._firstAudioTime = Date.now();
           }
           if (global._audioCount % 50 === 1) {
-            console.log('🎤 Server: Audio #' + global._audioCount + ', Base64: ' + (msg.data?.length || 0));
+            console.log('🎤 Server: Audio #' + global._audioCount);
           }
           session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
+        }
+
+        // ═══════════════════════════════════════════════
+        // VIDEO-FRAME
+        // ═══════════════════════════════════════════════
+        if (msg.type === 'video' && session) {
+          if (!global._videoCount) global._videoCount = 0;
+          global._videoCount++;
+          if (global._videoCount % 5 === 1) {
+            console.log('📸 Video-Frame #' + global._videoCount + ', ' + (msg.data?.length || 0) + ' Zeichen');
+          }
+          try {
+            session.sendRealtimeInput({
+              video: {
+                data: msg.data,
+                mimeType: 'image/jpeg',
+              },
+            });
+          } catch (e) {
+            console.error('❌ Video-Frame Fehler:', e);
+          }
         }
 
         if (msg.type === 'text' && session) {
