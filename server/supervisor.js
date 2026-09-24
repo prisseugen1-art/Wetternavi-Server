@@ -10,31 +10,47 @@ const pool = new Pool({
 
 // ==================== TRIGGER-ERKENNUNG ====================
 
+function normalize(text) {
+  return text
+    .toLowerCase()
+    .replace(/[.,!?;:()"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function matchesSilentTrigger(text) {
+  const t = normalize(text);
   const patterns = [
-    /sei\s+(mal\s+)?still/i,
-    /sei\s+leise/i,
-    /\bruhe\s*(jetzt|bitte)?/i,
-    /halt\s+(die\s+klappe|mal\s+still|den\s+mund)/i,
-    /\bpsst\b/i,
-    /\bmoment\s+mal/i,
-    /\bwarte\s+mal/i,
-    /ich\s+rede\s+gerade/i,
-    /\bschnauze\b/i,
-    /leise\s+(bitte|jetzt)/i,
-    /hör\s+auf\s+zu\s+reden/i,
+    /\bsei\s+(mal\s+)?still\b/,
+    /\bsei\s+leise\b/,
+    /\bsei\s+ruhig\b/,
+    /\bruhe\s*(jetzt|bitte)?\b/,
+    /\bhalt\s+(die\s+klappe|mal\s+still|den\s+mund)\b/,
+    /\bpsst\b/,
+    /\bmoment\s+mal\b/,
+    /\bwarte\s+mal\b/,
+    /\bich\s+rede\s+gerade\b/,
+    /\bschnauze\b/,
+    /\bleise\s+(bitte|jetzt)\b/,
+    /\bhör\s+auf\s+zu\s+reden\b/,
+    /\bklappe\s+zu\b/,
+    /\bshut\s+up\b/,
   ];
-  return patterns.some(p => p.test(text));
+  return patterns.some(p => p.test(t));
 }
 
 function matchesWakeWord(text) {
+  const t = normalize(text);
   const patterns = [
-    /hey\s+begleiter/i,
-    /hey\s+gemini/i,
-    /hey\s+jackson/i,
-    /hey\s+buddy/i,
+    /\bhey\s+begleiter\b/,
+    /\bhey\s+gemini\b/,
+    /\bhey\s+jackson\b/,
+    /\bhey\s+buddy\b/,
+    /\bhallo\s+begleiter\b/,
+    /\bbegleiter\s+(bist\s+du\s+da|aufwachen|hörst\s+du|wach\s+auf)\b/,
+    /\bbegleiter\b/,
   ];
-  return patterns.some(p => p.test(text));
+  return patterns.some(p => p.test(t));
 }
 
 // ==================== HOME-DETECTION ====================
@@ -80,6 +96,7 @@ async function updateHomeIfNeeded(userId) {
     `, [userId]);
 
     if (result.rows.length === 0) return;
+
     const { rlat, rlon, nights } = result.rows[0];
     if (nights < 3) return;
 
@@ -104,6 +121,7 @@ async function isAtHome(userId, lat, lon) {
       [userId]
     );
     if (result.rows.length === 0) return false;
+
     const { home_lat, home_lon } = result.rows[0];
     const distance = haversine(lat, lon, home_lat, home_lon);
     return distance < 200;
@@ -125,20 +143,18 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 // ==================== MODUS-ENTSCHEIDUNG ====================
 
-/**
- * Entscheidet den Modus basierend auf aktueller Situation + Text.
- * NEU: currentMode wird beachtet – einmal silent bleibt silent bis Wake-Word.
- */
 export async function detectMode(userId, imuState, lat, lon, lastUserText, currentMode = 'normal') {
   const hour = new Date().getHours();
   const isNight = hour >= 22 || hour < 7;
 
-  // 1. Explizite Befehle (höchste Priorität)
+  // 1. Explizite Befehle (HÖCHSTE Priorität – auch im Silent)
   if (lastUserText) {
     if (matchesWakeWord(lastUserText)) {
+      console.log(`👂 Wake-Word erkannt in: "${lastUserText}"`);
       return 'normal';
     }
     if (matchesSilentTrigger(lastUserText)) {
+      console.log(`🤫 Silent-Trigger erkannt in: "${lastUserText}"`);
       return 'silent';
     }
   }

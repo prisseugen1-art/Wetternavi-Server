@@ -16,12 +16,16 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 
 function modeInstruction(mode) {
   if (mode === 'silent') {
-    return '[SYSTEM-INSTRUKTION] Wechsle in den SILENT-MODUS. ' +
-           'Ab jetzt: ABSOLUT STILL. Antworte NUR, wenn ich "Hey Begleiter" sage. ' +
-           'Auf alles andere: KEINE Reaktion. Kein "Mhm", kein Kommentar, keine Bestätigung.';
+    return '[SYSTEM-INSTRUKTION] SILENT-MODUS AKTIV. ' +
+           'WICHTIG: Du bleibst AUFMERKSAM und hörst weiter zu – aber du REAGIERST NICHT auf normale Sprache. ' +
+           'Keine Kommentare, kein "Mhm", keine Bestätigung, keine Fragen. ' +
+           'EINZIGE Ausnahme: Wenn du die Worte "Hey Begleiter" (oder "Hey Gemini") hörst, ' +
+           'antworte NUR mit einem kurzen "Ja?" oder "Ich bin da." ' +
+           'Und wechsle danach wieder in deinen normalen, freundlichen Modus. ' +
+           'Auf ALLES andere: absolute Stille.';
   }
-  return '[SYSTEM-INSTRUKTION] Wechsle in den NORMAL-MODUS. ' +
-         'Ab jetzt: Reagiere auf meine Fragen normal, freundlich, kurz.';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. ' +
+         'Ab jetzt: Reagiere auf meine Fragen normal, freundlich, kurz (1-2 Sätze).';
 }
 
 // ==================== GEMINI LIVE SETUP ====================
@@ -111,7 +115,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // NEU: Voice-Trigger für Modus-Wechsel
+    // Voice-Trigger für Modus-Wechsel
     if (userProfile.user_id) {
       const current = clientWs._lastMode || 'normal';
       const mode = await detectMode(
@@ -125,7 +129,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
 
       if (mode !== current) {
         clientWs._lastMode = mode;
-        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode} | Trigger: "${userText}"`);
+        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
         clientWs.send(JSON.stringify({ type: 'mode', mode }));
 
         try {
@@ -134,7 +138,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
               role: 'user',
               parts: [{ text: modeInstruction(mode) }],
             }],
-            turnComplete: false,
+            turnComplete: true,
           });
         } catch (e) {
           console.error('❌ Modus-Send-Fehler:', e.message);
@@ -348,13 +352,15 @@ function buildSystemInstruction(profile) {
     'NORMAL-MODUS (Standard):',
     '- Aktiv, freundlich, gesprächig.',
     '- Reagierst auf alles was der Nutzer sagt.',
+    '- Antworten max. 1-2 kurze Sätze.',
     '',
     'SILENT-MODUS:',
-    '- ABSOLUT STILL. Schweigen.',
-    '- KEINE Reaktion auf alles was du hörst.',
-    '- KEIN "Mhm", KEIN "Ich verstehe", KEIN gar nichts.',
-    '- Ausnahme: Wenn du "Hey Begleiter" hörst → antworte kurz: "Ja?" oder "Ich bin da."',
-    '- Danach wieder STILL warten.',
+    '- Du bleibst AUFMERKSAM – hörst weiter zu.',
+    '- ABER: Du reagierst NICHT auf normale Sprache.',
+    '- KEIN "Mhm", KEIN "Ich verstehe", KEINE Kommentare.',
+    '- EINZIGE Ausnahme: Wenn du "Hey Begleiter" hörst:',
+    '  → Antworte kurz: "Ja?" oder "Ich bin da."',
+    '  → Danach wieder still.',
     '',
     '===========================================',
     'DEINE PERSÖNLICHKEIT',
@@ -362,7 +368,6 @@ function buildSystemInstruction(profile) {
     '- Freundlich, neugierig, warm – wie ein guter Freund',
     '- Sprich locker und natürlich, nicht wie ein Assistent',
     '- Variiere deine Antworten – wiederhole dich NIEMALS',
-    '- Antworte MAXIMAL in 1-2 kurzen Sätzen',
     '',
     '===========================================',
     'SEHEN UND HÖREN',
@@ -457,7 +462,7 @@ export function setupGeminiWebSocket(server) {
             try {
               session.sendClientContent({
                 turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
-                turnComplete: false,
+                turnComplete: true,
               });
             } catch (e) {
               console.error('❌ Modus-Send-Fehler:', e.message);
