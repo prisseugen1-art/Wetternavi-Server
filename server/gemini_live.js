@@ -12,6 +12,18 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
+// ==================== MODUS-INSTRUKTION ====================
+
+function modeInstruction(mode) {
+  if (mode === 'silent') {
+    return '[SYSTEM-INSTRUKTION] Wechsle in den SILENT-MODUS. ' +
+           'Ab jetzt: ABSOLUT STILL. Antworte NUR, wenn ich "Hey Begleiter" sage. ' +
+           'Auf alles andere: KEINE Reaktion. Kein "Mhm", kein Kommentar, keine Bestätigung.';
+  }
+  return '[SYSTEM-INSTRUKTION] Wechsle in den NORMAL-MODUS. ' +
+         'Ab jetzt: Reagiere auf meine Fragen normal, freundlich, kurz.';
+}
+
 // ==================== GEMINI LIVE SETUP ====================
 
 export async function createGeminiSession(clientWs, userProfile) {
@@ -21,7 +33,6 @@ export async function createGeminiSession(clientWs, userProfile) {
   console.log('📦 Profil:', JSON.stringify(userProfile).substring(0, 200));
 
   const systemInstruction = buildSystemInstruction(userProfile);
-
   let session = null;
 
   session = await ai.live.connect({
@@ -76,18 +87,11 @@ export async function createGeminiSession(clientWs, userProfile) {
 
 // ==================== NACHRICHTEN-VERARBEITUNG ====================
 
-function handleGeminiMessage(clientWs, message, session, userProfile) {
+async function handleGeminiMessage(clientWs, message, session, userProfile) {
   const serverContent = message.serverContent;
 
+  // -------- Audio-Teile an App senden --------
   if (serverContent?.modelTurn?.parts) {
-    if (!global._firstResponseTime && global._firstAudioTime) {
-      global._firstResponseTime = Date.now();
-      const latency = global._firstResponseTime - global._firstAudioTime;
-      if (latency < 30000) console.log('⏱️ LATENZ: ' + latency + 'ms');
-      global._firstAudioTime = null;
-      global._firstResponseTime = null;
-    }
-
     for (const part of serverContent.modelTurn.parts) {
       if (part.inlineData?.data) {
         clientWs.send(JSON.stringify({
@@ -99,14 +103,47 @@ function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
+  // -------- User-Transkription + Voice-Trigger --------
   if (serverContent?.inputTranscription?.text) {
-    console.log('🎤 Nutzer:', serverContent.inputTranscription.text);
+    const userText = serverContent.inputTranscription.text;
+    console.log('🎤 Nutzer:', userText);
     clientWs.send(JSON.stringify({
-      type: 'transcript', role: 'user',
-      text: serverContent.inputTranscription.text,
+      type: 'transcript', role: 'user', text: userText,
     }));
+
+    // NEU: Voice-Trigger für Modus-Wechsel
+    if (userProfile.user_id) {
+      const current = clientWs._lastMode || 'normal';
+      const mode = await detectMode(
+        userProfile.user_id,
+        clientWs._lastImuState || 'unknown',
+        clientWs._lastLat,
+        clientWs._lastLon,
+        userText,
+        current
+      );
+
+      if (mode !== current) {
+        clientWs._lastMode = mode;
+        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode} | Trigger: "${userText}"`);
+        clientWs.send(JSON.stringify({ type: 'mode', mode }));
+
+        try {
+          session.sendClientContent({
+            turns: [{
+              role: 'user',
+              parts: [{ text: modeInstruction(mode) }],
+            }],
+            turnComplete: false,
+          });
+        } catch (e) {
+          console.error('❌ Modus-Send-Fehler:', e.message);
+        }
+      }
+    }
   }
 
+  // -------- Agent-Transkription --------
   if (serverContent?.outputTranscription?.text) {
     console.log('🤖 Gemini:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -115,10 +152,12 @@ function handleGeminiMessage(clientWs, message, session, userProfile) {
     }));
   }
 
+  // -------- Tool-Calls --------
   if (message.toolCall) {
     handleToolCall(session, userProfile, message.toolCall);
   }
 
+  // -------- Turn-Ende --------
   if (serverContent?.turnComplete) {
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
@@ -277,7 +316,7 @@ async function saveUserPreference(userId, key, value) {
 
 async function getUserPreferences(userId) {
   if (!userId) return { error: 'no user_id' };
-  const res = await fetch(SELF_URL + '/api/debug/user/' + userId);
+  const res = await fetch(SELF_URL + '/api/profile/' + userId);
   if (!res.ok) throw new Error('Lade-Fehler: ' + res.status);
   const data = await res.json();
   return { preferences: data.data || {} };
@@ -300,24 +339,22 @@ function buildSystemInstruction(profile) {
     'Du kannst sehen und hören – der Nutzer sendet Video und Audio.',
     '',
     '===========================================',
-    'MODUS-SYSTEM',
+    'MODUS-SYSTEM (SEHR WICHTIG)',
     '===========================================',
     '',
     'Du hast zwei Modi: NORMAL und SILENT.',
+    'Der Modus wird dir per [SYSTEM-INSTRUKTION] mitgeteilt.',
     '',
     'NORMAL-MODUS (Standard):',
-    '- Du bist aktiv, freundlich, gesprächig.',
+    '- Aktiv, freundlich, gesprächig.',
     '- Reagierst auf alles was der Nutzer sagt.',
     '',
     'SILENT-MODUS:',
-    '- Du bist STILL.',
-    '- Antworte NUR, wenn der Nutzer dich direkt anspricht mit:',
-    '  "Hey Begleiter" oder "Hey Gemini".',
-    '- Auf alles andere: schweigen.',
-    '- Kein "Wie geht es dir?", kein Smalltalk, keine Fragen.',
-    '',
-    'Du bekommst bei Moduswechsel eine [SYSTEM-INSTRUKTION] mit dem aktuellen',
-    'Modus. Richte dich danach.',
+    '- ABSOLUT STILL. Schweigen.',
+    '- KEINE Reaktion auf alles was du hörst.',
+    '- KEIN "Mhm", KEIN "Ich verstehe", KEIN gar nichts.',
+    '- Ausnahme: Wenn du "Hey Begleiter" hörst → antworte kurz: "Ja?" oder "Ich bin da."',
+    '- Danach wieder STILL warten.',
     '',
     '===========================================',
     'DEINE PERSÖNLICHKEIT',
@@ -343,11 +380,6 @@ function buildSystemInstruction(profile) {
     '',
     'Bei NEUEN Fakten (Nutzer erzählt von sich):',
     '- save_user_preference (STILL, ohne Ankündigung).',
-    '',
-    'KEY-REGELN:',
-    '- name, nickname, age, hometown',
-    '- partner_name, son_1, son_2, daughter_1',
-    '- pet_dog, pet_cat, hobby, favorite_food',
     '',
     '===========================================',
     'TOOLS',
@@ -380,58 +412,51 @@ export function setupGeminiWebSocket(server) {
     let session = null;
     let userProfile = {};
 
+    // Session-State
+    clientWs._lastMode = 'normal';
+    clientWs._lastImuState = 'unknown';
+    clientWs._lastLat = null;
+    clientWs._lastLon = null;
+
     clientWs.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString());
 
-        // ═══════════════════════════════════════════════
-        // INIT
-        // ═══════════════════════════════════════════════
+        // -------- INIT --------
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
           session = await createGeminiSession(clientWs, userProfile);
           return;
         }
 
-        // ═══════════════════════════════════════════════
-        // CONTEXT (IMU + GPS) → Supervisor
-        // ═══════════════════════════════════════════════
+        // -------- CONTEXT (IMU + GPS) --------
         if (msg.type === 'context') {
-          // IMU + GPS in DB speichern
+          clientWs._lastImuState = msg.imu_state;
+          clientWs._lastLat = msg.lat;
+          clientWs._lastLon = msg.lon;
+
           if (userProfile.user_id) {
-            await logPresence(
-              userProfile.user_id,
-              msg.imu_state,
-              msg.lat,
-              msg.lon
-            );
+            await logPresence(userProfile.user_id, msg.imu_state, msg.lat, msg.lon);
           }
 
-          // Modus ermitteln
+          const current = clientWs._lastMode || 'normal';
           const mode = await detectMode(
             userProfile.user_id,
             msg.imu_state,
             msg.lat,
             msg.lon,
-            null
+            null,
+            current
           );
 
-          // Nur bei Änderung senden
-          if (session && global._lastMode !== mode) {
-            global._lastMode = mode;
-            console.log(`🎭 Modus: ${mode} (IMU: ${msg.imu_state})`);
+          if (session && mode !== current) {
+            clientWs._lastMode = mode;
+            console.log(`🎭 Modus-Wechsel (IMU): ${current} → ${mode}`);
+            clientWs.send(JSON.stringify({ type: 'mode', mode }));
 
             try {
               session.sendClientContent({
-                turns: [{
-                  role: 'user',
-                  parts: [{
-                    text: `[SYSTEM-INSTRUKTION] Aktueller Modus: ${mode.toUpperCase()}. ` +
-                          (mode === 'silent'
-                            ? 'Antworte ab jetzt NUR auf direkte Ansprache mit "Hey Begleiter".'
-                            : 'Normalmodus aktiv.'),
-                  }],
-                }],
+                turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
                 turnComplete: false,
               });
             } catch (e) {
@@ -441,32 +466,15 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ═══════════════════════════════════════════════
-        // AUDIO
-        // ═══════════════════════════════════════════════
+        // -------- AUDIO --------
         if (msg.type === 'audio' && session) {
-          if (!global._audioCount) global._audioCount = 0;
-          global._audioCount++;
-          if (!global._firstAudioTime && global._audioCount > 3) {
-            global._firstAudioTime = Date.now();
-          }
-          if (global._audioCount % 50 === 1) {
-            console.log('🎤 Server: Audio #' + global._audioCount);
-          }
           session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
-        // ═══════════════════════════════════════════════
-        // VIDEO
-        // ═══════════════════════════════════════════════
+        // -------- VIDEO --------
         if (msg.type === 'video' && session) {
-          if (!global._videoCount) global._videoCount = 0;
-          global._videoCount++;
-          if (global._videoCount % 5 === 1) {
-            console.log('📸 Video-Frame #' + global._videoCount + ', ' + (msg.data?.length || 0) + ' Zeichen');
-          }
           try {
             session.sendRealtimeInput({
               video: {
@@ -479,9 +487,7 @@ export function setupGeminiWebSocket(server) {
           }
         }
 
-        // ═══════════════════════════════════════════════
-        // TEXT
-        // ═══════════════════════════════════════════════
+        // -------- TEXT --------
         if (msg.type === 'text' && session) {
           session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
@@ -499,7 +505,6 @@ export function setupGeminiWebSocket(server) {
 
     clientWs.on('close', async () => {
       console.log('📱 App getrennt');
-      global._lastMode = null;
       if (session) {
         try {
           await session.close();

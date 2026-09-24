@@ -8,6 +8,35 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
+// ==================== TRIGGER-ERKENNUNG ====================
+
+function matchesSilentTrigger(text) {
+  const patterns = [
+    /sei\s+(mal\s+)?still/i,
+    /sei\s+leise/i,
+    /\bruhe\s*(jetzt|bitte)?/i,
+    /halt\s+(die\s+klappe|mal\s+still|den\s+mund)/i,
+    /\bpsst\b/i,
+    /\bmoment\s+mal/i,
+    /\bwarte\s+mal/i,
+    /ich\s+rede\s+gerade/i,
+    /\bschnauze\b/i,
+    /leise\s+(bitte|jetzt)/i,
+    /hör\s+auf\s+zu\s+reden/i,
+  ];
+  return patterns.some(p => p.test(text));
+}
+
+function matchesWakeWord(text) {
+  const patterns = [
+    /hey\s+begleiter/i,
+    /hey\s+gemini/i,
+    /hey\s+jackson/i,
+    /hey\s+buddy/i,
+  ];
+  return patterns.some(p => p.test(text));
+}
+
 // ==================== HOME-DETECTION ====================
 
 export async function logPresence(userId, imuState, lat, lon) {
@@ -51,9 +80,7 @@ async function updateHomeIfNeeded(userId) {
     `, [userId]);
 
     if (result.rows.length === 0) return;
-
     const { rlat, rlon, nights } = result.rows[0];
-
     if (nights < 3) return;
 
     await pool.query(`
@@ -71,15 +98,12 @@ async function updateHomeIfNeeded(userId) {
 
 async function isAtHome(userId, lat, lon) {
   if (!lat || !lon) return false;
-
   try {
     const result = await pool.query(
       'SELECT home_lat, home_lon FROM user_home WHERE user_id = $1',
       [userId]
     );
-
     if (result.rows.length === 0) return false;
-
     const { home_lat, home_lon } = result.rows[0];
     const distance = haversine(lat, lon, home_lat, home_lon);
     return distance < 200;
@@ -101,32 +125,40 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 // ==================== MODUS-ENTSCHEIDUNG ====================
 
-export async function detectMode(userId, imuState, lat, lon, lastUserText) {
+/**
+ * Entscheidet den Modus basierend auf aktueller Situation + Text.
+ * NEU: currentMode wird beachtet – einmal silent bleibt silent bis Wake-Word.
+ */
+export async function detectMode(userId, imuState, lat, lon, lastUserText, currentMode = 'normal') {
   const hour = new Date().getHours();
   const isNight = hour >= 22 || hour < 7;
 
-  // 1. Explizite Befehle
+  // 1. Explizite Befehle (höchste Priorität)
   if (lastUserText) {
-    if (/moment|warte|sei still|rede gerade|ruhe/i.test(lastUserText)) {
-      return 'silent';
-    }
-    if (/hey begleiter|hey gemini|begleiter\b/i.test(lastUserText)) {
+    if (matchesWakeWord(lastUserText)) {
       return 'normal';
+    }
+    if (matchesSilentTrigger(lastUserText)) {
+      return 'silent';
     }
   }
 
-  // 2. Nacht-Logik
+  // 2. Wenn bereits SILENT → bleib silent (bis Wake-Word)
+  if (currentMode === 'silent') {
+    return 'silent';
+  }
+
+  // 3. Nacht-Logik (Zeit + Bewegung + Ort)
   if (isNight) {
     if (imuState === 'walking' || imuState === 'running' || imuState === 'driving') {
       return 'normal';
     }
-
     if (imuState === 'stationary') {
       const atHome = await isAtHome(userId, lat, lon);
       if (atHome) return 'silent';
     }
   }
 
-  // 3. Standard
+  // 4. Standard
   return 'normal';
 }
