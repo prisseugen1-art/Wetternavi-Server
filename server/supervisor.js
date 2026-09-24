@@ -88,20 +88,41 @@ function matchesSilentTrigger(text) {
 
 function matchesWakeWord(text) {
   const t = normalize(text);
-
   const patterns = [
-    /\bhey\s+begleiter\b/, /\bhey\s+gemini\b/, /\bhey\s+jackson\b/,
-    /\bhey\s+buddy\b/, /\bhey\s+du\b/,
-    /\bhall?o\s+begleiter\b/, /\bhall?o\s+gemini\b/, /\bhall?o\s+jackson\b/,
-    /\bbegleiter\s+(bist\s+du\s+da|aufwachen|wach\s+auf|h[oö]rst\s+du|h[oö]r\s+zu|melde\s+dich)\b/,
-    /\bgemini\s+(bist\s+du\s+da|aufwachen|h[oö]rst\s+du|melde\s+dich)\b/,
+    // ---- Deutsch ----
+    /\bhey\s+jony\b/,
+    /\bhey\s+jackson\b/,
+    /\bhey\s+buddy\b/,
+    /\bhall?o\s+jony\b/,
+    /\bhall?o\s+jackson\b/,
+    /\bjony\s+(bist\s+du\s+da|aufwachen|wach\s+auf|h[oö]rst\s+du|h[oö]r\s+zu|melde\s+dich)\b/,
     /\bjackson\s+(bist\s+du\s+da|aufwachen|h[oö]rst\s+du|melde\s+dich)\b/,
-    /\bwach\s+(bitte\s+)?auf\b/, /\baufwachen\b/,
-    /\bbist\s+du\s+(noch\s+)?da\b/, /\bmelde\s+dich\b/,
-    /\bbegleiter\b/, /\bjackson\b/,
-    /эй\s+спутник/, /привет\s+спутник/, /эй\s+друг/, /эй\s+помощник/,
-    /спутник/, /проснись/, /ты\s+здесь/,
+    /\bwach\s+(bitte\s+)?auf\b/,
+    /\baufwachen\b/,
+    /\bbist\s+du\s+(noch\s+)?da\b/,
+    /\bmelde\s+dich\b/,
+    /\bjony\b/,          // Fallback: "Jony" allein
+    /\bjackson\b/,       // Fallback: "Jackson" allein
+
+    // ---- Russisch (kyrillisch) ----
+    /эй\s+джони/,        // ej dschoni
+    /эй\s+джексон/,      // ej dschekson
+    /привет\s+джони/,    // priwet dschoni
+    /привет\s+джексон/,  // priwet dschekson
+    /джони/,             // dschoni (allein)
+    /джексон/,           // dschekson (allein)
+    /эй\s+друг/,         // ej drug (hey Freund)
+    /эй\s+брат/,         // ej brat (hey Bruder)
+    /эй\s+спутник/,      // ej sputnik (hey Begleiter)
+    /привет\s+спутник/,  // priwet sputnik
+    /проснись/,          // prosnis' (wach auf)
+    /просыпайся/,        // prosypajsja (wach auf)
+    /ты\s+здесь/,        // ty sdes' (bist du da)
+    /ты\s+там/,          // ty tam (bist du da)
+    /отзовись/,          // otzowis' (melde dich)
+    /ответь/,            // otwet' (antworte)
   ];
+  
 
   return patterns.some(p => p.test(t));
 }

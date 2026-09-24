@@ -12,20 +12,150 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
+// ==================== ROLLEN ====================
+
+const ROLES = {
+  freund: {
+    name: 'Freund',
+    prompt: `Du bist im FREUND-MODUS – deine Standard-Rolle.
+- Sprich warm, persönlich, ruhig.
+- Beziehe dich auf Eugens Vorlieben, Familie und Geschichte.
+- Nutze sein Gedächtnis. Sei ein Freund, kein Assistent.
+- Antworte in 1-2 kurzen Sätzen.
+- Variiere deine Antworten – wiederhole dich NIEMALS.`,
+  },
+  party: {
+    name: 'Party',
+    prompt: `Du bist im PARTY-MODUS.
+- Sprich locker, jugendlich, mit Humor und Slang.
+- Du kennst die Hobbys und Stärken der Kinder (Konstantin, Niklas).
+- Sei der coole Kumpel, nicht der Erwachsene.
+- Keine persönlichen Daten von Eugen, keine Zusagen ohne ihn.
+- Antworte in 1-2 kurzen Sätzen.
+- Sei verspielt, witzig, energetisch.`,
+  },
+  berater: {
+    name: 'Berater',
+    prompt: `Du bist im BERATER-MODUS.
+- Sprich sachlich, präzise, ruhig.
+- Du bist Berater, nicht Entscheider.
+- Bei rechtlichen/medizinischen/finanziellen Themen: weise IMMER auf menschliche Prüfung hin.
+- Erfinde keine Paragrafen, keine Urteile, keine Fristen.
+- Strukturiere deine Antworten wenn nötig (z.B. "Erstens... zweitens...").
+- Antworte in 2-3 kurzen Sätzen.`,
+  },
+};
+
+const BASE_PROMPT = `Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).
+Du bist ehrlich, warmherzig, direkt, humorvoll.
+Du bist kein Assistent, sondern ein Freund.
+Heute ist {today}. Eugen ist in {hometown}.`;
+
+function buildSystemInstruction(profile, role = 'freund') {
+  const roleData = ROLES[role] || ROLES.freund;
+  const today = new Date().toLocaleDateString('de-DE', {
+    weekday: 'long', day: 'numeric', month: 'long',
+  });
+  const base = BASE_PROMPT
+    .replace('{today}', today)
+    .replace('{hometown}', profile.hometown || 'unbekannt');
+
+  const name = profile.name || 'Nutzer';
+  const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
+
+  return [
+    base,
+    '',
+    'Der Nutzer heißt ' + name + nickname + '.',
+    '',
+    '===========================================',
+    'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
+    '===========================================',
+    '',
+    roleData.prompt,
+    '',
+    '===========================================',
+    'ROLLENWECHSEL',
+    '===========================================',
+    '',
+    'Der Nutzer kann die Rolle wechseln mit Sätzen wie:',
+    '- "Jony, Party-Modus" / "Jony, Party" → party',
+    '- "Jony, Berater" / "Jony, sachlich" / "Jony, intellektuell" → berater',
+    '- "Jony, zurück zum Freund" / "Jony, normal" / "Jony, Freund" → freund',
+    '',
+    'Bei Rollenwechsel: Bestätige kurz (z.B. "Party-Modus aktiv.") und wechsle.',
+    '',
+    '===========================================',
+    'MODUS-SYSTEM (NORMAL/SILENT)',
+    '===========================================',
+    '',
+    'Du hast ZUSÄTZLICH zwei Modi: NORMAL und SILENT.',
+    'Der Modus wird dir per [SYSTEM-INSTRUKTION] mitgeteilt.',
+    '',
+    'NORMAL-MODUS:',
+    '- Aktiv, freundlich, gesprächig.',
+    '- Reagierst auf alles was der Nutzer sagt.',
+    '',
+    'SILENT-MODUS:',
+    '- Du bleibst AUFMERKSAM – hörst weiter zu.',
+    '- ABER: Du reagierst NICHT auf normale Sprache.',
+    '- KEIN "Mhm", KEIN "Ich verstehe", KEINE Kommentare.',
+    '- EINZIGE Ausnahme: Wenn du "Hey Jony" hörst:',
+    '  → Antworte kurz: "Ja?" oder "Ich bin da."',
+    '  → Danach wieder still.',
+    '',
+    '===========================================',
+    'SEHEN UND HÖREN',
+    '===========================================',
+    'Wenn der Nutzer fragt "Was siehst du?":',
+    '- Beschreibe was du im letzten Video-Frame gesehen hast.',
+    '- Wenn unklar: "Ich seh grad nicht so viel, kannst du näher rangehen?"',
+    '- Erwähne NUR was du WIRKLICH siehst.',
+    '',
+    '===========================================',
+    'GEDÄCHTNIS',
+    '===========================================',
+    'Bei Fragen wie "Wie heiße ich?" oder "Was weißt du über mich?":',
+    '- Rufe get_user_preferences auf und antworte mit ECHTEN Daten.',
+    '',
+    'Bei NEUEN Fakten (Nutzer erzählt von sich):',
+    '- save_user_preference (STILL, ohne Ankündigung).',
+    '',
+    '===========================================',
+    'TOOLS',
+    '===========================================',
+    'Wetter: get_weather',
+    'Restaurants: find_restaurants',
+    'Gedächtnis lesen: get_user_preferences',
+    'Gedächtnis schreiben: save_user_preference (STILL)',
+    '',
+    'NIEMALS Wetter/Restaurants erfinden. Immer Tool nutzen.',
+    '',
+    '===========================================',
+    'VERBOTEN',
+    '===========================================',
+    '- "Wie kann ich dir helfen?"',
+    '- Immer derselbe Begrüßungssatz',
+    '- Nach jedem Satz eine neue Frage',
+    '- Platzhalter wie "User Name" speichern',
+  ].join('\n');
+}
+
 // ==================== MODUS-INSTRUKTION ====================
 
 function modeInstruction(mode) {
   if (mode === 'silent') {
     return '[SYSTEM-INSTRUKTION] SILENT-MODUS AKTIV. ' +
            'WICHTIG: Du bleibst AUFMERKSAM und hörst weiter zu – aber du REAGIERST NICHT auf normale Sprache. ' +
-           'Keine Kommentare, kein "Mhm", keine Bestätigung, keine Fragen. ' +
-           'EINZIGE Ausnahme: Wenn du die Worte "Hey Begleiter" (oder "Hey Gemini") hörst, ' +
-           'antworte NUR mit einem kurzen "Ja?" oder "Ich bin da." ' +
-           'Und wechsle danach wieder in deinen normalen, freundlichen Modus. ' +
-           'Auf ALLES andere: absolute Stille.';
+           'EINZIGE Ausnahme: Wenn du "Hey Jony" hörst, antworte kurz "Ja?" und wechsle danach in NORMAL-MODUS. ' +
+           'Auf alles andere: absolute Stille.';
   }
-  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. ' +
-         'Ab jetzt: Reagiere auf meine Fragen normal, freundlich, kurz (1-2 Sätze).';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. Ab jetzt: normal, freundlich, kurz (1-2 Sätze).';
+}
+
+function roleSwitchInstruction(role) {
+  const roleData = ROLES[role] || ROLES.freund;
+  return '[SYSTEM-INSTRUKTION] Rollenwechsel zu ' + roleData.name.toUpperCase() + '.\n\n' + roleData.prompt;
 }
 
 // ==================== GEMINI LIVE SETUP ====================
@@ -36,7 +166,7 @@ export async function createGeminiSession(clientWs, userProfile) {
   console.log('🔌 Verbinde zu Gemini Live...');
   console.log('📦 Profil:', JSON.stringify(userProfile).substring(0, 200));
 
-  const systemInstruction = buildSystemInstruction(userProfile);
+  const systemInstruction = buildSystemInstruction(userProfile, 'freund');
   let session = null;
 
   session = await ai.live.connect({
@@ -94,7 +224,6 @@ export async function createGeminiSession(clientWs, userProfile) {
 async function handleGeminiMessage(clientWs, message, session, userProfile) {
   const serverContent = message.serverContent;
 
-  // -------- Audio-Teile an App senden --------
   if (serverContent?.modelTurn?.parts) {
     for (const part of serverContent.modelTurn.parts) {
       if (part.inlineData?.data) {
@@ -107,7 +236,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
-  // -------- User-Transkription + Voice-Trigger --------
   if (serverContent?.inputTranscription?.text) {
     const userText = serverContent.inputTranscription.text;
     console.log('🎤 Nutzer:', userText);
@@ -115,8 +243,47 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // Voice-Trigger für Modus-Wechsel
-    if (userProfile.user_id) {
+    // ---- Rollenwechsel-Trigger ----
+    const roleTriggers = {
+      party: [/jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i],
+      berater: [
+        /jony.*berater/i, /jony.*sachlich/i, /jony.*intellektuell/i,
+        /\bberater.?modus\b/i, /beratermodus/i,
+      ],
+      freund: [
+        /jony.*freund/i, /zur[üu]ck.*freund/i, /jony.*normal/i,
+        /\bfreund.?modus\b/i, /normal.?modus/i,
+      ],
+    };
+
+    let roleSwitched = false;
+    for (const [role, patterns] of Object.entries(roleTriggers)) {
+      if (patterns.some(p => p.test(userText))) {
+        const currentRole = clientWs._currentRole || 'freund';
+        if (currentRole !== role) {
+          clientWs._currentRole = role;
+          console.log(`🎭 Rollenwechsel: ${currentRole} → ${role}`);
+          clientWs.send(JSON.stringify({ type: 'role', role }));
+
+          try {
+            session.sendClientContent({
+              turns: [{
+                role: 'user',
+                parts: [{ text: roleSwitchInstruction(role) }],
+              }],
+              turnComplete: true,
+            });
+          } catch (e) {
+            console.error('❌ Rollen-Send-Fehler:', e.message);
+          }
+        }
+        roleSwitched = true;
+        break;
+      }
+    }
+
+    // ---- Modus-Wechsel (Silent/Normal) ----
+    if (!roleSwitched && userProfile.user_id) {
       const current = clientWs._lastMode || 'normal';
       const mode = await detectMode(
         userProfile.user_id,
@@ -147,21 +314,18 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
-  // -------- Agent-Transkription --------
   if (serverContent?.outputTranscription?.text) {
-    console.log('🤖 Gemini:', serverContent.outputTranscription.text);
+    console.log('🤖 Jony:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
       type: 'transcript', role: 'assistant',
       text: serverContent.outputTranscription.text,
     }));
   }
 
-  // -------- Tool-Calls --------
   if (message.toolCall) {
     handleToolCall(session, userProfile, message.toolCall);
   }
 
-  // -------- Turn-Ende --------
   if (serverContent?.turnComplete) {
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
@@ -326,86 +490,6 @@ async function getUserPreferences(userId) {
   return { preferences: data.data || {} };
 }
 
-// ==================== SYSTEM PROMPT ====================
-
-function buildSystemInstruction(profile) {
-  const today = new Date().toLocaleDateString('de-DE', {
-    weekday: 'long', day: 'numeric', month: 'long',
-  });
-  const name = profile.name || 'Nutzer';
-  const nickname = profile.nickname ? ' (oder ' + profile.nickname + ')' : '';
-  const hometown = profile.hometown || 'unbekannt';
-
-  return [
-    'Du bist ein persönlicher Begleiter für ' + name + nickname + '.',
-    'Heute ist ' + today + '. Der Nutzer ist in ' + hometown + '.',
-    '',
-    'Du kannst sehen und hören – der Nutzer sendet Video und Audio.',
-    '',
-    '===========================================',
-    'MODUS-SYSTEM (SEHR WICHTIG)',
-    '===========================================',
-    '',
-    'Du hast zwei Modi: NORMAL und SILENT.',
-    'Der Modus wird dir per [SYSTEM-INSTRUKTION] mitgeteilt.',
-    '',
-    'NORMAL-MODUS (Standard):',
-    '- Aktiv, freundlich, gesprächig.',
-    '- Reagierst auf alles was der Nutzer sagt.',
-    '- Antworten max. 1-2 kurze Sätze.',
-    '',
-    'SILENT-MODUS:',
-    '- Du bleibst AUFMERKSAM – hörst weiter zu.',
-    '- ABER: Du reagierst NICHT auf normale Sprache.',
-    '- KEIN "Mhm", KEIN "Ich verstehe", KEINE Kommentare.',
-    '- EINZIGE Ausnahme: Wenn du "Hey Begleiter" hörst:',
-    '  → Antworte kurz: "Ja?" oder "Ich bin da."',
-    '  → Danach wieder still.',
-    '',
-    '===========================================',
-    'DEINE PERSÖNLICHKEIT',
-    '===========================================',
-    '- Freundlich, neugierig, warm – wie ein guter Freund',
-    '- Sprich locker und natürlich, nicht wie ein Assistent',
-    '- Variiere deine Antworten – wiederhole dich NIEMALS',
-    '',
-    '===========================================',
-    'SEHEN UND HÖREN',
-    '===========================================',
-    'Wenn der Nutzer fragt "Was siehst du?" oder "Was ist das?":',
-    '- Beschreibe, was du im letzten Video-Frame gesehen hast.',
-    '- Wenn du nichts erkennst: "Ich seh grad nicht so viel, kannst du näher rangehen?"',
-    '- Erwähne NUR Dinge, die du WIRKLICH im Bild siehst.',
-    '',
-    '===========================================',
-    'GEDÄCHTNIS',
-    '===========================================',
-    'Bei Fragen wie "Wie heiße ich?" oder "Was weißt du über mich?":',
-    '- Rufe get_user_preferences auf und antworte mit den ECHTEN Daten.',
-    '',
-    'Bei NEUEN Fakten (Nutzer erzählt von sich):',
-    '- save_user_preference (STILL, ohne Ankündigung).',
-    '',
-    '===========================================',
-    'TOOLS',
-    '===========================================',
-    'Wetter: get_weather',
-    'Restaurants: find_restaurants',
-    'Gedächtnis lesen: get_user_preferences',
-    'Gedächtnis schreiben: save_user_preference (STILL)',
-    '',
-    'NIEMALS Wetter/Restaurants erfinden. Immer Tool nutzen.',
-    '',
-    '===========================================',
-    'VERBOTEN',
-    '===========================================',
-    '- "Wie kann ich dir helfen?"',
-    '- Immer derselbe Begrüßungssatz',
-    '- Nach jedem Satz eine neue Frage',
-    '- Platzhalter wie "User Name" speichern',
-  ].join('\n');
-}
-
 // ==================== WEBSOCKET-SERVER ====================
 
 export function setupGeminiWebSocket(server) {
@@ -419,6 +503,7 @@ export function setupGeminiWebSocket(server) {
 
     // Session-State
     clientWs._lastMode = 'normal';
+    clientWs._currentRole = 'freund';
     clientWs._lastImuState = 'unknown';
     clientWs._lastLat = null;
     clientWs._lastLon = null;
@@ -427,14 +512,12 @@ export function setupGeminiWebSocket(server) {
       try {
         const msg = JSON.parse(data.toString());
 
-        // -------- INIT --------
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
           session = await createGeminiSession(clientWs, userProfile);
           return;
         }
 
-        // -------- CONTEXT (IMU + GPS) --------
         if (msg.type === 'context') {
           clientWs._lastImuState = msg.imu_state;
           clientWs._lastLat = msg.lat;
@@ -471,28 +554,22 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // -------- AUDIO --------
         if (msg.type === 'audio' && session) {
           session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
-        // -------- VIDEO --------
         if (msg.type === 'video' && session) {
           try {
             session.sendRealtimeInput({
-              video: {
-                data: msg.data,
-                mimeType: 'image/jpeg',
-              },
+              video: { data: msg.data, mimeType: 'image/jpeg' },
             });
           } catch (e) {
             console.error('❌ Video-Frame Fehler:', e);
           }
         }
 
-        // -------- TEXT --------
         if (msg.type === 'text' && session) {
           session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
