@@ -32,7 +32,34 @@ async function initDb() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
-    console.log('✅ Datenbank-Tabelle bereit');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_presence (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        lat DOUBLE PRECISION,
+        lon DOUBLE PRECISION,
+        imu_state TEXT,
+        timestamp TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_presence_user_time
+      ON user_presence (user_id, timestamp DESC)
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_home (
+        user_id TEXT PRIMARY KEY,
+        home_lat DOUBLE PRECISION,
+        home_lon DOUBLE PRECISION,
+        confidence INT DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    console.log('✅ Datenbank-Tabellen bereit');
   } catch (error) {
     console.error('❌ DB-Init-Fehler:', error);
   }
@@ -114,7 +141,7 @@ function normalizePhone(phone) {
 // Health Check
 app.get('/', (req, res) => res.send('Server läuft erfolgreich!'));
 
-// -------- Debug (NUR FÜR ENTWICKLUNG!) --------
+// -------- Debug --------
 app.get('/api/debug/user/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -145,6 +172,51 @@ app.get('/api/debug/all', async (req, res) => {
   }
 });
 
+// -------- Debug: Key löschen --------
+app.post('/api/debug/delete-key', async (req, res) => {
+  try {
+    const { user_id, key } = req.body;
+    if (!user_id || !key) {
+      return res.status(400).json({ error: 'user_id and key required' });
+    }
+
+    await pool.query(`
+      UPDATE user_data
+      SET data = data - $2::text,
+          updated_at = NOW()
+      WHERE user_id = $1
+    `, [user_id, key]);
+
+    console.log(`🗑️ Key "${key}" gelöscht für ${user_id}`);
+    res.json({ success: true, deleted_key: key });
+  } catch (error) {
+    console.error('❌ Delete-Key Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Debug: Home + Presence --------
+app.get('/api/debug/home/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const home = await pool.query(
+      'SELECT * FROM user_home WHERE user_id = $1',
+      [userId]
+    );
+    const presence = await pool.query(
+      'SELECT * FROM user_presence WHERE user_id = $1 ORDER BY timestamp DESC LIMIT 20',
+      [userId]
+    );
+    res.json({
+      user_id: userId,
+      home: home.rows[0] || null,
+      recent_presence: presence.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // -------- Profil: Speichern --------
 app.post('/api/profile/save', async (req, res) => {
   try {
@@ -161,7 +233,6 @@ app.post('/api/profile/save', async (req, res) => {
       return res.status(400).json({ error: 'No fields to save' });
     }
 
-    // Alle Felder in einem Batch
     await pool.query(`
       INSERT INTO user_data (user_id, data)
       VALUES ($1, $2::jsonb)
@@ -223,7 +294,7 @@ app.post('/api/create-web-call', async (req, res) => {
   }
 });
 
-// -------- Save Preference (Retell & Gemini) --------
+// -------- Save Preference --------
 app.post('/api/save-preference', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -240,7 +311,6 @@ app.post('/api/save-preference', async (req, res) => {
       return res.status(400).json({ error: 'Missing fields' });
     }
 
-    // NIEMALS Platzhalter speichern
     const valueStr = String(value).trim();
     if (valueStr === 'User Name' || valueStr === 'undefined' || valueStr === '') {
       console.log('⚠️ Ungültiger Wert – verworfen');
@@ -265,6 +335,8 @@ app.post('/api/delete-user-data', async (req, res) => {
     const userId = req.body?.user_id || req.body?.args?.user_id;
     if (!userId) return res.status(400).json({ error: 'user_id required' });
     await pool.query('DELETE FROM user_data WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM user_presence WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM user_home WHERE user_id = $1', [userId]);
     console.log('🗑️ Daten gelöscht für', userId);
     res.json({ success: true });
   } catch (error) {
@@ -374,29 +446,4 @@ server.listen(PORT, async () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
   console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
   await initDb();
-});
-/**
- * Debug: Löscht einen bestimmten Key aus dem Profil
- * ⚠️ NUR FÜR ENTWICKLUNG!
- */
-app.post('/api/debug/delete-key', async (req, res) => {
-  try {
-    const { user_id, key } = req.body;
-    if (!user_id || !key) {
-      return res.status(400).json({ error: 'user_id and key required' });
-    }
-
-    await pool.query(`
-      UPDATE user_data
-      SET data = data - $2::text,
-          updated_at = NOW()
-      WHERE user_id = $1
-    `, [user_id, key]);
-
-    console.log(`🗑️ Key "${key}" gelöscht für ${user_id}`);
-    res.json({ success: true, deleted_key: key });
-  } catch (error) {
-    console.error('❌ Delete-Key Fehler:', error);
-    res.status(500).json({ error: error.message });
-  }
 });
