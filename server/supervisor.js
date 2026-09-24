@@ -13,10 +13,7 @@ const pool = new Pool({
 function normalize(text) {
   return text
     .toLowerCase()
-    // Satzzeichen zu Leerzeichen
     .replace(/[.,!?;:()"']/g, ' ')
-    // Kyrillisch: Kommas etc. auch
-    .replace(/[,.!?;:()"']/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -25,62 +22,65 @@ function matchesSilentTrigger(text) {
   const t = normalize(text);
 
   const patterns = [
-    // ---- Deutsch: "sei (mal) still/ruhig/leise" ----
-    /\bsei\s+(mal\s+|doch\s+|bitte\s+|kurz\s+)?(still|ruhig|leise|jetzt\s+still)\b/,
+    // ---------- DIREKT: "sei (mal) still/ruhig/leise" ----------
+    /\bsei\s+(mal\s+|doch\s+|bitte\s+|kurz\s+|jetzt\s+)?(still|ruhig|leise)\b/,
     /\bsei\s+(mal\s+)?jetzt\s+(still|ruhig|leise)\b/,
 
-    // ---- Deutsch: Ruhe ----
-    /\bruhe\s*(jetzt|bitte|mal)?\b/,
-    /\bjetzt\s+ist\s+ruhe\b/,
-    /\bsch\s*ruhe\b/,
+    // ---------- HÖFLICH: "kannst/könntest du (mal) still sein" ----------
+    /\bkannst\s+du\s+(mal\s+|bitte\s+|kurz\s+)?(still|ruhig|leise)\s*(sein)?\b/,
+    /\bk[oö]nntest\s+du\s+(mal\s+|bitte\s+)?(still|ruhig|leise)\s*(sein)?\b/,
+    /\bw[üu]rdest\s+du\s+(mal\s+|bitte\s+)?(still|ruhig|leise)\s*(sein)?\b/,
+    /\bw[äa]rst\s+du\s+so\s+freundlich\s+(und\s+)?(still|ruhig|leise)\b/,
 
-    // ---- Deutsch: Klappe / Mund halten ----
-    /\bhalt\s+(mal\s+)?(die\s+klappe|die\s+klappe\s+halten|den\s+mund|den\s+rand|still|ruhe|jetzt\s+ruhe)\b/,
+    // ---------- BITTE: "bitte sei still" / "bitte ruhig" ----------
+    /\bbitte\s+(sei\s+)?(still|ruhig|leise)\b/,
+    /\bw[äa]re\s+es\s+m[oö]glich\s+(dass\s+du\s+)?(still|ruhig|leise)\b/,
+
+    // ---------- RUHE ----------
+    /\bruhe\s*(jetzt|bitte|mal)?\b/,
+    /\bjetzt\s+ist\s+(aber\s+)?ruhe\b/,
+
+    // ---------- KLAPPE / MUND ----------
+    /\bhalt\s+(mal\s+)?(die\s+klappe|den\s+mund|den\s+rand|still|ruhe|jetzt\s+ruhe)\b/,
     /\bklappe\s+(zu|halten?)\b/,
     /\bmund\s+halten?\b/,
     /\bschnauze\b/,
-    /\bschnauze\s+halten?\b/,
 
-    // ---- Deutsch: psst / psssst ----
-    /\bps{2,}t\b/,   // passt zu psst, pssst, psssst
-    /\bshh+\b/,      // shh, shhh
-    /\bsch+\b/,      // sch
+    // ---------- PSST / SHH ----------
+    /\bps{2,}t\b/,
+    /\bshh+\b/,
+    /\bsch+\b/,
 
-    // ---- Deutsch: warten / moment ----
+    // ---------- MOMENT / WARTEN ----------
     /\bmoment\s+(mal|bitte)?\b/,
     /\bwarte\s+(mal|kurz|bitte)?\b/,
     /\bhalt\s+(mal\s+)?(kurz\s+)?an\b/,
 
-    // ---- Deutsch: "ich rede gerade" ----
+    // ---------- "ICH REDE/MUSS REDEN" ----------
     /\bich\s+rede\s+(gerade|jetzt)\b/,
     /\bich\s+spreche\s+(gerade|jetzt)\b/,
+    /\bich\s+muss\s+(hier\s+|mal\s+|kurz\s+|jetzt\s+)?(was|etwas)\s+(reden|sprechen|sagen|kl[aä]ren|besprechen)\b/,
+    /\bich\s+will\s+(hier\s+|mal\s+|kurz\s+)?(was|etwas)\s+(reden|sagen|kl[aä]ren)\b/,
     /\bh[oö]r\s+auf\s+zu\s+(reden|sprechen)\b/,
+
+    // ---------- NICHT REDEN ----------
     /\bsag\s+nichts\b/,
     /\bkein\s+wort\b/,
     /\bsag\s+(jetzt\s+)?(mal\s+)?(nichts|kein\s+wort)\b/,
+    /\bunterbrich\s+mich\s+nicht\b/,
+    /\bfall\s+mir\s+nicht\s+ins\s+wort\b/,
 
-    // ---- Deutsch: leise sein ----
+    // ---------- LEISE ----------
     /\bleise\s+(bitte|jetzt|mal)\b/,
-    /\bsei\s+bitte\s+leise\b/,
     /\bnicht\s+so\s+laut\b/,
 
-    // ---- Deutsch: Stop / Hör auf ----
+    // ---------- STOP ----------
     /\bstop\s+(mal\s+)?(jetzt)?\b/,
     /\bh[oö]r\s+(jetzt\s+)?auf\b/,
 
-    // ---- Russisch: тише, замолчи, помолчи, молчи ----
-    /тише/,                // tische = leiser
-    /замолчи/,             // samoltschi = sei still
-    /помолчи/,             // pomoltschi = schweig
-    /молчи/,               // moltschi = schweig
-    /хватит/,              // chwatit = genug
-    /заткнись/,            // satknis' = halt die Klappe
-    /заткни/,              // satkni
-    /замри/,               // samri = frier ein / halt still
-    /тихо/,                // ticho = leise
-    /постой/,              // postoj = warte
-    /подожди/,             // podoschdi = warte
-    /остановись/,          // ostanowis' = halt an
+    // ---------- RUSSISCH ----------
+    /тише/, /замолчи/, /помолчи/, /молчи/, /хватит/,
+    /заткнись/, /заткни/, /замри/, /тихо/, /постой/, /подожди/, /остановись/,
   ];
 
   return patterns.some(p => p.test(t));
@@ -90,41 +90,17 @@ function matchesWakeWord(text) {
   const t = normalize(text);
 
   const patterns = [
-    // ---- Deutsch: "Hey Begleiter" ----
-    /\bhey\s+begleiter\b/,
-    /\bhey\s+gemini\b/,
-    /\bhey\s+jackson\b/,
-    /\bhey\s+buddy\b/,
-    /\bhey\s+du\b/,
-
-    // ---- Deutsch: "Hallo Begleiter" ----
-    /\bhall?o\s+begleiter\b/,
-    /\bhall?o\s+gemini\b/,
-    /\bhall?o\s+jackson\b/,
-
-    // ---- Deutsch: "Begleiter (bist du da / wach auf / hörst du)" ----
+    /\bhey\s+begleiter\b/, /\bhey\s+gemini\b/, /\bhey\s+jackson\b/,
+    /\bhey\s+buddy\b/, /\bhey\s+du\b/,
+    /\bhall?o\s+begleiter\b/, /\bhall?o\s+gemini\b/, /\bhall?o\s+jackson\b/,
     /\bbegleiter\s+(bist\s+du\s+da|aufwachen|wach\s+auf|h[oö]rst\s+du|h[oö]r\s+zu|melde\s+dich)\b/,
     /\bgemini\s+(bist\s+du\s+da|aufwachen|h[oö]rst\s+du|melde\s+dich)\b/,
     /\bjackson\s+(bist\s+du\s+da|aufwachen|h[oö]rst\s+du|melde\s+dich)\b/,
-
-    // ---- Deutsch: Aufwachen / Wach auf ----
-    /\bwach\s+(bitte\s+)?auf\b/,
-    /\baufwachen\b/,
-    /\bbist\s+du\s+(noch\s+)?da\b/,
-    /\bmelde\s+dich\b/,
-
-    // ---- Deutsch: "Begleiter" alleine (Fallback, zuletzt) ----
-    /\bbegleiter\b/,
-    /\bjackson\b/,
-
-    // ---- Russisch: Эй, спутник / Эй, друг ----
-    /эй\s+спутник/,        // ej sputnik
-    /привет\s+спутник/,    // priwet sputnik
-    /эй\s+друг/,           // ej drug
-    /эй\s+помощник/,       // ej pomoschtschnik
-    /спутник/,             // sputnik (alleine)
-    /проснись/,            // prosnis' = wach auf
-    /ты\s+здесь/,          // ty sdes' = bist du da
+    /\bwach\s+(bitte\s+)?auf\b/, /\baufwachen\b/,
+    /\bbist\s+du\s+(noch\s+)?da\b/, /\bmelde\s+dich\b/,
+    /\bbegleiter\b/, /\bjackson\b/,
+    /эй\s+спутник/, /привет\s+спутник/, /эй\s+друг/, /эй\s+помощник/,
+    /спутник/, /проснись/, /ты\s+здесь/,
   ];
 
   return patterns.some(p => p.test(t));
@@ -173,7 +149,6 @@ async function updateHomeIfNeeded(userId) {
     `, [userId]);
 
     if (result.rows.length === 0) return;
-
     const { rlat, rlon, nights } = result.rows[0];
     if (nights < 3) return;
 
@@ -224,26 +199,19 @@ export async function detectMode(userId, imuState, lat, lon, lastUserText, curre
   const hour = new Date().getHours();
   const isNight = hour >= 22 || hour < 7;
 
-  // 1. Explizite Befehle (HÖCHSTE Priorität – auch im Silent)
   if (lastUserText) {
-    // Wake-Word hat Vorrang (aus Silent raus)
     if (matchesWakeWord(lastUserText)) {
       console.log(`👂 Wake-Word erkannt in: "${lastUserText}"`);
       return 'normal';
     }
-    // Silent-Trigger
     if (matchesSilentTrigger(lastUserText)) {
       console.log(`🤫 Silent-Trigger erkannt in: "${lastUserText}"`);
       return 'silent';
     }
   }
 
-  // 2. Wenn bereits SILENT → bleib silent (bis Wake-Word)
-  if (currentMode === 'silent') {
-    return 'silent';
-  }
+  if (currentMode === 'silent') return 'silent';
 
-  // 3. Nacht-Logik (Zeit + Bewegung + Ort)
   if (isNight) {
     if (imuState === 'walking' || imuState === 'running' || imuState === 'driving') {
       return 'normal';
@@ -254,6 +222,5 @@ export async function detectMode(userId, imuState, lat, lon, lastUserText, curre
     }
   }
 
-  // 4. Standard
   return 'normal';
 }
