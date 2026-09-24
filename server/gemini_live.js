@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const GEMINI_VOICE = 'Kore';
+const GEMINI_VOICE = 'Charon';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -250,7 +250,7 @@ export async function createGeminiSession(clientWs, userProfile) {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: GEMINI_VOICE },
+          prebuiltVoiceConfig: { voiceName: 'Charon' },
         },
       },
       systemInstruction: { parts: [{ text: systemInstruction }] },
