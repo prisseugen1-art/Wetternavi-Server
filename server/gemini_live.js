@@ -15,8 +15,8 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 // ==================== PROAKTIV-INTERVALLE ====================
 
 const PROACTIVE_INTERVALS = {
-  party: 45000,    // Party: 45s Stille → Spruch
-  freund: 90000,   // Freund: 90s Stille → sanfte Frage
+  party: 15000,    // Party: 15s Stille → Spruch
+  freund: 45000,   // Freund: 45s Stille → sanfte Frage
   berater: 0,      // Berater: NIE proaktiv
 };
 
