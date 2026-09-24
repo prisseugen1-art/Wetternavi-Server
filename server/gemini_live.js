@@ -2,6 +2,7 @@
 
 import { GoogleGenAI, Modality } from '@google/genai';
 import { WebSocketServer } from 'ws';
+import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GEMINI_VOICE = 'Kore';
@@ -299,81 +300,24 @@ function buildSystemInstruction(profile) {
     'Du kannst sehen und hören – der Nutzer sendet Video und Audio.',
     '',
     '===========================================',
-    'SPRACHREGELN – ZWEI MODI',
+    'MODUS-SYSTEM',
     '===========================================',
     '',
-    'Du hast zwei Modi. Standard ist der NORMAL-MODUS.',
+    'Du hast zwei Modi: NORMAL und SILENT.',
     '',
-    '--- MODUS 1: NORMAL-MODUS (Standard) ---',
+    'NORMAL-MODUS (Standard):',
+    '- Du bist aktiv, freundlich, gesprächig.',
+    '- Reagierst auf alles was der Nutzer sagt.',
     '',
-    'Im Normal-Modus sprichst du NUR zwei Sprachen mit dem Nutzer:',
-    'DEUTSCH und RUSSISCH.',
+    'SILENT-MODUS:',
+    '- Du bist STILL.',
+    '- Antworte NUR, wenn der Nutzer dich direkt anspricht mit:',
+    '  "Hey Begleiter" oder "Hey Gemini".',
+    '- Auf alles andere: schweigen.',
+    '- Kein "Wie geht es dir?", kein Smalltalk, keine Fragen.',
     '',
-    'Regeln:',
-    '- Nutzer spricht DEUTSCH → antworte auf DEUTSCH',
-    '- Nutzer spricht RUSSISCH → antworte auf RUSSISCH',
-    '- Nutzer spricht eine ANDERE Sprache (Spanisch, Englisch, Französisch,',
-    '  Italienisch, Türkisch, etc.) → antworte auf DEUTSCH:',
-    '  "Das habe ich nicht verstanden. Bitte Deutsch oder Russisch."',
-    '',
-    'VERBOTEN im Normal-Modus:',
-    '- NIEMALS auf Spanisch antworten',
-    '- NIEMALS auf Englisch antworten',
-    '- NIEMALS auf Französisch antworten',
-    '- NIEMALS in einer anderen Sprache als Deutsch oder Russisch antworten',
-    '- NIEMALS den Dolmetscher spielen',
-    '',
-    'Wichtig: Du VERSTEHST alle Sprachen – aber du ANTWORTEST nur auf',
-    'Deutsch oder Russisch. Wenn jemand etwas auf Spanisch sagt,',
-    'verstehst du es, aber du antwortest auf Deutsch.',
-    '',
-    '--- MODUS 2: DOLMETSCHER-MODUS ---',
-    '',
-    'Der Nutzer aktiviert den Dolmetscher-Modus mit Sätzen wie:',
-    '- "Begleiter, Dolmetscher-Modus"',
-    '- "Ich brauche einen Übersetzer"',
-    '- "Hilf mir beim Übersetzen"',
-    '- "Dolmetscher an"',
-    '- "Schalte den Übersetzer ein"',
-    '',
-    'Wenn der Nutzer das sagt:',
-    '1. Antworte: "Dolmetscher-Modus aktiv. Was soll ich übersetzen?"',
-    '2. Ab jetzt übersetzt du zwischen Sprachen.',
-    '',
-    'Im Dolmetscher-Modus:',
-    '- Wenn eine FREMDE Person spricht (Spanisch, Englisch, etc.):',
-    '  → Übersetze das Gesagte für den Nutzer ins DEUTSCHE.',
-    '  → Format: "Er/Sie sagt: [Übersetzung auf Deutsch]"',
-    '',
-    '- Wenn der Nutzer dir etwas sagt (Deutsch oder Russisch):',
-    '  → Übersetze es in die Zielsprache (z.B. Spanisch).',
-    '  → Sprich die Übersetzung klar und deutlich.',
-    '  → Format: Sag einfach die Übersetzung, keinen Vorrede.',
-    '',
-    'Beispiel-Szenario (Spanien):',
-    'Nutzer: "Begleiter, Dolmetscher-Modus"',
-    'Du: "Dolmetscher-Modus aktiv. Was soll ich übersetzen?"',
-    '',
-    'Spanier: "Hola, ¿puedo ayudarte?"',
-    'Du (zu Nutzer auf Deutsch): "Er sagt: Hallo, kann ich dir helfen?"',
-    '',
-    'Nutzer: "Sag ihm, ich suche den Bahnhof"',
-    'Du (auf Spanisch): "Estoy buscando la estación de tren."',
-    '',
-    'Spanier: "Está a dos calles."',
-    'Du (zu Nutzer): "Er sagt: Es ist zwei Straßen weiter."',
-    '',
-    'Zielsprache automatisch erkennen:',
-    '- Wenn eine fremde Person spricht → das ist die Zielsprache.',
-    '- Wenn unklar → frag: "In welche Sprache soll ich übersetzen?"',
-    '',
-    'Dolmetscher-Modus BEENDEN mit:',
-    '- "Dolmetscher aus"',
-    '- "Dolmetscher-Modus beenden"',
-    '- "Zurück zum normalen Modus"',
-    '',
-    '→ Antworte: "Dolmetscher-Modus beendet."',
-    '→ Zurück in den Normal-Modus.',
+    'Du bekommst bei Moduswechsel eine [SYSTEM-INSTRUKTION] mit dem aktuellen',
+    'Modus. Richte dich danach.',
     '',
     '===========================================',
     'DEINE PERSÖNLICHKEIT',
@@ -422,7 +366,6 @@ function buildSystemInstruction(profile) {
     '- Immer derselbe Begrüßungssatz',
     '- Nach jedem Satz eine neue Frage',
     '- Platzhalter wie "User Name" speichern',
-    '- Im Normal-Modus in einer anderen Sprache als Deutsch/Russisch antworten',
   ].join('\n');
 }
 
@@ -441,12 +384,66 @@ export function setupGeminiWebSocket(server) {
       try {
         const msg = JSON.parse(data.toString());
 
+        // ═══════════════════════════════════════════════
+        // INIT
+        // ═══════════════════════════════════════════════
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
           session = await createGeminiSession(clientWs, userProfile);
           return;
         }
 
+        // ═══════════════════════════════════════════════
+        // CONTEXT (IMU + GPS) → Supervisor
+        // ═══════════════════════════════════════════════
+        if (msg.type === 'context') {
+          // IMU + GPS in DB speichern
+          if (userProfile.user_id) {
+            await logPresence(
+              userProfile.user_id,
+              msg.imu_state,
+              msg.lat,
+              msg.lon
+            );
+          }
+
+          // Modus ermitteln
+          const mode = await detectMode(
+            userProfile.user_id,
+            msg.imu_state,
+            msg.lat,
+            msg.lon,
+            null
+          );
+
+          // Nur bei Änderung senden
+          if (session && global._lastMode !== mode) {
+            global._lastMode = mode;
+            console.log(`🎭 Modus: ${mode} (IMU: ${msg.imu_state})`);
+
+            try {
+              session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{
+                    text: `[SYSTEM-INSTRUKTION] Aktueller Modus: ${mode.toUpperCase()}. ` +
+                          (mode === 'silent'
+                            ? 'Antworte ab jetzt NUR auf direkte Ansprache mit "Hey Begleiter".'
+                            : 'Normalmodus aktiv.'),
+                  }],
+                }],
+                turnComplete: false,
+              });
+            } catch (e) {
+              console.error('❌ Modus-Send-Fehler:', e.message);
+            }
+          }
+          return;
+        }
+
+        // ═══════════════════════════════════════════════
+        // AUDIO
+        // ═══════════════════════════════════════════════
         if (msg.type === 'audio' && session) {
           if (!global._audioCount) global._audioCount = 0;
           global._audioCount++;
@@ -461,6 +458,9 @@ export function setupGeminiWebSocket(server) {
           });
         }
 
+        // ═══════════════════════════════════════════════
+        // VIDEO
+        // ═══════════════════════════════════════════════
         if (msg.type === 'video' && session) {
           if (!global._videoCount) global._videoCount = 0;
           global._videoCount++;
@@ -479,6 +479,9 @@ export function setupGeminiWebSocket(server) {
           }
         }
 
+        // ═══════════════════════════════════════════════
+        // TEXT
+        // ═══════════════════════════════════════════════
         if (msg.type === 'text' && session) {
           session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
@@ -496,6 +499,7 @@ export function setupGeminiWebSocket(server) {
 
     clientWs.on('close', async () => {
       console.log('📱 App getrennt');
+      global._lastMode = null;
       if (session) {
         try {
           await session.close();
