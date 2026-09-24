@@ -101,16 +101,14 @@ function matchesWakeWord(text) {
     /\baufwachen\b/,
     /\bbist\s+du\s+(noch\s+)?da\b/,
     /\bmelde\s+dich\b/,
-    /\bjony\b/,          // Fallback: "Jony" allein
-    /\bjackson\b/,       // Fallback: "Jackson" allein
-
+        // Fallbacks entfernt – "Jony" allein reicht nicht mehr.
+    // Nur explizite Wake-Formulierungen wecken.
     // ---- Russisch (kyrillisch) ----
     /эй\s+джони/,        // ej dschoni
     /эй\s+джексон/,      // ej dschekson
     /привет\s+джони/,    // priwet dschoni
     /привет\s+джексон/,  // priwet dschekson
-    /джони/,             // dschoni (allein)
-    /джексон/,           // dschekson (allein)
+       
     /эй\s+друг/,         // ej drug (hey Freund)
     /эй\s+брат/,         // ej brat (hey Bruder)
     /эй\s+спутник/,      // ej sputnik (hey Begleiter)

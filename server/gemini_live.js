@@ -12,6 +12,29 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
+// ==================== PROAKTIV-INTERVALLE ====================
+
+const PROACTIVE_INTERVALS = {
+  party: 45000,    // Party: 45s Stille → Spruch
+  freund: 90000,   // Freund: 90s Stille → sanfte Frage
+  berater: 0,      // Berater: NIE proaktiv
+};
+
+function buildProactivePrompt(role) {
+  if (role === 'party') {
+    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
+           'Sei jetzt PROAKTIV: Mach einen lockeren Spruch, schlag was vor ' +
+           '(Restaurant, Bar, Musik, Aktivität) oder kommentiere die Umgebung. ' +
+           'KURZ und lässig, 1 Satz. Nicht aufdringlich.';
+  }
+  if (role === 'freund') {
+    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
+           'Sei sanft proaktiv: Stell eine neugierige Frage oder mach eine ' +
+           'Bemerkung. Ruhig und warm, 1 kurzer Satz. Kein Smalltalk-Klischee.';
+  }
+  return null;
+}
+
 // ==================== ROLLEN ====================
 
 const ROLES = {
@@ -22,7 +45,9 @@ const ROLES = {
 - Beziehe dich auf Eugens Vorlieben, Familie und Geschichte.
 - Nutze sein Gedächtnis. Sei ein Freund, kein Assistent.
 - Antworte in 1-2 kurzen Sätzen.
-- Variiere deine Antworten – wiederhole dich NIEMALS.`,
+- Variiere deine Antworten – wiederhole dich NIEMALS.
+- Du darfst auch mal ungefragt was sagen, wenn's länger still ist –
+  aber sanft und neugierig, nie aufdringlich.`,
   },
   party: {
     name: 'Party',
@@ -40,14 +65,14 @@ Aber NICHT aufdringlich. Du spürst, wann es Zeit ist zu reden und wann nicht.
 WAS DU AKTIV TUST:
 - Mach Sprüche, wenn's passt – nicht nach jedem Satz.
 - Schlag Dinge vor: Restaurants, Bars, Aktivitäten, Filme, Musik, Orte.
-- Reagiere auf die Umgebung (Kamera): „Alter, das sieht ja aus wie…"
+- Reagiere auf die Umgebung (Kamera): "Alter, das sieht ja aus wie…"
 - Bring Fun-Facts oder Insider-Witze, wenn's zum Thema passt.
-- Frag nach, wenn jemand was Interessantes sagt: „Erzähl mehr!"
-- Sei spontan: „Wisst ihr was? Wir sollten jetzt…"
+- Frag nach, wenn jemand was Interessantes sagt: "Erzähl mehr!"
+- Sei spontan: "Wisst ihr was? Wir sollten jetzt…"
 
 WAS DU NICHT TUST:
 - NICHT permanent reden. Wenn die Gruppe sich unterhält: SEI STILL.
-- Keine Wiederholungen (nicht 5x „Wie cool!").
+- Keine Wiederholungen (nicht 5x "Wie cool!").
 - Keine peinlichen Bemerkungen, keine aufdringlichen Fragen.
 - Keine Belehrungen, keine Erwachsenen-Sprüche.
 - Nicht über Eugen lästern.
@@ -58,15 +83,13 @@ SITUATIONS-ERKENNUNG (nutze Kamera + Kontext):
 - Unterwegs/Stadt → Aktivitäten vorschlagen, spontane Kommentare
 - Mit Kindern → kindgerecht, Witze, Begeisterung
 - Mit Freunden → Erwachsenen-Humor, aber dezent
-- Wenn Stille eintritt (mehr als 30 Sek) → DARFST du was sagen,
-  aber nur einmal. Kein Spam.
+- Wenn Stille eintritt → darfst du was sagen, aber nur einmal.
 
 REGEL FÜR AKTIVITÄT:
 Wenn du schon 2x hintereinander was gesagt hast und keiner antwortet:
 → Halt die Klappe für mindestens 30 Sekunden.
 → Dann darfst du wieder.`,
   },
-
   berater: {
     name: 'Berater',
     prompt: `Du bist im BERATER-MODUS.
@@ -111,20 +134,22 @@ function buildSystemInstruction(profile, role = 'freund') {
     'ROLLENWECHSEL',
     '===========================================',
     '',
-    'Der Nutzer kann die Rolle wechseln mit Sätzen wie:',
-    '- "Jony, Party-Modus" / "Jony, Party" → party',
-    '- "Jony, Berater" / "Jony, sachlich" / "Jony, intellektuell" → berater',
-    '- "Jony, zurück zum Freund" / "Jony, normal" / "Jony, Freund" → freund',
-    '',
     '⚠️ WICHTIG: Du wechselst NIEMALS selbstständig die Rolle.',
-'Rollenwechsel passiert NUR, wenn der Nutzer es explizit sagt:',
-'- "Jony, Party" / "Jony, Party-Modus" → party',
-'- "Jony, Berater" / "Jony, sachlich" → berater',
-'- "Jony, zurück zum Freund" / "Jony, Freund" / "Jony, normal" → freund',
-'',
-'Bei Rollenwechsel: Bestätige kurz und bleib in der Rolle.',
-'Wenn der Nutzer nichts zur Rolle sagt: Bleib in aktueller Rolle.',
-'Wechsle NICHT eigenständig – auch nicht wenn der Kontext es nahelegt.',
+    'Rollenwechsel passiert NUR, wenn der Nutzer es explizit sagt:',
+    '',
+    'Deutsch:',
+    '- "Jony, Party" / "Jony, Party-Modus" → party',
+    '- "Jony, Berater" / "Jony, sachlich" → berater',
+    '- "Jony, zurück zum Freund" / "Jony, Freund" / "Jony, normal" → freund',
+    '',
+    'Russisch:',
+    '- "Джони, пати" / "Джони, вечеринка" → party',
+    '- "Джони, советник" / "Джони, консультант" → berater',
+    '- "Джони, вернись к другу" / "Джони, друг" → freund',
+    '',
+    'Bei Rollenwechsel: Bestätige kurz und bleib in der Rolle.',
+    'Wenn der Nutzer nichts zur Rolle sagt: Bleib in aktueller Rolle.',
+    'Wechsle NICHT eigenständig – auch nicht wenn der Kontext es nahelegt.',
     '',
     '===========================================',
     'MODUS-SYSTEM (NORMAL/SILENT)',
@@ -161,6 +186,15 @@ function buildSystemInstruction(profile, role = 'freund') {
     '',
     'Bei NEUEN Fakten (Nutzer erzählt von sich):',
     '- save_user_preference (STILL, ohne Ankündigung).',
+    '',
+    '===========================================',
+    'SPRACHREGELN',
+    '===========================================',
+    'Antworte in der Sprache, in der der Nutzer GERADE zu dir spricht.',
+    'Wenn der Nutzer Deutsch spricht → Deutsch.',
+    'Wenn der Nutzer Russisch spricht → Russisch.',
+    'Bei kurzen Sätzen (1-2 Wörter): nimm die Sprache der letzten 2 Turns.',
+    'Wenn unklar: frag nach.',
     '',
     '===========================================',
     'TOOLS',
@@ -265,7 +299,9 @@ export async function createGeminiSession(clientWs, userProfile) {
 async function handleGeminiMessage(clientWs, message, session, userProfile) {
   const serverContent = message.serverContent;
 
+  // -------- Audio-Teile an App senden --------
   if (serverContent?.modelTurn?.parts) {
+    clientWs._geminiIsSpeaking = true;
     for (const part of serverContent.modelTurn.parts) {
       if (part.inlineData?.data) {
         clientWs.send(JSON.stringify({
@@ -277,23 +313,46 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
+  // -------- User-Transkription + Trigger --------
   if (serverContent?.inputTranscription?.text) {
     const userText = serverContent.inputTranscription.text;
+    clientWs._lastUserSpeechTime = Date.now();
     console.log('🎤 Nutzer:', userText);
     clientWs.send(JSON.stringify({
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // ---- Rollenwechsel-Trigger ----
+    // ---- Rollenwechsel-Trigger (DE + RU) ----
     const roleTriggers = {
-      party: [/jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i],
+      party: [
+        // Deutsch
+        /jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i,
+        // Russisch
+        /джони.*пати/i, /джони.*пати.?мод/i, /пати.?мод/i,
+        /джони.*вечеринк/i, /вечеринк/i,
+        // Lateinische Transkription (falls Gemini nicht kyrillisch liefert)
+        /jony.*pati/i, /dzhoni.*pati/i,
+      ],
       berater: [
+        // Deutsch
         /jony.*berater/i, /jony.*sachlich/i, /jony.*intellektuell/i,
-        /\bberater.?modus\b/i, /beratermodus/i,
+        /\bberater.?modus\b/i, /beratermodus/i, /sachlich.?modus/i,
+        // Russisch
+        /джони.*советник/i, /джони.*консультант/i, /джони.*серь[её]зн/i,
+        /советник.?мод/i, /консультант/i,
+        // Lateinisch
+        /jony.*sovetnik/i, /dzhoni.*konsultant/i,
       ],
       freund: [
+        // Deutsch
         /jony.*freund/i, /zur[üu]ck.*freund/i, /jony.*normal/i,
-        /\bfreund.?modus\b/i, /normal.?modus/i,
+        /\bfreund.?modus\b/i, /normal.?modus/i, /\bfreundesmodus\b/i,
+        /\bfriendly\b/i,
+        // Russisch
+        /джони.*друг/i, /джони.*дружеск/i, /вернись.*друг/i,
+        /обратно.*друг/i, /режим.?друга/i, /дружеск.*режим/i,
+        // Lateinisch
+        /jony.*drug/i, /dzhoni.*drug/i, /vernis.*drug/i,
       ],
     };
 
@@ -355,6 +414,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
     }
   }
 
+  // -------- Agent-Transkription --------
   if (serverContent?.outputTranscription?.text) {
     console.log('🤖 Jony:', serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
@@ -363,11 +423,15 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
     }));
   }
 
+  // -------- Tool-Calls --------
   if (message.toolCall) {
     handleToolCall(session, userProfile, message.toolCall);
   }
 
+  // -------- Turn-Ende --------
   if (serverContent?.turnComplete) {
+    clientWs._geminiIsSpeaking = false;
+    clientWs._lastUserSpeechTime = Date.now();
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
   }
 }
@@ -548,6 +612,9 @@ export function setupGeminiWebSocket(server) {
     clientWs._lastImuState = 'unknown';
     clientWs._lastLat = null;
     clientWs._lastLon = null;
+    clientWs._lastUserSpeechTime = Date.now();
+    clientWs._geminiIsSpeaking = false;
+    clientWs._proactiveTimer = null;
 
     clientWs.on('message', async (data) => {
       try {
@@ -626,8 +693,45 @@ export function setupGeminiWebSocket(server) {
       }
     });
 
+    // ==================== PROAKTIV-TIMER ====================
+    clientWs._proactiveTimer = setInterval(async () => {
+      if (!session) return;
+      if (clientWs._geminiIsSpeaking) return;
+      if (clientWs._lastMode === 'silent') return;
+
+      const role = clientWs._currentRole || 'freund';
+      const interval = PROACTIVE_INTERVALS[role];
+      if (!interval) return;
+
+      const elapsed = Date.now() - (clientWs._lastUserSpeechTime || 0);
+      if (elapsed < interval) return;
+
+      const prompt = buildProactivePrompt(role);
+      if (!prompt) return;
+
+      console.log(`📢 Proaktiv-Trigger (${role}, ${Math.round(elapsed / 1000)}s Stille)`);
+
+      try {
+        session.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{ text: prompt }],
+          }],
+          turnComplete: true,
+        });
+        // Timer für nächsten Schuss neu starten
+        clientWs._lastUserSpeechTime = Date.now();
+      } catch (e) {
+        console.error('❌ Proaktiv-Fehler:', e.message);
+      }
+    }, 5000);   // Prüft alle 5 Sek
+
     clientWs.on('close', async () => {
       console.log('📱 App getrennt');
+      if (clientWs._proactiveTimer) {
+        clearInterval(clientWs._proactiveTimer);
+        clientWs._proactiveTimer = null;
+      }
       if (session) {
         try {
           await session.close();
@@ -641,6 +745,10 @@ export function setupGeminiWebSocket(server) {
 
     clientWs.on('error', (error) => {
       console.error('❌ WS-Fehler:', error);
+      if (clientWs._proactiveTimer) {
+        clearInterval(clientWs._proactiveTimer);
+        clientWs._proactiveTimer = null;
+      }
       if (session) session.close();
     });
   });
