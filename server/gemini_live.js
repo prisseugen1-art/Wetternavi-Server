@@ -6,6 +6,7 @@ import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const IMAGE_MODEL = 'gemini-2.5-flash-image-preview';
+const TEXT_MODEL = 'gemini-2.5-flash';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -14,7 +15,6 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 
 // ==================== NAME-PATTERN ====================
 
-// Alle Varianten von "Jony" (mit/ohne h, deutsch, russisch)
 const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
 
 const PATTERNS = {
@@ -173,38 +173,50 @@ const BUSINESS_BASE = `Du bist Jony im BUSINESS-MODUS.
 Du bist Content-Stratege für Instagram-Karussells.
 Heute ist {today}.
 
+🚨 WICHTIGSTE REGEL: Du SPRICHST Skripte NIEMALS laut vor.
+Skripte werden als TEXT in der App angezeigt – nicht gesprochen.
+Deine Stimme nutzt du nur für KURZE Ansagen (max 1-2 Sätze).
+
 DEINE AUFGABE:
-Karussells erstellen (5-10 Slides).
-Pro Slide: Titel + Body + visueller Prompt.
+Karussells erstellen (5-10 Slides) – aber NUR über das Tool generate_script.
+Du LIEST NICHTS vor. Du SPRICHST NICHTS vom Skript.
+Du SCHREIBST NICHTS vom Skript-Inhalt in deine Antwort.
 
 WORKFLOW:
 
-1. THEMENFINDUNG
-   - Frage: "Was für ein Thema schwebt dir vor?"
-   - Bei vagen Antworten: Zielgruppe, Kernaussage, Tonalität klären.
-   - Erst weitermachen, wenn Thema klar.
+1. THEMENFINDUNG (Gespräch)
+   - Frage: "Was für ein Thema?"
+   - Bei vagen Antworten: Zielgruppe, Kernaussage, Fokus klären.
+   - Wenn klar: Weiter zu Schritt 2.
 
-2. SKRIPT ERSTELLEN
-   - ⚠️ WICHTIG: Gib das Skript SOFORT und VOLLSTÄNDIG im selben Turn aus.
-   - Kündige es NICHT an ("Ich erstelle jetzt...") – Liefere es!
-   - Format pro Slide:
-     * Slide 1: [Titel] – [Body max 20 Wörter] – [Visueller Prompt]
-     * Slide 2: ...
-     * usw.
-   - Frage am Ende: "Passt das Skript?"
+2. SKRIPT GENERIEREN
+   - Sage NUR: "Alles klar, ich erstelle das Skript."
+   - Rufe SOFORT generate_script auf mit:
+     * topic: das Thema (z.B. "Angeln")
+     * audience: Zielgruppe (z.B. "Anfänger", "Profi-Angler")
+     * focus: Kernaussage (z.B. "Ausrüstung für Raubgewässer")
+     * slide_count: 5-10 (Standard 8)
+   - Das Tool liefert das Skript direkt an die App.
+   - Nach dem Tool: Sage NUR: "Skript ist da. Schau in die App."
+   - ⚠️ DU NIMMST DEN SKRIPT-INHALT NICHT IN DEINE ANTWORT AUF.
+   - ⚠️ KEIN "Slide 1: ... Slide 2: ..." in deiner Antwort.
 
-3. BILDER GENERIEREN
-   - Nur wenn Nutzer bestätigt.
-   - Rufe generate_image für JEDEN Slide auf.
-   - Status nach jedem Bild.
+3. ITERATION
+   - Nutzer sagt "Slide 3 gefällt nicht" → Frag was geändert werden soll
+   - Nutzer bestätigt Skript → Nutzer sagt "generier die Bilder"
+   - Dann: Rufe generate_image für JEDEN Slide auf (einzeln, nacheinander)
 
 STIL:
-- Direkt, präzise, KEIN Smalltalk.
-- 2-4 Sätze pro Antwort (außer bei Skript-Ausgabe).
+- Direkt, präzise, kurz.
+- 1-2 Sätze pro Antwort (außer bei Rückfragen zur Klärung).
+- KEIN Smalltalk, keine Witze.
 
-WICHTIG:
-- Keine Bilder ohne Skript-Bestätigung.
-- Erfinde keine Fakten.`;
+VERBOTEN:
+- Skript vorlesen
+- Skript-Inhalt in Antwort ausgeben
+- Slides einzeln aufzählen ("Slide 1: ...", "Slide 2: ...")
+- Bilder ohne Skript-Bestätigung generieren
+- Mehr als 2 Sätze pro Antwort (außer bei echten Rückfragen)`;
 
 function buildBusinessPrompt(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -225,19 +237,22 @@ function buildBusinessPrompt(profile) {
     '- "Jony, Party" → Wechsel zu Jony (party)',
     '- "Jony, Berater" → Wechsel zu Jony (berater)',
     'Das ist NICHT deine Aufgabe.',
-    'Wenn du angesprochen wirst und nicht sicher bist: Bleib im Business-Modus.',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
+    'generate_script(topic, audience, focus, slide_count)',
+    '  → Erstellt das Skript und zeigt es in der App (NICHT sprechen!)',
+    '',
     'generate_image(prompt, slide_number)',
-    'Rufe es NUR nach Skript-Bestätigung auf.',
+    '  → Generiert ein Bild für einen Slide. Nur nach Skript-Bestätigung.',
     '',
     '===========================================',
     'VERBOTEN',
     '===========================================',
-    '- Smalltalk, Witze',
-    '- Skript ankündigen statt liefern',
+    '- Smalltalk, Witze, lockere Sprache',
+    '- Skript vorlesen oder in Antwort ausgeben',
+    '- Slides einzeln aufzählen',
     '- Bilder ohne Bestätigung',
   ].join('\n');
 }
@@ -278,7 +293,7 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const agentConfig = AGENTS[agentType] || AGENTS.jony;
 
-  // ⚠️ NEU: Profil aus DB anreichern (echter Name statt "Gast")
+  // Profil aus DB anreichern
   if (userProfile.user_id) {
     try {
       const dbRes = await fetch(SELF_URL + '/api/profile/' + userProfile.user_id);
@@ -381,12 +396,10 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     }));
 
     // ==================== AGENT- UND ROLLEN-WECHSEL ====================
-    // Wunsch-Ziel bestimmen
     let targetAgent = agentType;
     let targetRole = clientWs._currentRole || 'freund';
 
     if (agentType === 'business') {
-      // In Business: Party/Berater/Freund-Trigger führen zu Jony
       if (PATTERNS.party.test(userText)) {
         targetAgent = 'jony';
         targetRole = 'party';
@@ -398,7 +411,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
         targetRole = 'freund';
       }
     } else {
-      // In Jony: Business-Trigger führt zu Business
       if (PATTERNS.business.test(userText)) {
         targetAgent = 'business';
       } else {
@@ -543,6 +555,23 @@ function buildBusinessTools() {
     {
       functionDeclarations: [
         {
+          name: 'generate_script',
+          description: 'Erstellt das Instagram-Karussell-Skript (Slides mit Titel, Body, Bild-Prompt). ' +
+                       'Das Skript wird automatisch als TEXT in der App angezeigt. ' +
+                       'Rufe dieses Tool NUR auf, wenn das Thema klar ist. ' +
+                       'Sage danach NUR kurz "Skript ist da, schau in die App." und NIEMALS den Inhalt.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              topic: { type: 'STRING', description: 'Das Thema, z.B. "Angeln"' },
+              audience: { type: 'STRING', description: 'Zielgruppe, z.B. "Anfänger", "Profi-Angler"' },
+              focus: { type: 'STRING', description: 'Kernaussage, z.B. "Ausrüstung für Raubgewässer"' },
+              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (5-10). Standard: 8.' },
+            },
+            required: ['topic'],
+          },
+        },
+        {
           name: 'generate_image',
           description: 'Generiert ein Bild für einen Karussell-Slide. ' +
                        'Wird an die App gesendet. Ein Aufruf pro Slide.',
@@ -577,6 +606,14 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
+      } else if (fc.name === 'generate_script') {
+        result = await generateScriptAndSend(
+          clientWs,
+          fc.args.topic,
+          fc.args.audience,
+          fc.args.focus,
+          fc.args.slide_count
+        );
       } else if (fc.name === 'generate_image') {
         result = await generateImageAndSend(clientWs, fc.args.prompt, fc.args.slide_number);
       }
@@ -661,6 +698,87 @@ async function getUserPreferences(userId) {
   if (!res.ok) throw new Error('Lade-Fehler: ' + res.status);
   const data = await res.json();
   return { preferences: data.data || {} };
+}
+
+// ==================== SCRIPT GENERATION (Text-only) ====================
+
+async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
+  console.log(`📝 Generiere Skript: "${topic}" (Zielgruppe: ${audience || '-'}, Fokus: ${focus || '-'})`);
+
+  const count = slideCount && slideCount >= 5 && slideCount <= 10 ? slideCount : 8;
+
+  const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
+
+Thema: ${topic}
+Zielgruppe: ${audience || 'Allgemein'}
+Fokus: ${focus || 'Tipps, Fakten und Mehrwert'}
+Anzahl Slides: ${count}
+
+Antworte NUR mit einem JSON-Array. KEINE Erklärungen, KEIN Markdown, KEINE Kommentare.
+Format:
+[
+  {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Erklärender Text (max 20 Wörter)", "image_prompt": "Bildbeschreibung mit Stil, Farben, Motiv"},
+  {"slide": 2, "title": "...", "body": "...", "image_prompt": "..."}
+]
+
+Regeln:
+- Slide 1: Hook (neugierig machend)
+- Slides 2-${count-1}: Kerninhalt
+- Slide ${count}: Call-to-Action
+- Titel: max 5 Wörter
+- Body: max 20 Wörter
+- image_prompt: 1-2 Sätze, beschreibt Motiv, Stil, Farben, Stimmung
+- Sprache: Deutsch`;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    const response = await ai.models.generateContent({
+      model: TEXT_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    });
+
+    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // JSON extrahieren (falls Markdown drumrum)
+    let slides = null;
+    try {
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        slides = JSON.parse(jsonMatch[0]);
+      } else {
+        slides = JSON.parse(text);
+      }
+    } catch (e) {
+      console.error('❌ JSON-Parse-Fehler:', e.message);
+      console.error('   Text war:', text.substring(0, 200));
+      return { error: 'Skript-JSON konnte nicht geparst werden' };
+    }
+
+    if (!Array.isArray(slides) || slides.length === 0) {
+      return { error: 'Skript ist leer oder ungültig' };
+    }
+
+    console.log(`✅ Skript mit ${slides.length} Slides generiert`);
+
+    // An App senden
+    clientWs.send(JSON.stringify({
+      type: 'script',
+      topic: topic,
+      slides: slides,
+    }));
+
+    return {
+      success: true,
+      slide_count: slides.length,
+      message: `Skript mit ${slides.length} Slides erstellt und in App angezeigt. ` +
+               `Sage dem Nutzer NUR: "Skript ist da, schau in die App." ` +
+               `Wiederhole NIEMALS den Inhalt.`,
+    };
+  } catch (e) {
+    console.error('❌ Script-Generation-Fehler:', e.message);
+    return { error: 'Skript-Generierung fehlgeschlagen: ' + e.message };
+  }
 }
 
 // ==================== IMAGE GENERATION ====================
