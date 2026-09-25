@@ -810,44 +810,6 @@ NUR das JSON.`;
 // ==================== IMAGE GENERATION (Cloudflare Workers AI) ====================
 
 /**
- * Wartet N ms
- */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Übersetzt deutschen Prompt ins Englische (FLUX versteht Englisch besser).
- */
-async function translateToEnglishImagePrompt(germanPrompt) {
-  try {
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: 'Du übersetzt deutsche Bildbeschreibungen in präzise englische ' +
-                   'Bildgenerierungs-Prompts. Antworte NUR mit dem englischen Prompt ' +
-                   'in EINER Zeile. Keine Erklärungen. Füge KEINE Marken/Namen hinzu.'
-        },
-        {
-          role: 'user',
-          content: `Übersetze für ein realistisches Foto:\n${germanPrompt}`
-        }
-      ],
-      model: 'openai/gpt-oss-20b',
-      temperature: 0.3,
-    });
-
-    const translated = completion.choices[0]?.message?.content?.trim() || germanPrompt;
-    console.log(`   🌐 Übersetzt: "${translated.substring(0, 100)}..."`);
-    return translated;
-  } catch (e) {
-    console.log(`   ⚠️ Übersetzung fehlgeschlagen, nutze Original: ${e.message}`);
-    return germanPrompt;
-  }
-}
-
-/**
  * Generiert ein Bild über Cloudflare Workers AI (FLUX.1-schnell).
  */
 async function generateImageWithCloudflare(englishPrompt) {
@@ -860,9 +822,7 @@ async function generateImageWithCloudflare(englishPrompt) {
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
 
-  const seed = Math.floor(Math.random() * 1000000);
-
-  console.log(`   Cloudflare Request (Seed: ${seed})...`);
+  console.log(`   Cloudflare Request...`);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -872,8 +832,7 @@ async function generateImageWithCloudflare(englishPrompt) {
     },
     body: JSON.stringify({
       prompt: englishPrompt,
-      seed: seed,
-      steps: 4,
+      steps: 4,  // 4 ist Standard und schnell, max. 8 für bessere Qualität
     }),
   });
 
