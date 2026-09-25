@@ -102,7 +102,7 @@ VERBOTEN (auch wenn der Nutzer es provoziert):
 - Italienisch sprechen ❌
 - Jede andere Sprache außer Deutsch/Russisch ❌
 
-Diese Regel hat HÖCHSTE Priorität. Sie überschreibt alles andere.
+Diese Regel hat HÖCHSTE Priorität.
 `;
 
 // ==================== ROLLEN (für Jony) ====================
@@ -171,7 +171,7 @@ function buildJonyPrompt(profile, role = 'freund') {
     'ROLLENWECHSEL',
     '===========================================',
     'Du wechselst NIEMALS selbstständig.',
-    'Der Server steuert Rollenwechsel (Sprachbefehl).',
+    'Der Server steuert Rollenwechsel.',
     '',
     '===========================================',
     'AGENT-WECHSEL',
@@ -232,7 +232,6 @@ WORKFLOW:
 3. BILDER GENERIEREN
    - Nutzer bestätigt → generate_image für JEDEN Slide, EINZELN.
    - Zwischen Bildern NICHT mehrere gleichzeitig anfordern.
-   - Nach jedem Bild kurz Status.
 
 STIL: Direkt, präzise, kurz. KEIN Smalltalk.
 
@@ -273,8 +272,7 @@ function buildBusinessPrompt(profile) {
 function modeInstruction(mode) {
   if (mode === 'silent') {
     return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. ' +
-           'Ausnahme: "Hey Jony" → "Ja?" und zurück zu NORMAL. ' +
-           'Nur DEUTSCH/RUSSISCH.';
+           'Ausnahme: "Hey Jony" → "Ja?". Nur DEUTSCH/RUSSISCH.';
   }
   return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz. Nur DEUTSCH/RUSSISCH.';
 }
@@ -565,28 +563,25 @@ function buildBusinessTools() {
           name: 'generate_script',
           description: 'Erstellt das Instagram-Karussell-Skript (Slides mit Titel, Body, Bild-Prompt). ' +
                        'Das Skript wird automatisch als TEXT in der App angezeigt. ' +
-                       'Rufe dieses Tool NUR auf, wenn das Thema klar ist. ' +
-                       'Sage danach NUR kurz "Skript ist da, schau in die App." und NIEMALS den Inhalt.',
+                       'Sage danach NUR kurz "Skript ist da, schau in die App."',
           parameters: {
             type: 'OBJECT',
             properties: {
-              topic: { type: 'STRING', description: 'Das Thema, z.B. "Angeln"' },
-              audience: { type: 'STRING', description: 'Zielgruppe, z.B. "Anfänger"' },
+              topic: { type: 'STRING', description: 'Das Thema' },
+              audience: { type: 'STRING', description: 'Zielgruppe' },
               focus: { type: 'STRING', description: 'Kernaussage' },
-              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (1-10). Standard: 8.' },
+              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (1-10)' },
             },
             required: ['topic'],
           },
         },
         {
           name: 'generate_image',
-          description: 'Generiert ein Bild für einen Karussell-Slide. ' +
-                       'Wird an die App gesendet. Ein Aufruf pro Slide. ' +
-                       'Warte zwischen mehreren Bildern ein paar Sekunden.',
+          description: 'Generiert ein Bild für einen Karussell-Slide. Ein Aufruf pro Slide.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              prompt: { type: 'STRING', description: 'Visueller Prompt (Farben, Stil, Motiv)' },
+              prompt: { type: 'STRING', description: 'Visueller Prompt' },
               slide_number: { type: 'INTEGER' },
             },
             required: ['prompt', 'slide_number'],
@@ -738,7 +733,6 @@ Regeln:
 - image_prompt auf ENGLISCH, sehr detailliert (mind. 20 Wörter)
 - Titel max 5 Wörter, Body max 20 Wörter, auf Deutsch
 - Slide 1 = Hook, mittlere = Inhalt, letzter = Call-to-Action
-- Sprache Titel/Body: Deutsch
 
 NUR das JSON.`;
 
@@ -809,9 +803,38 @@ NUR das JSON.`;
 
 // ==================== IMAGE GENERATION (Cloudflare Workers AI) ====================
 
-/**
- * Generiert ein Bild über Cloudflare Workers AI (FLUX.1-schnell).
- */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function translateToEnglishImagePrompt(germanPrompt) {
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'Du übersetzt deutsche Bildbeschreibungen in präzise englische ' +
+                   'Bildgenerierungs-Prompts. Antworte NUR mit dem englischen Prompt ' +
+                   'in EINER Zeile. Keine Erklärungen. Füge KEINE Marken/Namen hinzu.'
+        },
+        {
+          role: 'user',
+          content: `Übersetze für ein realistisches Foto:\n${germanPrompt}`
+        }
+      ],
+      model: 'openai/gpt-oss-20b',
+      temperature: 0.3,
+    });
+
+    const translated = completion.choices[0]?.message?.content?.trim() || germanPrompt;
+    console.log(`   🌐 Übersetzt: "${translated.substring(0, 100)}..."`);
+    return translated;
+  } catch (e) {
+    console.log(`   ⚠️ Übersetzung fehlgeschlagen: ${e.message}`);
+    return germanPrompt;
+  }
+}
+
 async function generateImageWithCloudflare(englishPrompt) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
@@ -832,7 +855,7 @@ async function generateImageWithCloudflare(englishPrompt) {
     },
     body: JSON.stringify({
       prompt: englishPrompt,
-      steps: 4,  // 4 ist Standard und schnell, max. 8 für bessere Qualität
+      steps: 4,
     }),
   });
 
@@ -853,27 +876,20 @@ async function generateImageWithCloudflare(englishPrompt) {
   return { imageBase64, mimeType: 'image/jpeg' };
 }
 
-/**
- * Vollständiger Flow: Übersetzen → Cloudflare → an App senden.
- */
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
   console.log(`🎨 Generiere Slide ${slideNumber} via Cloudflare Workers AI...`);
 
-  // Rate-Limit-Prevention: min. 2 Sek zwischen Bildern
   const lastImgTime = clientWs._lastImageTime || 0;
   const timeSince = Date.now() - lastImgTime;
   const minGap = 2000;
   if (timeSince < minGap) {
-    const wait = minGap - timeSince;
-    await sleep(wait);
+    await sleep(minGap - timeSince);
   }
   clientWs._lastImageTime = Date.now();
 
   try {
-    // 1. Prompt ins Englische übersetzen
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
 
-    // 2. Bei Cloudflare generieren (mit Retry)
     let result = null;
     let lastError = null;
 
