@@ -196,7 +196,7 @@ WORKFLOW:
      * topic: das Thema (z.B. "Angeln")
      * audience: Zielgruppe (z.B. "Anfänger", "Profi-Angler")
      * focus: Kernaussage (z.B. "Ausrüstung für Raubgewässer")
-     * slide_count: 5-10 (Standard 8)
+     * slide_count: 1-10 (Standard 8)
    - Das Tool liefert das Skript direkt an die App.
    - Nach dem Tool: Sage NUR: "Skript ist da. Schau in die App."
    - ⚠️ DU NIMMST DEN SKRIPT-INHALT NICHT IN DEINE ANTWORT AUF.
@@ -575,7 +575,7 @@ function buildBusinessTools() {
               topic: { type: 'STRING', description: 'Das Thema, z.B. "Angeln"' },
               audience: { type: 'STRING', description: 'Zielgruppe, z.B. "Anfänger", "Profi-Angler"' },
               focus: { type: 'STRING', description: 'Kernaussage, z.B. "Ausrüstung für Raubgewässer"' },
-              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (5-10). Standard: 8.' },
+              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (1-10). Standard: 8.' },
             },
             required: ['topic'],
           },
@@ -714,7 +714,7 @@ async function getUserPreferences(userId) {
 async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
   console.log(`📝 Generiere Skript: "${topic}" (Zielgruppe: ${audience || '-'}, Fokus: ${focus || '-'})`);
 
-  const count = slideCount && slideCount >= 5 && slideCount <= 10 ? slideCount : 8;
+  const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
   const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
 
