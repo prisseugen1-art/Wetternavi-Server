@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const GEMINI_VOICE = 'Fenrir';
+const IMAGE_MODEL = 'gemini-2.5-flash-image-preview';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -15,9 +15,9 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
 // ==================== PROAKTIV-INTERVALLE ====================
 
 const PROACTIVE_INTERVALS = {
-  party: 15000,    // Party: 15s Stille → Spruch
-  freund: 45000,   // Freund: 45s Stille → sanfte Frage
-  berater: 0,      // Berater: NIE proaktiv
+  party: 15000,
+  freund: 45000,
+  berater: 0,
 };
 
 function buildProactivePrompt(role) {
@@ -35,7 +35,7 @@ function buildProactivePrompt(role) {
   return null;
 }
 
-// ==================== ROLLEN ====================
+// ==================== ROLLEN (für Jony) ====================
 
 const ROLES = {
   freund: {
@@ -60,35 +60,20 @@ const ROLES = {
 
 DEINE PERSÖNLICHKEIT:
 Du bist der aktive Stimmungsmacher – charmant, witzig, energetisch.
-Aber NICHT aufdringlich. Du spürst, wann es Zeit ist zu reden und wann nicht.
+Aber NICHT aufdringlich.
 
 WAS DU AKTIV TUST:
 - Mach Sprüche, wenn's passt – nicht nach jedem Satz.
 - Schlag Dinge vor: Restaurants, Bars, Aktivitäten, Filme, Musik, Orte.
-- Reagiere auf die Umgebung (Kamera): "Alter, das sieht ja aus wie…"
-- Bring Fun-Facts oder Insider-Witze, wenn's zum Thema passt.
-- Frag nach, wenn jemand was Interessantes sagt: "Erzähl mehr!"
-- Sei spontan: "Wisst ihr was? Wir sollten jetzt…"
+- Reagiere auf die Umgebung (Kamera).
+- Frag nach, wenn jemand was Interessantes sagt.
+- Sei spontan.
 
 WAS DU NICHT TUST:
 - NICHT permanent reden. Wenn die Gruppe sich unterhält: SEI STILL.
-- Keine Wiederholungen (nicht 5x "Wie cool!").
-- Keine peinlichen Bemerkungen, keine aufdringlichen Fragen.
-- Keine Belehrungen, keine Erwachsenen-Sprüche.
-- Nicht über Eugen lästern.
-
-SITUATIONS-ERKENNUNG (nutze Kamera + Kontext):
-- Zuhause/chillig → lockere Sprüche, Musik, Filme vorschlagen
-- Restaurant/Bar → Trinksprüche, Fun-Facts zum Ort, Empfehlungen
-- Unterwegs/Stadt → Aktivitäten vorschlagen, spontane Kommentare
-- Mit Kindern → kindgerecht, Witze, Begeisterung
-- Mit Freunden → Erwachsenen-Humor, aber dezent
-- Wenn Stille eintritt → darfst du was sagen, aber nur einmal.
-
-REGEL FÜR AKTIVITÄT:
-Wenn du schon 2x hintereinander was gesagt hast und keiner antwortet:
-→ Halt die Klappe für mindestens 30 Sekunden.
-→ Dann darfst du wieder.`,
+- Keine Wiederholungen.
+- Keine peinlichen Bemerkungen.
+- Keine Belehrungen.`,
   },
   berater: {
     name: 'Berater',
@@ -97,22 +82,24 @@ Wenn du schon 2x hintereinander was gesagt hast und keiner antwortet:
 - Du bist Berater, nicht Entscheider.
 - Bei rechtlichen/medizinischen/finanziellen Themen: weise IMMER auf menschliche Prüfung hin.
 - Erfinde keine Paragrafen, keine Urteile, keine Fristen.
-- Strukturiere deine Antworten wenn nötig (z.B. "Erstens... zweitens...").
+- Strukturiere deine Antworten wenn nötig.
 - Antworte in 2-3 kurzen Sätzen.`,
   },
 };
 
-const BASE_PROMPT = `Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).
+// ==================== JONY PROMPT ====================
+
+const JONY_BASE = `Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).
 Du bist ehrlich, warmherzig, direkt, humorvoll.
 Du bist kein Assistent, sondern ein Freund.
 Heute ist {today}. Eugen ist in {hometown}.`;
 
-function buildSystemInstruction(profile, role = 'freund') {
+function buildJonyPrompt(profile, role = 'freund') {
   const roleData = ROLES[role] || ROLES.freund;
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
-  const base = BASE_PROMPT
+  const base = JONY_BASE
     .replace('{today}', today)
     .replace('{hometown}', profile.hometown || 'unbekannt');
 
@@ -134,85 +121,141 @@ function buildSystemInstruction(profile, role = 'freund') {
     'ROLLENWECHSEL',
     '===========================================',
     '',
-    '⚠️ WICHTIG: Du wechselst NIEMALS selbstständig die Rolle.',
-    'Rollenwechsel passiert NUR, wenn der Nutzer es explizit sagt:',
+    '⚠️ Du wechselst NIEMALS selbstständig die Rolle.',
+    'Nur wenn der Nutzer explizit sagt:',
+    '- "Jony, Party" → party',
+    '- "Jony, Berater" / "sachlich" → berater',
+    '- "Jony, zurück zum Freund" / "normal" → freund',
     '',
-    'Deutsch:',
-    '- "Jony, Party" / "Jony, Party-Modus" → party',
-    '- "Jony, Berater" / "Jony, sachlich" → berater',
-    '- "Jony, zurück zum Freund" / "Jony, Freund" / "Jony, normal" → freund',
-    '',
-    'Russisch:',
-    '- "Джони, пати" / "Джони, вечеринка" → party',
-    '- "Джони, советник" / "Джони, консультант" → berater',
-    '- "Джони, вернись к другу" / "Джони, друг" → freund',
-    '',
-    'Bei Rollenwechsel: Bestätige kurz und bleib in der Rolle.',
-    'Wenn der Nutzer nichts zur Rolle sagt: Bleib in aktueller Rolle.',
-    'Wechsle NICHT eigenständig – auch nicht wenn der Kontext es nahelegt.',
+    '===========================================',
+    'AGENT-WECHSEL',
+    '===========================================',
+    'Der Nutzer kann in den BUSINESS-MODUS wechseln:',
+    '- "Jony, Business-Modus" / "Business" → Agent wechselt (Server macht das)',
+    'Das ist NICHT deine Aufgabe – der Server erkennt das und wechselt.',
+    'Du bestätigst nur kurz ("Business-Modus aktiv.") falls aufgefordert.',
     '',
     '===========================================',
     'MODUS-SYSTEM (NORMAL/SILENT)',
     '===========================================',
-    '',
-    'Du hast ZUSÄTZLICH zwei Modi: NORMAL und SILENT.',
-    'Der Modus wird dir per [SYSTEM-INSTRUKTION] mitgeteilt.',
-    '',
-    'NORMAL-MODUS:',
-    '- Aktiv, freundlich, gesprächig.',
-    '- Reagierst auf alles was der Nutzer sagt.',
-    '',
-    'SILENT-MODUS:',
-    '- Du bleibst AUFMERKSAM – hörst weiter zu.',
-    '- ABER: Du reagierst NICHT auf normale Sprache.',
-    '- KEIN "Mhm", KEIN "Ich verstehe", KEINE Kommentare.',
-    '- EINZIGE Ausnahme: Wenn du "Hey Jony" hörst:',
-    '  → Antworte kurz: "Ja?" oder "Ich bin da."',
-    '  → Danach wieder still.',
+    'NORMAL: aktiv, freundlich, gesprächig.',
+    'SILENT: aufmerksam, aber reagierst NICHT – Ausnahme "Hey Jony".',
     '',
     '===========================================',
     'SEHEN UND HÖREN',
     '===========================================',
     'Wenn der Nutzer fragt "Was siehst du?":',
     '- Beschreibe was du im letzten Video-Frame gesehen hast.',
-    '- Wenn unklar: "Ich seh grad nicht so viel, kannst du näher rangehen?"',
-    '- Erwähne NUR was du WIRKLICH siehst.',
     '',
     '===========================================',
     'GEDÄCHTNIS',
     '===========================================',
-    'Bei Fragen wie "Wie heiße ich?" oder "Was weißt du über mich?":',
-    '- Rufe get_user_preferences auf und antworte mit ECHTEN Daten.',
-    '',
-    'Bei NEUEN Fakten (Nutzer erzählt von sich):',
-    '- save_user_preference (STILL, ohne Ankündigung).',
-    '',
-    '===========================================',
-    'SPRACHREGELN',
-    '===========================================',
-    'Antworte in der Sprache, in der der Nutzer GERADE zu dir spricht.',
-    'Wenn der Nutzer Deutsch spricht → Deutsch.',
-    'Wenn der Nutzer Russisch spricht → Russisch.',
-    'Bei kurzen Sätzen (1-2 Wörter): nimm die Sprache der letzten 2 Turns.',
-    'Wenn unklar: frag nach.',
+    'Bei Fragen über den Nutzer: get_user_preferences aufrufen.',
+    'Bei NEUEN Fakten: save_user_preference (STILL, ohne Ankündigung).',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
     'Wetter: get_weather',
     'Restaurants: find_restaurants',
-    'Gedächtnis lesen: get_user_preferences',
-    'Gedächtnis schreiben: save_user_preference (STILL)',
+    'Gedächtnis: get_user_preferences / save_user_preference',
     '',
     'NIEMALS Wetter/Restaurants erfinden. Immer Tool nutzen.',
+    '',
+    '===========================================',
+    'SPRACHREGELN',
+    '===========================================',
+    'Antworte in der Sprache, in der der Nutzer GERADE spricht.',
     '',
     '===========================================',
     'VERBOTEN',
     '===========================================',
     '- "Wie kann ich dir helfen?"',
     '- Immer derselbe Begrüßungssatz',
-    '- Nach jedem Satz eine neue Frage',
     '- Platzhalter wie "User Name" speichern',
+  ].join('\n');
+}
+
+// ==================== BUSINESS PROMPT ====================
+
+const BUSINESS_BASE = `Du bist Jony im BUSINESS-MODUS.
+Du bist ein Content-Stratege für Instagram-Karussells.
+Heute ist {today}.
+
+DEINE AUFGABE:
+Du hilfst Eugen, hochwertige Instagram-Karussells zu erstellen.
+Ein Karussell besteht aus 5-10 Slides.
+Jeder Slide hat: Titel, kurzer Body-Text, visueller Prompt.
+
+WORKFLOW (führe den Nutzer Schritt für Schritt):
+
+1. THEMENFINDUNG
+   - Frage: "Was für ein Thema schwebt dir vor?"
+   - Bei vagen Antworten: Frag nach Zielgruppe, Kernaussage, Tonalität
+   - Erst weitermachen, wenn das Thema klar ist
+
+2. SKRIPT ERSTELLEN
+   - Strukturiere das Karussell: Slide 1 (Hook), Slides 2-9 (Inhalt), Slide 10 (CTA)
+   - Pro Slide: Titel (max 5 Wörter), Body (max 20 Wörter), visueller Prompt (1-2 Sätze)
+   - Präsentiere das Skript als Liste
+   - Frage am Ende: "Passt das Skript oder sollen wir was ändern?"
+
+3. BILDER GENERIEREN
+   - Wenn Nutzer bestätigt: Rufe generate_image für JEDEN Slide auf
+   - Nutze den visuellen Prompt aus dem Skript
+   - Format: 1:1 (Instagram-Standard)
+   - Nach jedem Bild: kurzer Status ("Slide 1 fertig.")
+
+4. ITERATION
+   - Wenn Nutzer einen Slide ändern will: Skript anpassen + generate_image erneut aufrufen
+   - Wenn Nutzer komplett neu will: zurück zu Schritt 2
+
+STIL:
+- Direkt, präzise, keine Floskeln.
+- 2-4 Sätze pro Antwort.
+- Kein Smalltalk, kein Humor, kein lockeres Gequatsche.
+- Strukturiert und zielorientiert.
+
+WICHTIG:
+- Du generierst KEINE Bilder ohne Bestätigung des Skripts.
+- Du erfindest keine Fakten – wenn du etwas nicht weißt, sag es.
+- Bei visuellen Prompts: beschreib Farben, Stimmung, Stil (minimalistisch/fotografisch/illustrativ/etc.)`;
+
+function buildBusinessPrompt(profile) {
+  const today = new Date().toLocaleDateString('de-DE', {
+    weekday: 'long', day: 'numeric', month: 'long',
+  });
+  const name = profile.name || 'Nutzer';
+
+  return [
+    BUSINESS_BASE.replace('{today}', today),
+    '',
+    'Der Nutzer heißt ' + name + '.',
+    '',
+    '===========================================',
+    'AGENT-WECHSEL',
+    '===========================================',
+    'Der Nutzer kann zurück zum Freund-Modus wechseln:',
+    '- "Jony, zurück zum Freund" / "Freund" / "normal" → Agent wechselt (Server macht das)',
+    'Du bestätigst nur kurz ("Zurück zum Freund.") falls aufgefordert.',
+    '',
+    '===========================================',
+    'TOOLS',
+    '===========================================',
+    'generate_image(prompt, slide_number) – generiert ein Bild und sendet es an die App',
+    '',
+    'Rufe generate_image NUR auf, wenn:',
+    '1. Das Skript fertig ist',
+    '2. Der Nutzer bestätigt hat ("Ja, generier die Bilder")',
+    '',
+    'Wenn du unsicher bist: frag nach.',
+    '',
+    '===========================================',
+    'VERBOTEN',
+    '===========================================',
+    '- Smalltalk, Witze, lockere Sprache',
+    '- Bilder generieren ohne Bestätigung',
+    '- Das Skript in einem Turn komplett neu machen – immer nur ändern was nötig ist',
   ].join('\n');
 }
 
@@ -221,11 +264,10 @@ function buildSystemInstruction(profile, role = 'freund') {
 function modeInstruction(mode) {
   if (mode === 'silent') {
     return '[SYSTEM-INSTRUKTION] SILENT-MODUS AKTIV. ' +
-           'WICHTIG: Du bleibst AUFMERKSAM und hörst weiter zu – aber du REAGIERST NICHT auf normale Sprache. ' +
-           'EINZIGE Ausnahme: Wenn du "Hey Jony" hörst, antworte kurz "Ja?" und wechsle danach in NORMAL-MODUS. ' +
-           'Auf alles andere: absolute Stille.';
+           'Bleib aufmerksam, aber reagiere NICHT auf normale Sprache. ' +
+           'Ausnahme: "Hey Jony" → antworte kurz "Ja?" und wechsle in NORMAL-MODUS.';
   }
-  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. Ab jetzt: normal, freundlich, kurz (1-2 Sätze).';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. Ab jetzt normal, freundlich, kurz.';
 }
 
 function roleSwitchInstruction(role) {
@@ -233,15 +275,34 @@ function roleSwitchInstruction(role) {
   return '[SYSTEM-INSTRUKTION] Rollenwechsel zu ' + roleData.name.toUpperCase() + '.\n\n' + roleData.prompt;
 }
 
+// ==================== AGENT-DEFINITIONEN ====================
+
+const AGENTS = {
+  jony: {
+    voice: 'Fenrir',
+    buildPrompt: (profile, role) => buildJonyPrompt(profile, role),
+    tools: () => buildJonyTools(),
+  },
+  business: {
+    voice: 'Charon',
+    buildPrompt: (profile) => buildBusinessPrompt(profile),
+    tools: () => buildBusinessTools(),
+  },
+};
+
 // ==================== GEMINI LIVE SETUP ====================
 
-export async function createGeminiSession(clientWs, userProfile) {
+export async function createGeminiSession(clientWs, userProfile, agentType = 'jony') {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const agentConfig = AGENTS[agentType] || AGENTS.jony;
 
-  console.log('🔌 Verbinde zu Gemini Live...');
-  console.log('📦 Profil:', JSON.stringify(userProfile).substring(0, 200));
+  console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice})...`);
 
-  const systemInstruction = buildSystemInstruction(userProfile, 'freund');
+  const systemInstruction = agentConfig.buildPrompt(
+    userProfile,
+    clientWs._currentRole || 'freund'
+  );
+
   let session = null;
 
   session = await ai.live.connect({
@@ -250,13 +311,13 @@ export async function createGeminiSession(clientWs, userProfile) {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Charon' },
+          prebuiltVoiceConfig: { voiceName: agentConfig.voice },
         },
       },
       systemInstruction: { parts: [{ text: systemInstruction }] },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      tools: buildTools(),
+      tools: agentConfig.tools(),
       realtimeInputConfig: {
         automaticActivityDetection: {
           disabled: false,
@@ -269,11 +330,13 @@ export async function createGeminiSession(clientWs, userProfile) {
     },
     callbacks: {
       onopen: () => {
-        console.log('✅ Gemini Live Session geöffnet');
-        clientWs.send(JSON.stringify({ type: 'status', status: 'connected' }));
+        console.log(`✅ Gemini Live Session geöffnet (${agentType})`);
+        clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: agentType }));
       },
       onmessage: (message) => {
-        handleGeminiMessage(clientWs, message, session, userProfile);
+        // Guard: nur wenn die aktuelle Session noch die ist, die diesen Callback hält
+        if (clientWs._session !== session) return;
+        handleGeminiMessage(clientWs, message, session, userProfile, agentType);
       },
       onerror: (error) => {
         console.error('❌ Gemini Live Fehler:', error);
@@ -282,8 +345,7 @@ export async function createGeminiSession(clientWs, userProfile) {
         } catch (e) {}
       },
       onclose: (event) => {
-        console.log('🔌 Gemini Live Session geschlossen');
-        if (event) console.log('🔌 Close-Grund:', JSON.stringify(event));
+        console.log(`🔌 Gemini Live Session geschlossen (${agentType})`);
         try {
           clientWs.send(JSON.stringify({ type: 'status', status: 'disconnected' }));
         } catch (e) {}
@@ -296,14 +358,14 @@ export async function createGeminiSession(clientWs, userProfile) {
 
 // ==================== NACHRICHTEN-VERARBEITUNG ====================
 
-async function handleGeminiMessage(clientWs, message, session, userProfile) {
+async function handleGeminiMessage(clientWs, message, session, userProfile, agentType) {
   const serverContent = message.serverContent;
 
   // -------- Audio-Teile an App senden --------
   if (serverContent?.modelTurn?.parts) {
     clientWs._geminiIsSpeaking = true;
     for (const part of serverContent.modelTurn.parts) {
-      if (part.inlineData?.data) {
+      if (part.inlineData?.data && part.inlineData.mimeType?.startsWith('audio/')) {
         clientWs.send(JSON.stringify({
           type: 'audio',
           data: part.inlineData.data,
@@ -322,93 +384,111 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // ---- Rollenwechsel-Trigger (DE + RU) ----
-    const roleTriggers = {
-      party: [
-        // Deutsch
-        /jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i,
-        // Russisch
-        /джони.*пати/i, /джони.*пати.?мод/i, /пати.?мод/i,
-        /джони.*вечеринк/i, /вечеринк/i,
-        // Lateinische Transkription (falls Gemini nicht kyrillisch liefert)
-        /jony.*pati/i, /dzhoni.*pati/i,
-      ],
-      berater: [
-        // Deutsch
-        /jony.*berater/i, /jony.*sachlich/i, /jony.*intellektuell/i,
-        /\bberater.?modus\b/i, /beratermodus/i, /sachlich.?modus/i,
-        // Russisch
-        /джони.*советник/i, /джони.*консультант/i, /джони.*серь[её]зн/i,
-        /советник.?мод/i, /консультант/i,
-        // Lateinisch
-        /jony.*sovetnik/i, /dzhoni.*konsultant/i,
-      ],
-      freund: [
-        // Deutsch
-        /jony.*freund/i, /zur[üu]ck.*freund/i, /jony.*normal/i,
-        /\bfreund.?modus\b/i, /normal.?modus/i, /\bfreundesmodus\b/i,
-        /\bfriendly\b/i,
-        // Russisch
-        /джони.*друг/i, /джони.*дружеск/i, /вернись.*друг/i,
-        /обратно.*друг/i, /режим.?друга/i, /дружеск.*режим/i,
-        // Lateinisch
-        /jony.*drug/i, /dzhoni.*drug/i, /vernis.*drug/i,
-      ],
-    };
+    // ---- AGENT-WECHSEL (Business ↔ Jony) ----
+    const businessTrigger = /\b(business.?modus|business\s+mode|jony.*business|джони.*бизнес|бизнес.?мод)\b/i;
+    const jonyTrigger = /\b(jony.*zur[üu]ck.*freund|jony.*freund.?modus|jony.*normal|jony.*zur[üu]ck|zur[üu]ck.*zum\s+freund|джони.*обратно|обратно.*друг|вернись.*друг)\b/i;
 
-    let roleSwitched = false;
-    for (const [role, patterns] of Object.entries(roleTriggers)) {
-      if (patterns.some(p => p.test(userText))) {
-        const currentRole = clientWs._currentRole || 'freund';
-        if (currentRole !== role) {
-          clientWs._currentRole = role;
-          console.log(`🎭 Rollenwechsel: ${currentRole} → ${role}`);
-          clientWs.send(JSON.stringify({ type: 'role', role }));
+    if (agentType !== 'business' && businessTrigger.test(userText)) {
+      // Wechsel zu Business
+      console.log('🔄 Agent-Wechsel-Trigger: → business');
+      try {
+        await clientWs._session?.close();
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 300));
+      const newSession = await createGeminiSession(clientWs, userProfile, 'business');
+      clientWs._session = newSession;
+      clientWs._currentAgent = 'business';
+      clientWs.send(JSON.stringify({ type: 'agent', agent: 'business' }));
+      return;
+    }
+
+    if (agentType === 'business' && jonyTrigger.test(userText)) {
+      console.log('🔄 Agent-Wechsel-Trigger: → jony');
+      try {
+        await clientWs._session?.close();
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 300));
+      clientWs._currentRole = 'freund';
+      const newSession = await createGeminiSession(clientWs, userProfile, 'jony');
+      clientWs._session = newSession;
+      clientWs._currentAgent = 'jony';
+      clientWs.send(JSON.stringify({ type: 'agent', agent: 'jony' }));
+      return;
+    }
+
+    // ---- Rollen-Trigger (nur bei Jony) ----
+    if (agentType === 'jony') {
+      const roleTriggers = {
+        party: [
+          /jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i,
+          /джони.*пати/i, /джони.*вечеринк/i, /вечеринк/i,
+        ],
+        berater: [
+          /jony.*berater/i, /jony.*sachlich/i, /jony.*intellektuell/i,
+          /\bberater.?modus\b/i, /beratermodus/i,
+          /джони.*советник/i, /джони.*консультант/i, /советник.?мод/i,
+        ],
+        freund: [
+          /jony.*freund/i, /zur[üu]ck.*freund/i, /jony.*normal/i,
+          /\bfreund.?modus\b/i, /normal.?modus/i,
+          /джони.*друг/i, /вернись.*друг/i, /обратно.*друг/i,
+        ],
+      };
+
+      let roleSwitched = false;
+      for (const [role, patterns] of Object.entries(roleTriggers)) {
+        if (patterns.some(p => p.test(userText))) {
+          const currentRole = clientWs._currentRole || 'freund';
+          if (currentRole !== role) {
+            clientWs._currentRole = role;
+            console.log(`🎭 Rollenwechsel: ${currentRole} → ${role}`);
+            clientWs.send(JSON.stringify({ type: 'role', role }));
+
+            try {
+              session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: roleSwitchInstruction(role) }],
+                }],
+                turnComplete: true,
+              });
+            } catch (e) {
+              console.error('❌ Rollen-Send-Fehler:', e.message);
+            }
+          }
+          roleSwitched = true;
+          break;
+        }
+      }
+
+      // ---- Modus-Wechsel (Silent/Normal) ----
+      if (!roleSwitched && userProfile.user_id) {
+        const current = clientWs._lastMode || 'normal';
+        const mode = await detectMode(
+          userProfile.user_id,
+          clientWs._lastImuState || 'unknown',
+          clientWs._lastLat,
+          clientWs._lastLon,
+          userText,
+          current
+        );
+
+        if (mode !== current) {
+          clientWs._lastMode = mode;
+          console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
+          clientWs.send(JSON.stringify({ type: 'mode', mode }));
 
           try {
             session.sendClientContent({
               turns: [{
                 role: 'user',
-                parts: [{ text: roleSwitchInstruction(role) }],
+                parts: [{ text: modeInstruction(mode) }],
               }],
               turnComplete: true,
             });
           } catch (e) {
-            console.error('❌ Rollen-Send-Fehler:', e.message);
+            console.error('❌ Modus-Send-Fehler:', e.message);
           }
-        }
-        roleSwitched = true;
-        break;
-      }
-    }
-
-    // ---- Modus-Wechsel (Silent/Normal) ----
-    if (!roleSwitched && userProfile.user_id) {
-      const current = clientWs._lastMode || 'normal';
-      const mode = await detectMode(
-        userProfile.user_id,
-        clientWs._lastImuState || 'unknown',
-        clientWs._lastLat,
-        clientWs._lastLon,
-        userText,
-        current
-      );
-
-      if (mode !== current) {
-        clientWs._lastMode = mode;
-        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
-        clientWs.send(JSON.stringify({ type: 'mode', mode }));
-
-        try {
-          session.sendClientContent({
-            turns: [{
-              role: 'user',
-              parts: [{ text: modeInstruction(mode) }],
-            }],
-            turnComplete: true,
-          });
-        } catch (e) {
-          console.error('❌ Modus-Send-Fehler:', e.message);
         }
       }
     }
@@ -425,7 +505,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
 
   // -------- Tool-Calls --------
   if (message.toolCall) {
-    handleToolCall(session, userProfile, message.toolCall);
+    handleToolCall(clientWs, session, userProfile, message.toolCall, agentType);
   }
 
   // -------- Turn-Ende --------
@@ -438,7 +518,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile) {
 
 // ==================== TOOLS ====================
 
-function buildTools() {
+function buildJonyTools() {
   return [
     {
       functionDeclarations: [
@@ -493,7 +573,36 @@ function buildTools() {
   ];
 }
 
-async function handleToolCall(session, userProfile, toolCall) {
+function buildBusinessTools() {
+  return [
+    {
+      functionDeclarations: [
+        {
+          name: 'generate_image',
+          description: 'Generiert ein Bild für einen Karussell-Slide. ' +
+                       'Das Bild wird an die App gesendet und dort in der Galerie angezeigt. ' +
+                       'Rufe dieses Tool für JEDEN Slide einzeln auf.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              prompt: {
+                type: 'STRING',
+                description: 'Detaillierter visueller Prompt (Farben, Stimmung, Stil, Motiv).',
+              },
+              slide_number: {
+                type: 'INTEGER',
+                description: 'Für welchen Slide (1-10).',
+              },
+            },
+            required: ['prompt', 'slide_number'],
+          },
+        },
+      ],
+    },
+  ];
+}
+
+async function handleToolCall(clientWs, session, userProfile, toolCall, agentType) {
   const functionCalls = toolCall.functionCalls;
   const responses = [];
 
@@ -510,6 +619,12 @@ async function handleToolCall(session, userProfile, toolCall) {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
+      } else if (fc.name === 'generate_image') {
+        result = await generateImageAndSend(
+          clientWs,
+          fc.args.prompt,
+          fc.args.slide_number
+        );
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
@@ -595,6 +710,70 @@ async function getUserPreferences(userId) {
   return { preferences: data.data || {} };
 }
 
+// ==================== IMAGE GENERATION ====================
+
+async function generateImageAndSend(clientWs, prompt, slideNumber) {
+  console.log(`🎨 Generiere Bild für Slide ${slideNumber}...`);
+  console.log(`   Prompt: "${prompt.substring(0, 100)}..."`);
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    const response = await ai.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [{
+        role: 'user',
+        parts: [{ text: `Erstelle ein Instagram-Karussell-Bild (1:1 Format).\n\n${prompt}` }],
+      }],
+      config: {
+        responseModalities: ['IMAGE'],
+      },
+    });
+
+    // Bild aus Response extrahieren
+    let imageBase64 = null;
+    let mimeType = 'image/png';
+
+    if (response?.candidates?.[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData?.data) {
+          imageBase64 = part.inlineData.data;
+          mimeType = part.inlineData.mimeType || 'image/png';
+          break;
+        }
+      }
+    }
+
+    if (!imageBase64) {
+      console.error('❌ Keine Bilddaten in Response');
+      return { error: 'Keine Bilddaten erhalten', slide: slideNumber };
+    }
+
+    console.log(`✅ Bild für Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
+
+    // An App senden
+    clientWs.send(JSON.stringify({
+      type: 'image',
+      slide: slideNumber,
+      mimeType,
+      data: imageBase64,
+    }));
+
+    return {
+      success: true,
+      slide: slideNumber,
+      message: `Bild für Slide ${slideNumber} generiert und an App gesendet.`,
+    };
+  } catch (e) {
+    console.error('❌ Image-Generation-Fehler:', e.message);
+    console.error('   Stack:', e.stack?.substring(0, 300));
+    return {
+      error: 'Bildgenerierung fehlgeschlagen: ' + e.message,
+      slide: slideNumber,
+    };
+  }
+}
+
 // ==================== WEBSOCKET-SERVER ====================
 
 export function setupGeminiWebSocket(server) {
@@ -603,12 +782,13 @@ export function setupGeminiWebSocket(server) {
   wss.on('connection', async (clientWs, req) => {
     console.log('📱 App verbunden via WebSocket');
 
-    let session = null;
     let userProfile = {};
 
     // Session-State
-    clientWs._lastMode = 'normal';
+    clientWs._session = null;
+    clientWs._currentAgent = 'jony';
     clientWs._currentRole = 'freund';
+    clientWs._lastMode = 'normal';
     clientWs._lastImuState = 'unknown';
     clientWs._lastLat = null;
     clientWs._lastLon = null;
@@ -622,7 +802,7 @@ export function setupGeminiWebSocket(server) {
 
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
-          session = await createGeminiSession(clientWs, userProfile);
+          clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
           return;
         }
 
@@ -645,13 +825,13 @@ export function setupGeminiWebSocket(server) {
             current
           );
 
-          if (session && mode !== current) {
+          if (clientWs._session && mode !== current) {
             clientWs._lastMode = mode;
             console.log(`🎭 Modus-Wechsel (IMU): ${current} → ${mode}`);
             clientWs.send(JSON.stringify({ type: 'mode', mode }));
 
             try {
-              session.sendClientContent({
+              clientWs._session.sendClientContent({
                 turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
                 turnComplete: true,
               });
@@ -662,15 +842,15 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        if (msg.type === 'audio' && session) {
-          session.sendRealtimeInput({
+        if (msg.type === 'audio' && clientWs._session) {
+          clientWs._session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
-        if (msg.type === 'video' && session) {
+        if (msg.type === 'video' && clientWs._session) {
           try {
-            session.sendRealtimeInput({
+            clientWs._session.sendRealtimeInput({
               video: { data: msg.data, mimeType: 'image/jpeg' },
             });
           } catch (e) {
@@ -678,8 +858,8 @@ export function setupGeminiWebSocket(server) {
           }
         }
 
-        if (msg.type === 'text' && session) {
-          session.sendClientContent({
+        if (msg.type === 'text' && clientWs._session) {
+          clientWs._session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
             turnComplete: true,
           });
@@ -695,7 +875,8 @@ export function setupGeminiWebSocket(server) {
 
     // ==================== PROAKTIV-TIMER ====================
     clientWs._proactiveTimer = setInterval(async () => {
-      if (!session) return;
+      if (!clientWs._session) return;
+      if (clientWs._currentAgent !== 'jony') return;   // Proaktiv nur bei Jony
       if (clientWs._geminiIsSpeaking) return;
       if (clientWs._lastMode === 'silent') return;
 
@@ -712,19 +893,18 @@ export function setupGeminiWebSocket(server) {
       console.log(`📢 Proaktiv-Trigger (${role}, ${Math.round(elapsed / 1000)}s Stille)`);
 
       try {
-        session.sendClientContent({
+        clientWs._session.sendClientContent({
           turns: [{
             role: 'user',
             parts: [{ text: prompt }],
           }],
           turnComplete: true,
         });
-        // Timer für nächsten Schuss neu starten
         clientWs._lastUserSpeechTime = Date.now();
       } catch (e) {
         console.error('❌ Proaktiv-Fehler:', e.message);
       }
-    }, 5000);   // Prüft alle 5 Sek
+    }, 5000);
 
     clientWs.on('close', async () => {
       console.log('📱 App getrennt');
@@ -732,14 +912,14 @@ export function setupGeminiWebSocket(server) {
         clearInterval(clientWs._proactiveTimer);
         clientWs._proactiveTimer = null;
       }
-      if (session) {
+      if (clientWs._session) {
         try {
-          await session.close();
+          await clientWs._session.close();
           console.log('✅ Session sauber geschlossen');
         } catch (e) {
           console.error('❌ Session-Close-Fehler:', e);
         }
-        session = null;
+        clientWs._session = null;
       }
     });
 
@@ -749,7 +929,7 @@ export function setupGeminiWebSocket(server) {
         clearInterval(clientWs._proactiveTimer);
         clientWs._proactiveTimer = null;
       }
-      if (session) session.close();
+      if (clientWs._session) clientWs._session.close();
     });
   });
 
