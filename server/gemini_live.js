@@ -54,13 +54,19 @@ const PATTERNS = {
     `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
     'i'
   ),
+  dolmetscher: new RegExp(
+    `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
+    `dolmetscher.?modus|übersetzer|uebersetzer|` +
+    `${NAME_PATTERN}.?(перевод|переводчик)|переводчик|режим.?перевода)\\b`,
+    'i'
+  ),
 };
 
 // ==================== PROAKTIV-INTERVALLE ====================
 
 const PROACTIVE_INTERVALS = {
-  party: 15000,
-  freund: 45000,
+  party: 5000,
+  freund: 15000,
   berater: 0,
 };
 
@@ -78,29 +84,38 @@ function buildProactivePrompt(role) {
   return null;
 }
 
-// ==================== HARTE SPRACHREGEL ====================
+// ==================== SPRACHREGEL ====================
 
-const LANGUAGE_LOCK = `
+const LANGUAGE_RULE = `
 ===========================================
-🚨 SPRACHREGEL – HART UND UNVERBRÜCHLICH
+SPRACHREGEL
 ===========================================
 
 Du sprichst AUSSCHLIESSLICH zwei Sprachen:
 - DEUTSCH
 - RUSSISCH
 
-Wenn der Nutzer in einer ANDEREN Sprache spricht (Spanisch, Englisch, 
-Rumänisch, Französisch, Italienisch, Türkisch, Polnisch, etc.):
-→ Ignoriere den fremdsprachigen Inhalt KOMPLETT.
-→ Antworte auf DEUTSCH: "Bitte Deutsch oder Russisch."
+Wenn der Nutzer Deutsch spricht → Deutsch.
+Wenn der Nutzer Russisch spricht → Russisch.
 
-VERBOTEN (auch wenn der Nutzer es provoziert):
+Wenn der Nutzer eine ANDERE Sprache spricht (Spanisch, Englisch, Rumänisch, 
+Französisch, Italienisch, Türkisch, Polnisch, etc.) oder nur Wortfetzen:
+→ REAGIERE NICHT mit "Bitte Deutsch oder Russisch".
+→ Gehe einfach auf DEUTSCH normal weiter, als hättest du es nicht gehört.
+→ Wenn es zur Situation passt: frag auf Deutsch nach ("Was meinst du?").
+→ KEINE Sprach-Belehrung. Kein "Bitte sprich X". Keine Sprachendiskussion.
+
+VERBOTEN (außer im Dolmetscher-Modus):
 - Spanisch sprechen ❌
 - Englisch sprechen ❌
 - Rumänisch sprechen ❌
 - Französisch sprechen ❌
-- Italienisch sprechen ❌
 - Jede andere Sprache außer Deutsch/Russisch ❌
+
+AUSNAHME: Dolmetscher-Modus
+Wenn der Nutzer explizit sagt "Jony, Dolmetscher" / "Jony, übersetze" / 
+"Jony, Dolmetscher-Modus" → wechsle in den Übersetzer-Modus und übersetze 
+zwischen beliebigen Sprachen. Beenden mit "Jony, Dolmetscher aus".
 
 Diese Regel hat HÖCHSTE Priorität.
 `;
@@ -156,7 +171,7 @@ function buildJonyPrompt(profile, role = 'freund') {
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
   return [
-    LANGUAGE_LOCK,
+    LANGUAGE_RULE,
     '',
     base,
     '',
@@ -245,7 +260,7 @@ function buildBusinessPrompt(profile) {
   const name = profile.name || 'Nutzer';
 
   return [
-    LANGUAGE_LOCK,
+    LANGUAGE_RULE,
     '',
     BUSINESS_BASE.replace('{today}', today),
     '',
@@ -263,7 +278,6 @@ function buildBusinessPrompt(profile) {
     '- Skript vorlesen',
     '- Smalltalk',
     '- Tools nach Fehler wiederholen',
-    '- In einer anderen Sprache als Deutsch/Russisch antworten',
   ].join('\n');
 }
 
@@ -272,14 +286,28 @@ function buildBusinessPrompt(profile) {
 function modeInstruction(mode) {
   if (mode === 'silent') {
     return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. ' +
-           'Ausnahme: "Hey Jony" → "Ja?". Nur DEUTSCH/RUSSISCH.';
+           'Ausnahme: "Hey Jony" → "Ja?".';
   }
-  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz. Nur DEUTSCH/RUSSISCH.';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz.';
 }
 
 function roleSwitchInstruction(role) {
   const roleData = ROLES[role] || ROLES.freund;
   return '[SYSTEM-INSTRUKTION] Rollenwechsel zu ' + roleData.name.toUpperCase() + '.\n\n' + roleData.prompt;
+}
+
+function dolmetscherInstruction(active) {
+  if (active) {
+    return '[SYSTEM-INSTRUKTION] DOLMETSCHER-MODUS AKTIV.\n\n' +
+           'Du bist jetzt Übersetzer zwischen beliebigen Sprachen.\n' +
+           '- Wenn eine fremde Person spricht (z.B. Spanisch): Übersetze ins DEUTSCHE für Eugen.\n' +
+           '- Wenn Eugen dir was sagt (Deutsch/Russisch): Übersetze in die Zielsprache.\n' +
+           '- Format bei Übersetzung: NUR die Übersetzung, keine Erklärung.\n' +
+           '- Bestätige beim Start: "Dolmetscher-Modus aktiv."\n' +
+           '- Beenden mit "Jony, Dolmetscher aus" → "Dolmetscher-Modus beendet."\n\n' +
+           'In diesem Modus darfst du ALLE Sprachen sprechen.';
+  }
+  return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet. Zurück zur Standard-Sprachregel (nur Deutsch/Russisch).';
 }
 
 // ==================== AGENT-DEFINITIONEN ====================
@@ -406,6 +434,38 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
 
     let targetAgent = agentType;
     let targetRole = clientWs._currentRole || 'freund';
+    let toggledDolmetscher = null;
+
+    // ---- Dolmetscher-Trigger (nur bei Jony, nicht Business) ----
+    if (agentType === 'jony' && PATTERNS.dolmetscher.test(userText)) {
+      const currentlyOn = clientWs._dolmetscherActive || false;
+
+      // Prüfen ob "aus" oder "beenden"
+      const isOff = /\b(aus|beenden|stop|off|хватит|стоп|выключи)\b/i.test(userText);
+
+      if (currentlyOn && isOff) {
+        clientWs._dolmetscherActive = false;
+        toggledDolmetscher = false;
+        console.log('🌐 Dolmetscher-Modus: AUS');
+      } else if (!currentlyOn && !isOff) {
+        clientWs._dolmetscherActive = true;
+        toggledDolmetscher = true;
+        console.log('🌐 Dolmetscher-Modus: AN');
+      }
+
+      if (toggledDolmetscher !== null) {
+        clientWs.send(JSON.stringify({ type: 'dolmetscher', active: toggledDolmetscher }));
+        try {
+          session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: dolmetscherInstruction(toggledDolmetscher) }] }],
+            turnComplete: true,
+          });
+        } catch (e) {
+          console.error('❌ Dolmetscher-Send-Fehler:', e.message);
+        }
+        return;
+      }
+    }
 
     if (agentType === 'business') {
       if (PATTERNS.party.test(userText)) {
@@ -714,7 +774,7 @@ async function generateScriptAndSend(clientWs, topic, audience, focus, slideCoun
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
-    const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
+  const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
 
 Thema: ${topic}
 Zielgruppe: ${audience || 'Allgemein'}
@@ -743,10 +803,10 @@ Er MUSS alle diese Elemente enthalten:
 4. LIGHTING: Welches Licht? (z.B. "golden hour backlight, soft morning haze")
 5. CAMERA: Winkel + Perspektive (z.B. "medium close-up shot, slight low angle")
 6. STYLE: Stil (z.B. "cinematic photography, hyperrealistic, editorial magazine style")
-7. QUALITY: Qualitätsmerkmale (z.B. "sharp focus, 8K detail, shallow depth of field, professional lighting")
+7. QUALITY: Qualitätsmerkmale (z.B. "sharp focus, 8K detail, shallow depth of field")
 8. MOOD: Stimmung (z.B. "peaceful, serene, contemplative")
 
-Beispiel EINES guten image_prompts:
+Beispiel:
 "A weathered male angler with grey beard and green waders, casting a carbon fiber fishing rod into a misty alpine lake, standing on an old wooden dock at sunrise, golden hour backlight with soft morning haze, medium close-up shot from slight low angle, cinematic photography style, hyperrealistic, sharp focus, 8K detail, shallow depth of field, peaceful and serene mood, professional editorial magazine quality"
 
 - Titel max 5 Wörter, Body max 20 Wörter (DEUTSCH)
@@ -867,7 +927,6 @@ Output: A weathered older male angler with grey beard and green waterproof wader
   }
 }
 
-
 async function generateImageWithCloudflare(englishPrompt) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
@@ -981,6 +1040,7 @@ export function setupGeminiWebSocket(server) {
     clientWs._geminiIsSpeaking = false;
     clientWs._proactiveTimer = null;
     clientWs._lastImageTime = 0;
+    clientWs._dolmetscherActive = false;
 
     clientWs.on('message', async (data) => {
       try {
@@ -1051,6 +1111,7 @@ export function setupGeminiWebSocket(server) {
       if (clientWs._currentAgent !== 'jony') return;
       if (clientWs._geminiIsSpeaking) return;
       if (clientWs._lastMode === 'silent') return;
+      if (clientWs._dolmetscherActive) return;
 
       const role = clientWs._currentRole || 'freund';
       const interval = PROACTIVE_INTERVALS[role];
