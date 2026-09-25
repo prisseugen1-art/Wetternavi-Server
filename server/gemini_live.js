@@ -714,7 +714,7 @@ async function generateScriptAndSend(clientWs, topic, audience, focus, slideCoun
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
-  const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
+    const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
 
 Thema: ${topic}
 Zielgruppe: ${audience || 'Allgemein'}
@@ -724,15 +724,34 @@ Anzahl Slides: ${count}
 Antworte NUR mit einem JSON-Objekt:
 {
   "slides": [
-    {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Text max 20 Wörter", "image_prompt": "DETAILLIERTE ENGLISCHE Bildbeschreibung: subject, setting, lighting, camera angle, style, colors"},
-    ...
+    {
+      "slide": 1,
+      "title": "Kurzer Hook-Titel (max 5 Wörter, deutsch)",
+      "body": "Erklärender Text (max 20 Wörter, deutsch)",
+      "image_prompt": "DETAILED ENGLISH IMAGE PROMPT"
+    }
   ]
 }
 
-Regeln:
-- image_prompt auf ENGLISCH, sehr detailliert (mind. 20 Wörter)
-- Titel max 5 Wörter, Body max 20 Wörter, auf Deutsch
+REGELN FÜR image_prompt (SEHR WICHTIG):
+Der image_prompt MUSS auf ENGLISCH sein und MINDESTENS 35-50 Wörter enthalten.
+Er MUSS alle diese Elemente enthalten:
+
+1. SUBJECT: Wer/was genau? (z.B. "an older male angler with grey beard wearing green waders")
+2. ACTION/POSE: Was tut das Subjekt? (z.B. "holding a carbon fiber fishing rod, casting into the water")
+3. SETTING: Wo genau? (z.B. "on a wooden dock by a misty alpine lake at sunrise")
+4. LIGHTING: Welches Licht? (z.B. "golden hour backlight, soft morning haze")
+5. CAMERA: Winkel + Perspektive (z.B. "medium close-up shot, slight low angle")
+6. STYLE: Stil (z.B. "cinematic photography, hyperrealistic, editorial magazine style")
+7. QUALITY: Qualitätsmerkmale (z.B. "sharp focus, 8K detail, shallow depth of field, professional lighting")
+8. MOOD: Stimmung (z.B. "peaceful, serene, contemplative")
+
+Beispiel EINES guten image_prompts:
+"A weathered male angler with grey beard and green waders, casting a carbon fiber fishing rod into a misty alpine lake, standing on an old wooden dock at sunrise, golden hour backlight with soft morning haze, medium close-up shot from slight low angle, cinematic photography style, hyperrealistic, sharp focus, 8K detail, shallow depth of field, peaceful and serene mood, professional editorial magazine quality"
+
+- Titel max 5 Wörter, Body max 20 Wörter (DEUTSCH)
 - Slide 1 = Hook, mittlere = Inhalt, letzter = Call-to-Action
+- KEINE generischen Prompts wie "fishing equipment" – sei SPEZIFISCH
 
 NUR das JSON.`;
 
@@ -813,27 +832,41 @@ async function translateToEnglishImagePrompt(germanPrompt) {
       messages: [
         {
           role: 'system',
-          content: 'Du übersetzt deutsche Bildbeschreibungen in präzise englische ' +
-                   'Bildgenerierungs-Prompts. Antworte NUR mit dem englischen Prompt ' +
-                   'in EINER Zeile. Keine Erklärungen. Füge KEINE Marken/Namen hinzu.'
+          content: `Du bist ein Prompt-Engineer für FLUX.1 Bildgenerierung.
+
+Deine Aufgabe: Wandle den Input in einen MAXIMAL DETAILLIERTEN englischen Prompt um.
+
+REGELN:
+- Wenn der Input schon englisch ist: Verfeinere und erweitere ihn.
+- Wenn der Input deutsch ist: Übersetze UND erweitere ihn.
+- Der Output MUSS 40-60 Wörter enthalten.
+- Der Output MUSS alle Aspekte enthalten: Subjekt (mit Details wie Alter, Kleidung), Aktion, Umgebung (konkret), Beleuchtung (spezifisch), Kamerawinkel, Stil, Qualität, Stimmung.
+- KEINE generischen Phrasen wie "high quality" – immer spezifisch.
+- Antworte NUR mit dem englischen Prompt in EINER Zeile. Keine Erklärungen.
+- Keine Anführungszeichen am Anfang/Ende.
+
+Beispiel:
+Input: "Angler am See"
+Output: A weathered older male angler with grey beard and green waterproof waders, casting a carbon fiber rod with silver spinning reel into a calm lake surrounded by pine forest, standing on an old wooden dock at golden hour sunrise, warm backlight with soft mist on the water, medium close-up shot from low angle, cinematic photography style, hyperrealistic detail, sharp focus on the angler with shallow depth of field, peaceful contemplative mood, professional magazine editorial quality, shot on Canon 5D with 85mm lens`
         },
         {
           role: 'user',
-          content: `Übersetze für ein realistisches Foto:\n${germanPrompt}`
+          content: germanPrompt
         }
       ],
       model: 'openai/gpt-oss-20b',
-      temperature: 0.3,
+      temperature: 0.4,
     });
 
-    const translated = completion.choices[0]?.message?.content?.trim() || germanPrompt;
-    console.log(`   🌐 Übersetzt: "${translated.substring(0, 100)}..."`);
+    const translated = completion.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || germanPrompt;
+    console.log(`   🌐 Verfeinert (${translated.length} Zeichen): "${translated.substring(0, 120)}..."`);
     return translated;
   } catch (e) {
-    console.log(`   ⚠️ Übersetzung fehlgeschlagen: ${e.message}`);
+    console.log(`   ⚠️ Verfeinerung fehlgeschlagen: ${e.message}`);
     return germanPrompt;
   }
 }
+
 
 async function generateImageWithCloudflare(englishPrompt) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
