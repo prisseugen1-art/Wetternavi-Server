@@ -7,7 +7,7 @@ import pg from 'pg';
 import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket } from './server/gemini_live.js';
-import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus } from './server/telegram.js';
+import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
 
 dotenv.config();
 
@@ -139,7 +139,6 @@ function normalizePhone(phone) {
 
 // ========== ENDPUNKTE ==========
 
-// Health Check
 app.get('/', (req, res) => res.send('Server läuft erfolgreich!'));
 
 // -------- Debug --------
@@ -173,7 +172,6 @@ app.get('/api/debug/all', async (req, res) => {
   }
 });
 
-// -------- Debug: Key löschen --------
 app.post('/api/debug/delete-key', async (req, res) => {
   try {
     const { user_id, key } = req.body;
@@ -196,7 +194,6 @@ app.post('/api/debug/delete-key', async (req, res) => {
   }
 });
 
-// -------- Debug: Home + Presence --------
 app.get('/api/debug/home/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -218,7 +215,6 @@ app.get('/api/debug/home/:userId', async (req, res) => {
   }
 });
 
-// -------- Debug: Verfügbare Modelle --------
 app.get('/api/debug/models', async (req, res) => {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -246,7 +242,7 @@ app.get('/api/debug/models', async (req, res) => {
   }
 });
 
-// -------- Profil: Speichern --------
+// -------- Profil --------
 app.post('/api/profile/save', async (req, res) => {
   try {
     const { user_id, name, nickname, age, hometown } = req.body;
@@ -278,7 +274,6 @@ app.post('/api/profile/save', async (req, res) => {
   }
 });
 
-// -------- Profil: Laden --------
 app.get('/api/profile/:userId', async (req, res) => {
   try {
     const data = await getUserData(req.params.userId);
@@ -288,7 +283,7 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
-// -------- Create Web Call (Retell Backup) --------
+// -------- Retell --------
 app.post('/api/create-web-call', async (req, res) => {
   try {
     const userId = req.body.user_id;
@@ -358,7 +353,7 @@ app.post('/api/save-preference', async (req, res) => {
   }
 });
 
-// -------- Delete User Data --------
+// -------- Delete --------
 app.post('/api/delete-user-data', async (req, res) => {
   try {
     const userId = req.body?.user_id || req.body?.args?.user_id;
@@ -473,15 +468,15 @@ app.get('/api/telegram/status', (req, res) => {
   }
 });
 
-// Webhook-Route registrieren (falls Bot initialisiert)
-const telegramWebhookPath = getTelegramWebhookPath();
-if (telegramWebhookPath) {
-  const telegramCallback = getTelegramWebhookCallback();
-  if (telegramCallback) {
-    app.post(telegramWebhookPath, telegramCallback);
-    console.log(`📱 Telegram-Webhook-Route registriert: ${telegramWebhookPath}`);
+// -------- Telegram Webhook-Info (Debug) --------
+app.get('/api/telegram/webhook-info', async (req, res) => {
+  try {
+    const info = await getTelegramWebhookInfo();
+    res.json(info);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
-}
+});
 
 // ========== SENSOR-BUS ==========
 const sensorBus = new SensorBus();
@@ -494,17 +489,33 @@ setupGeminiWebSocket(server);
 server.listen(PORT, async () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
   console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
+  console.log(`🌐 Public Domain: ${process.env.RAILWAY_PUBLIC_DOMAIN || '(nicht gesetzt)'}`);
 
   await initDb();
 
-  // Telegram initialisieren
+  // ==================== TELEGRAM ====================
   try {
     const tgBot = await initTelegram();
     if (tgBot) {
+      // Webhook-Route JETZT registrieren (Bot ist initialisiert)
+      const webhookPath = getTelegramWebhookPath();
+      const webhookCallback = getTelegramWebhookCallback();
+
+      if (webhookPath && webhookCallback) {
+        app.post(webhookPath, webhookCallback);
+        console.log(`📱 Telegram-Webhook-Route registriert: ${webhookPath}`);
+      } else {
+        console.error('❌ Telegram-Webhook-Callback nicht verfügbar!');
+      }
+
+      // Webhook bei Telegram registrieren
       const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
       if (domain) {
         await setTelegramWebhook(domain);
+      } else {
+        console.error('❌ RAILWAY_PUBLIC_DOMAIN fehlt – kann Webhook nicht setzen!');
       }
+
       console.log('📱 Telegram initialisiert');
     }
   } catch (e) {

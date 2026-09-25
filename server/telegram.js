@@ -108,9 +108,6 @@ export async function initTelegram() {
         console.error('❌ Telegram-Listener-Fehler:', e.message);
       }
     }
-
-    // Bestätigung (optional, aber zeigt dem Nutzer dass es angekommen ist)
-    // await ctx.reply('📨 Nachricht empfangen.');
   });
 
   // ---- Bot-Info holen ----
@@ -169,6 +166,26 @@ export async function setTelegramWebhook(publicDomain) {
     console.log(`✅ Telegram-Webhook registriert: ${webhookUrl}`);
   } catch (e) {
     console.error('❌ Telegram-Webhook-Fehler:', e.message);
+  }
+}
+
+export async function getTelegramWebhookInfo() {
+  if (!bot) {
+    return { error: 'Bot nicht initialisiert' };
+  }
+  try {
+    const info = await bot.api.getWebhookInfo();
+    return {
+      url: info.url || '(keine URL gesetzt)',
+      hasCustomCertificate: info.has_custom_certificate,
+      pendingUpdateCount: info.pending_update_count,
+      lastErrorDate: info.last_error_date,
+      lastErrorMessage: info.last_error_message,
+      maxConnections: info.max_connections,
+      allowedUpdates: info.allowed_updates,
+    };
+  } catch (e) {
+    return { error: e.message };
   }
 }
 
