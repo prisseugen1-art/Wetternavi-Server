@@ -4,7 +4,6 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { WebSocketServer } from 'ws';
 import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
-import { sendWhatsAppMessage, onWhatsAppMessage } from './whatsapp.js';
 import { sendTelegramMessage, onTelegramMessage } from './telegram.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
@@ -350,13 +349,12 @@ function buildJonyPrompt(profile, role = 'freund') {
     'get_user_preferences aufrufen bei Fragen über Nutzer.',
     'save_user_preference (STILL) bei neuen Fakten.',
     '',
+        '===========================================',
+    'TELEGRAM',
     '===========================================',
-    'WHATSAPP + TELEGRAM',
-    '===========================================',
-    'Du kannst WhatsApp senden mit send_whatsapp_message.',
-    'Du kannst Telegram senden mit send_telegram_message.',
+    'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
     '',
-    'REGELN für beide:',
+    'REGELN:',
     '- Frage IMMER zuerst: "Soll ich das wirklich schicken?"',
     '- Warte auf Bestätigung ("ja", "ok", "ja schick").',
     '- Dann erst das Tool aufrufen.',
@@ -366,7 +364,7 @@ function buildJonyPrompt(profile, role = 'freund') {
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'send_whatsapp_message, send_telegram_message',
+    'send_telegram_message',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
   ].join('\n');
@@ -767,21 +765,9 @@ function buildJonyTools() {
             },
           },
         },
-        {
-          name: 'send_whatsapp_message',
-          description: 'Sendet eine WhatsApp-Nachricht an eine Telefonnummer. ' +
-                       'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
-                       'und warte auf Bestätigung, BEVOR du dieses Tool aufrufst.',
-          parameters: {
-            type: 'OBJECT',
-            properties: {
-              phone: { type: 'STRING', description: 'Telefonnummer mit Ländervorwahl, z.B. +4915212345678' },
-              text: { type: 'STRING', description: 'Der Nachrichtentext' },
-            },
-            required: ['phone', 'text'],
-          },
-        },
-        {
+        
+         
+        
           name: 'send_telegram_message',
           description: 'Sendet eine Telegram-Nachricht an einen Chat. ' +
                        'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
@@ -852,8 +838,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
-      } else if (fc.name === 'send_whatsapp_message') {
-        result = await handleSendWhatsApp(fc.args.phone, fc.args.text);
+
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
       } else if (fc.name === 'generate_script') {
@@ -887,16 +872,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
 
 // ==================== MESSENGER HANDLER ====================
 
-async function handleSendWhatsApp(phone, text) {
-  try {
-    const res = await sendWhatsAppMessage(phone, text);
-    console.log(`✅ WhatsApp gesendet an ${res.to}`);
-    return { success: true, to: res.to, message: 'Nachricht gesendet.' };
-  } catch (e) {
-    console.error('❌ WhatsApp-Send-Fehler:', e.message);
-    return { error: e.message };
-  }
-}
+
 
 async function handleSendTelegram(chatId, text) {
   try {
@@ -1346,47 +1322,7 @@ export function setupGeminiWebSocket(server) {
   return wss;
 }
 
-// ==================== WHATSAPP → APP FORWARDING ====================
 
-onWhatsAppMessage((payload) => {
-  const msg = {
-    type: 'whatsapp_incoming',
-    from: payload.from,
-    fromName: payload.fromName,
-    phone: payload.phone,
-    isGroup: payload.isGroup,
-    text: payload.text,
-    hasMedia: payload.hasMedia,
-    timestamp: payload.timestamp,
-  };
-
-  console.log(`📨 WhatsApp eingehend: ${payload.fromName} (${payload.phone}): "${payload.text.substring(0, 60)}"`);
-  console.log(`   → Leite an ${activeClients.size} aktive Clients weiter`);
-
-  for (const c of activeClients) {
-    try {
-      c.send(JSON.stringify(msg));
-    } catch (e) {}
-  }
-
-  for (const c of activeClients) {
-    if (c._session && c._currentAgent === 'jony') {
-      try {
-        c._session.sendClientContent({
-          turns: [{
-            role: 'user',
-            parts: [{
-              text: `[WHATSAPP-NACHRICHT EINGEHEND] Von ${payload.fromName} (${payload.phone}): "${payload.text}". ` +
-                    `Der Nutzer hat diese Nachricht NICHT gesagt – sie kam über WhatsApp. ` +
-                    `Reagiere NUR, wenn der Nutzer dich darauf anspricht. Sonst schweige.`
-            }],
-          }],
-          turnComplete: false,
-        });
-      } catch (e) {}
-    }
-  }
-});
 
 // ==================== TELEGRAM → APP FORWARDING ====================
 

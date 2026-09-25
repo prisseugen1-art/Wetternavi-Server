@@ -7,7 +7,6 @@ import pg from 'pg';
 import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket } from './server/gemini_live.js';
-import { initWhatsApp, getWhatsAppStatus, getWhatsAppQr, disconnectWhatsApp } from './server/whatsapp.js';
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus } from './server/telegram.js';
 
 dotenv.config();
@@ -464,37 +463,6 @@ app.post('/api/search-restaurant', async (req, res) => {
   }
 });
 
-// ========== WHATSAPP ==========
-
-app.get('/api/whatsapp/status', (req, res) => {
-  try {
-    res.json(getWhatsAppStatus());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/whatsapp/qr', (req, res) => {
-  try {
-    const qr = getWhatsAppQr();
-    if (!qr) {
-      return res.status(404).json({ error: 'Kein QR-Code verfügbar', hint: 'Session läuft bereits oder ist getrennt' });
-    }
-    res.json({ qr });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/whatsapp/disconnect', async (req, res) => {
-  try {
-    await disconnectWhatsApp();
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // ========== TELEGRAM ==========
 
 app.get('/api/telegram/status', (req, res) => {
@@ -528,14 +496,6 @@ server.listen(PORT, async () => {
   console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
 
   await initDb();
-
-  // WhatsApp initialisieren
-  try {
-    await initWhatsApp();
-    console.log('📱 WhatsApp initialisiert');
-  } catch (e) {
-    console.error('❌ WhatsApp-Init-Fehler:', e.message);
-  }
 
   // Telegram initialisieren
   try {
