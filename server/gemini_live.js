@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const IMAGE_MODEL = 'gemini-3.8-flash-image-preview';
+const IMAGE_MODEL = 'gemini-3.8-flash-image-preview';  // Fallbacks weiter unten
 const TEXT_MODEL = 'gemini-3.8-flash';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
@@ -211,12 +211,19 @@ STIL:
 - 1-2 Sätze pro Antwort (außer bei Rückfragen zur Klärung).
 - KEIN Smalltalk, keine Witze.
 
+⚠️ WICHTIG bei Tool-Fehlern:
+- Wenn generate_script oder generate_image einen Fehler liefert:
+  * Rufe es NICHT erneut auf.
+  * Sage dem Nutzer: "Es gibt ein technisches Problem. Bitte später nochmal versuchen."
+  * Warte auf eine neue Anweisung des Nutzers.
+
 VERBOTEN:
 - Skript vorlesen
 - Skript-Inhalt in Antwort ausgeben
 - Slides einzeln aufzählen ("Slide 1: ...", "Slide 2: ...")
 - Bilder ohne Skript-Bestätigung generieren
-- Mehr als 2 Sätze pro Antwort (außer bei echten Rückfragen)`;
+- Mehr als 2 Sätze pro Antwort (außer bei echten Rückfragen)
+- Tools mehrfach hintereinander aufrufen wenn Fehler`;
 
 function buildBusinessPrompt(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -254,6 +261,7 @@ function buildBusinessPrompt(profile) {
     '- Skript vorlesen oder in Antwort ausgeben',
     '- Slides einzeln aufzählen',
     '- Bilder ohne Bestätigung',
+    '- Tools nach Fehler wiederholen',
   ].join('\n');
 }
 
@@ -733,14 +741,46 @@ Regeln:
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL,
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    });
+    // Text-Modell mit Fallback
+    const textModels = [
+      TEXT_MODEL,
+      'gemini-3.8-flash',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+    ];
+
+    let response = null;
+    let lastError = null;
+
+    for (const modelName of textModels) {
+      try {
+        console.log(`   Versuch Text-Modell: ${modelName}`);
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+        console.log(`   ✅ Klappt mit: ${modelName}`);
+        break;
+      } catch (e) {
+        lastError = e;
+        const errMsg = e.message || String(e);
+        if (errMsg.includes('not found') || errMsg.includes('NOT_FOUND') || errMsg.includes('no longer available')) {
+          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
+          continue;
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    if (!response) {
+      console.error('❌ Kein Text-Modell verfügbar.');
+      return { error: 'Kein Text-Modell verfügbar: ' + (lastError?.message || '?') };
+    }
 
     const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // JSON extrahieren (falls Markdown drumrum)
+    // JSON extrahieren
     let slides = null;
     try {
       const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -761,7 +801,6 @@ Regeln:
 
     console.log(`✅ Skript mit ${slides.length} Slides generiert`);
 
-    // An App senden
     clientWs.send(JSON.stringify({
       type: 'script',
       topic: topic,
@@ -786,17 +825,59 @@ Regeln:
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
   console.log(`🎨 Generiere Bild für Slide ${slideNumber}...`);
 
+  // Fallback-Liste an Modellnamen (wird durchprobiert)
+  const imageModels = [
+    IMAGE_MODEL,
+    'gemini-3.8-flash-image',
+    'gemini-3.8-flash-image-generation',
+    'gemini-3.8-flash-image-preview',
+    'gemini-2.5-flash-image',
+    'gemini-2.5-flash-image-preview',
+    'gemini-2.5-flash-image-generation',
+    'gemini-2.0-flash-preview-image-generation',
+    'gemini-2.0-flash-exp-image-generation',
+  ];
+
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: [{
-        role: 'user',
-        parts: [{ text: `Instagram-Karussell-Bild (1:1).\n\n${prompt}` }],
-      }],
-      config: { responseModalities: ['IMAGE'] },
-    });
+    let response = null;
+    let usedModel = null;
+    let lastError = null;
+
+    for (const modelName of imageModels) {
+      try {
+        console.log(`   Versuch Image-Modell: ${modelName}`);
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents: [{
+            role: 'user',
+            parts: [{ text: `Instagram-Karussell-Bild (1:1).\n\n${prompt}` }],
+          }],
+          config: { responseModalities: ['IMAGE'] },
+        });
+        usedModel = modelName;
+        console.log(`   ✅ Klappt mit: ${modelName}`);
+        break;
+      } catch (e) {
+        lastError = e;
+        const errMsg = e.message || String(e);
+        if (errMsg.includes('not found') || errMsg.includes('NOT_FOUND') || errMsg.includes('not supported')) {
+          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
+          continue;
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    if (!response) {
+      console.error('❌ Kein Image-Modell verfügbar. Letzter Fehler:', lastError?.message);
+      return {
+        error: 'Kein Image-Modell verfügbar. Prüfe /api/debug/models im Browser.',
+        slide: slideNumber,
+      };
+    }
 
     let imageBase64 = null;
     let mimeType = 'image/png';
@@ -824,7 +905,7 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       data: imageBase64,
     }));
 
-    return { success: true, slide: slideNumber };
+    return { success: true, slide: slideNumber, model: usedModel };
   } catch (e) {
     console.error('❌ Image-Generation-Fehler:', e.message);
     return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
