@@ -54,6 +54,13 @@ const PATTERNS = {
     `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
     'i'
   ),
+  kids: new RegExp(
+    `\\b(${NAME_PATTERN}.?(kids|niklas|kinder|kind|junge|junior|kumpel)|` +
+    `kids.?modus|kinder.?modus|niklas.?modus|junge.?modus|` +
+    `${NAME_PATTERN}.?(детск|пацан|малой|ребенок|ребёнок)|` +
+    `детск.?мод|детск.?режим)\\b`,
+    'i'
+  ),
   dolmetscher: new RegExp(
     `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
     `dolmetscher.?modus|übersetzer|uebersetzer|` +
@@ -65,12 +72,19 @@ const PATTERNS = {
 // ==================== PROAKTIV-INTERVALLE ====================
 
 const PROACTIVE_INTERVALS = {
-  party: 5000,
-  freund: 15000,
+  kids: 25000,      // Kids: 25s – Kinder brauchen etwas mehr Raum
+  party: 15000,
+  freund: 45000,
   berater: 0,
 };
 
 function buildProactivePrompt(role) {
+  if (role === 'kids') {
+    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
+           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem – Gaming, Fußball, ' +
+           'Schule, Hobbys, Lieblingsfilm, YouTube. ' +
+           'EIN Satz, wie ein älterer Kumpel. Nicht nerven.';
+  }
   if (role === 'party') {
     return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
            'Sei PROAKTIV: Lockerer Spruch, Vorschlag oder Kommentar zur Umgebung. ' +
@@ -101,23 +115,15 @@ Wenn der Nutzer Russisch spricht → Russisch.
 Wenn der Nutzer eine ANDERE Sprache spricht (Spanisch, Englisch, Rumänisch, 
 Französisch, Italienisch, Türkisch, Polnisch, etc.) oder nur Wortfetzen:
 → REAGIERE NICHT mit "Bitte Deutsch oder Russisch".
-→ Gehe einfach auf DEUTSCH normal weiter, als hättest du es nicht gehört.
-→ Wenn es zur Situation passt: frag auf Deutsch nach ("Was meinst du?").
-→ KEINE Sprach-Belehrung. Kein "Bitte sprich X". Keine Sprachendiskussion.
+→ Gehe einfach auf DEUTSCH normal weiter.
+→ KEINE Sprach-Belehrung.
 
 VERBOTEN (außer im Dolmetscher-Modus):
 - Spanisch sprechen ❌
 - Englisch sprechen ❌
-- Rumänisch sprechen ❌
-- Französisch sprechen ❌
 - Jede andere Sprache außer Deutsch/Russisch ❌
 
-AUSNAHME: Dolmetscher-Modus
-Wenn der Nutzer explizit sagt "Jony, Dolmetscher" / "Jony, übersetze" / 
-"Jony, Dolmetscher-Modus" → wechsle in den Übersetzer-Modus und übersetze 
-zwischen beliebigen Sprachen. Beenden mit "Jony, Dolmetscher aus".
-
-Diese Regel hat HÖCHSTE Priorität.
+AUSNAHME: Dolmetscher-Modus (nur auf expliziten Befehl)
 `;
 
 // ==================== ROLLEN (für Jony) ====================
@@ -148,6 +154,64 @@ const ROLES = {
 - Strukturiere Antworten.
 - Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.
 - Antworte in 2-3 kurzen Sätzen.`,
+  },
+  kids: {
+    name: 'Kids',
+    prompt: `Du bist im KIDS-MODUS – für Kinder (ca. 8-14 Jahre).
+
+🚨 WICHTIGSTE REGEL: Behandle Kinder wie COOLE KUMPELS, nicht wie Babys.
+
+DEIN TON:
+- Locker, entspannt, freundlich.
+- Wie ein älterer Cousin (14-16), nicht wie ein Erwachsener.
+- NIE herablassend ("Na, kleiner Mann?" = ❌).
+- NIE übertrieben ("Suuuper gemacht!" = ❌).
+- NIE peinlich (kein "YOLO", kein "Swag" wenn du's nicht echt meinst).
+- KEIN Smalltalk über Schule/Noten als Erstes.
+
+WAS DU MACHST:
+- Sprich über COOLE Themen: Gaming (Minecraft, Fortnite, Roblox, Brawl Stars), 
+  Fußball, YouTube, Filme, coole Fakten (Weltraum, Dinosaurier, Technik), 
+  Sport, Musik, Tiere.
+- Erzähle coole FUN-FACTS, wenn's passt. Z.B. "Wusstest du, dass ein Oktopus 
+  drei Herzen hat?" – aber nicht aufdringlich.
+- Frag nach seinen Interessen: "Zockst du eigentlich auch?" / 
+  "Was für Musik hörst du so?"
+- Hör ZU wenn er erzählt. Frag nach mit echtem Interesse.
+- Wenn er was Cooles erzählt: zeig Begeisterung ("Echt? Erzähl!").
+- Wenn er was weiß: bestätige, sei beeindruckt ("Whoa, das wusst ich nicht!").
+
+WAS DU NICHT MACHST:
+- Keine Belehrungen, keine Vorträge.
+- Keine "Als ich in deinem Alter war..."-Geschichten.
+- Keine Rückfragen-Flut (nicht 5 Fragen hintereinander).
+- Keine peinlichen Erwachsenen-Floskeln.
+- Nicht über Eugen lästern.
+
+ÜBER NIKLAS (falls er dabei ist, aus dem Gedächtnis):
+- Er ist 11 (wird im Dezember 12).
+- Er spielt Fußball (mit Papa).
+- Er ist stark in Mathe.
+- Sein Bruder Konstantin ist über 18.
+
+EINSTIEG wenn Niklas dabei ist (nur EINMAL, nicht wiederholen):
+"Heeey, du musst Niklas sein! Ich hab schon viel von dir gehört. 
+Wie läuft's mit Fußball gerade?"
+
+Wenn Niklas was erzählt: hör zu, frag nach, bleib dran am Thema.
+
+Antworte in 1-2 Sätzen. Kurz, cool, echt.`,
+GEDÄCHTNIS (SEHR WICHTIG):
+Wenn Niklas etwas über sich erzählt, SPEICHERE es SOFORT mit save_user_preference:
+- Lieblingsspiel → key: "niklas_game", value: "Minecraft"
+- Lieblingsverein → key: "niklas_team", value: "Bayern"
+- Hobby → key: "niklas_hobby", value: "..."
+- Schule → key: "niklas_school_likes", value: "..."
+- Freunde → key: "niklas_friends", value: "..."
+- Sonstiges → key: "niklas_<thema>"
+
+REGEL: SOBALD Niklas was erzählt → EINMAL save_user_preference aufrufen.
+Du kündigst das NICHT an. Es passiert still im Hintergrund.
   },
 };
 
@@ -210,6 +274,8 @@ function buildJonyPrompt(profile, role = 'freund') {
     '===========================================',
     'get_user_preferences aufrufen bei Fragen über Nutzer.',
     'save_user_preference (STILL) bei neuen Fakten.',
+    'WICHTIG: Wenn Niklas was über sich erzählt (Hobbys, Schule, Freunde), ' +
+    'SPEICHERE es still mit Prefix "niklas_".',
     '',
     '===========================================',
     'TOOLS',
@@ -300,14 +366,14 @@ function dolmetscherInstruction(active) {
   if (active) {
     return '[SYSTEM-INSTRUKTION] DOLMETSCHER-MODUS AKTIV.\n\n' +
            'Du bist jetzt Übersetzer zwischen beliebigen Sprachen.\n' +
-           '- Wenn eine fremde Person spricht (z.B. Spanisch): Übersetze ins DEUTSCHE für Eugen.\n' +
+           '- Wenn eine fremde Person spricht: Übersetze ins DEUTSCHE für Eugen.\n' +
            '- Wenn Eugen dir was sagt (Deutsch/Russisch): Übersetze in die Zielsprache.\n' +
-           '- Format bei Übersetzung: NUR die Übersetzung, keine Erklärung.\n' +
+           '- Format bei Übersetzung: NUR die Übersetzung.\n' +
            '- Bestätige beim Start: "Dolmetscher-Modus aktiv."\n' +
            '- Beenden mit "Jony, Dolmetscher aus" → "Dolmetscher-Modus beendet."\n\n' +
            'In diesem Modus darfst du ALLE Sprachen sprechen.';
   }
-  return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet. Zurück zur Standard-Sprachregel (nur Deutsch/Russisch).';
+  return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet. Zurück zur Standard-Sprachregel.';
 }
 
 // ==================== AGENT-DEFINITIONEN ====================
@@ -436,11 +502,9 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     let targetRole = clientWs._currentRole || 'freund';
     let toggledDolmetscher = null;
 
-    // ---- Dolmetscher-Trigger (nur bei Jony, nicht Business) ----
+    // ---- Dolmetscher-Trigger (nur bei Jony) ----
     if (agentType === 'jony' && PATTERNS.dolmetscher.test(userText)) {
       const currentlyOn = clientWs._dolmetscherActive || false;
-
-      // Prüfen ob "aus" oder "beenden"
       const isOff = /\b(aus|beenden|stop|off|хватит|стоп|выключи)\b/i.test(userText);
 
       if (currentlyOn && isOff) {
@@ -474,6 +538,9 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       } else if (PATTERNS.berater.test(userText)) {
         targetAgent = 'jony';
         targetRole = 'berater';
+      } else if (PATTERNS.kids.test(userText)) {
+        targetAgent = 'jony';
+        targetRole = 'kids';
       } else if (PATTERNS.backToJony.test(userText)) {
         targetAgent = 'jony';
         targetRole = 'freund';
@@ -484,6 +551,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       } else {
         if (PATTERNS.party.test(userText)) targetRole = 'party';
         else if (PATTERNS.berater.test(userText)) targetRole = 'berater';
+        else if (PATTERNS.kids.test(userText)) targetRole = 'kids';
         else if (PATTERNS.backToJony.test(userText)) targetRole = 'freund';
       }
     }
@@ -621,27 +689,25 @@ function buildBusinessTools() {
       functionDeclarations: [
         {
           name: 'generate_script',
-          description: 'Erstellt das Instagram-Karussell-Skript (Slides mit Titel, Body, Bild-Prompt). ' +
-                       'Das Skript wird automatisch als TEXT in der App angezeigt. ' +
-                       'Sage danach NUR kurz "Skript ist da, schau in die App."',
+          description: 'Erstellt das Instagram-Karussell-Skript. Sage danach NUR "Skript ist da, schau in die App."',
           parameters: {
             type: 'OBJECT',
             properties: {
-              topic: { type: 'STRING', description: 'Das Thema' },
-              audience: { type: 'STRING', description: 'Zielgruppe' },
-              focus: { type: 'STRING', description: 'Kernaussage' },
-              slide_count: { type: 'INTEGER', description: 'Anzahl Slides (1-10)' },
+              topic: { type: 'STRING' },
+              audience: { type: 'STRING' },
+              focus: { type: 'STRING' },
+              slide_count: { type: 'INTEGER' },
             },
             required: ['topic'],
           },
         },
         {
           name: 'generate_image',
-          description: 'Generiert ein Bild für einen Karussell-Slide. Ein Aufruf pro Slide.',
+          description: 'Generiert ein Bild für einen Karussell-Slide.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              prompt: { type: 'STRING', description: 'Visueller Prompt' },
+              prompt: { type: 'STRING' },
               slide_number: { type: 'INTEGER' },
             },
             required: ['prompt', 'slide_number'],
@@ -763,7 +829,7 @@ async function getUserPreferences(userId) {
   return { preferences: data.data || {} };
 }
 
-// ==================== SCRIPT GENERATION (Groq) ====================
+// ==================== SCRIPT GENERATION ====================
 
 async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
   console.log(`📝 Groq generiert Skript: "${topic}"`);
@@ -796,22 +862,17 @@ Antworte NUR mit einem JSON-Objekt:
 REGELN FÜR image_prompt (SEHR WICHTIG):
 Der image_prompt MUSS auf ENGLISCH sein und MINDESTENS 35-50 Wörter enthalten.
 Er MUSS alle diese Elemente enthalten:
-
-1. SUBJECT: Wer/was genau? (z.B. "an older male angler with grey beard wearing green waders")
-2. ACTION/POSE: Was tut das Subjekt? (z.B. "holding a carbon fiber fishing rod, casting into the water")
-3. SETTING: Wo genau? (z.B. "on a wooden dock by a misty alpine lake at sunrise")
-4. LIGHTING: Welches Licht? (z.B. "golden hour backlight, soft morning haze")
-5. CAMERA: Winkel + Perspektive (z.B. "medium close-up shot, slight low angle")
-6. STYLE: Stil (z.B. "cinematic photography, hyperrealistic, editorial magazine style")
-7. QUALITY: Qualitätsmerkmale (z.B. "sharp focus, 8K detail, shallow depth of field")
-8. MOOD: Stimmung (z.B. "peaceful, serene, contemplative")
-
-Beispiel:
-"A weathered male angler with grey beard and green waders, casting a carbon fiber fishing rod into a misty alpine lake, standing on an old wooden dock at sunrise, golden hour backlight with soft morning haze, medium close-up shot from slight low angle, cinematic photography style, hyperrealistic, sharp focus, 8K detail, shallow depth of field, peaceful and serene mood, professional editorial magazine quality"
+1. SUBJECT (wer genau, mit Details)
+2. ACTION/POSE
+3. SETTING (konkret)
+4. LIGHTING (spezifisch)
+5. CAMERA (Winkel)
+6. STYLE (z.B. cinematic photography, hyperrealistic)
+7. QUALITY (z.B. sharp focus, 8K detail)
+8. MOOD
 
 - Titel max 5 Wörter, Body max 20 Wörter (DEUTSCH)
 - Slide 1 = Hook, mittlere = Inhalt, letzter = Call-to-Action
-- KEINE generischen Prompts wie "fishing equipment" – sei SPEZIFISCH
 
 NUR das JSON.`;
 
@@ -880,7 +941,7 @@ NUR das JSON.`;
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
 
-// ==================== IMAGE GENERATION (Cloudflare Workers AI) ====================
+// ==================== IMAGE GENERATION ====================
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -894,25 +955,14 @@ async function translateToEnglishImagePrompt(germanPrompt) {
           role: 'system',
           content: `Du bist ein Prompt-Engineer für FLUX.1 Bildgenerierung.
 
-Deine Aufgabe: Wandle den Input in einen MAXIMAL DETAILLIERTEN englischen Prompt um.
-
 REGELN:
-- Wenn der Input schon englisch ist: Verfeinere und erweitere ihn.
-- Wenn der Input deutsch ist: Übersetze UND erweitere ihn.
-- Der Output MUSS 40-60 Wörter enthalten.
-- Der Output MUSS alle Aspekte enthalten: Subjekt (mit Details wie Alter, Kleidung), Aktion, Umgebung (konkret), Beleuchtung (spezifisch), Kamerawinkel, Stil, Qualität, Stimmung.
-- KEINE generischen Phrasen wie "high quality" – immer spezifisch.
-- Antworte NUR mit dem englischen Prompt in EINER Zeile. Keine Erklärungen.
-- Keine Anführungszeichen am Anfang/Ende.
-
-Beispiel:
-Input: "Angler am See"
-Output: A weathered older male angler with grey beard and green waterproof waders, casting a carbon fiber rod with silver spinning reel into a calm lake surrounded by pine forest, standing on an old wooden dock at golden hour sunrise, warm backlight with soft mist on the water, medium close-up shot from low angle, cinematic photography style, hyperrealistic detail, sharp focus on the angler with shallow depth of field, peaceful contemplative mood, professional magazine editorial quality, shot on Canon 5D with 85mm lens`
+- Output MUSS 40-60 Wörter enthalten.
+- Subjekt mit Details, Aktion, Umgebung, Beleuchtung, Kamerawinkel, Stil, Qualität, Stimmung.
+- KEINE generischen Phrasen.
+- Antworte NUR mit dem englischen Prompt in EINER Zeile.
+- Keine Anführungszeichen.`
         },
-        {
-          role: 'user',
-          content: germanPrompt
-        }
+        { role: 'user', content: germanPrompt }
       ],
       model: 'openai/gpt-oss-20b',
       temperature: 0.4,
@@ -993,15 +1043,11 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       } catch (e) {
         lastError = e;
         console.log(`   ⏭️  Versuch ${attempt} fehlgeschlagen: ${e.message}`);
-        if (attempt < 3) {
-          await sleep(3000 * attempt);
-        }
+        if (attempt < 3) await sleep(3000 * attempt);
       }
     }
 
-    if (!result) {
-      throw lastError || new Error('Cloudflare fehlgeschlagen');
-    }
+    if (!result) throw lastError || new Error('Cloudflare fehlgeschlagen');
 
     console.log(`✅ Slide ${slideNumber} generiert via Cloudflare`);
 
