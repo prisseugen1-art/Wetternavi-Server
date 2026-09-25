@@ -1,6 +1,7 @@
 // server/telegram.js
 
 import { Bot, webhookCallback } from 'grammy';
+import { generateTelegramReply, getTelegramSessionInfo, clearTelegramSession } from './telegram_agent.js';
 
 // ==================== KONFIGURATION ====================
 
@@ -55,14 +56,16 @@ export async function initTelegram() {
     await ctx.reply(
       `Hallo ${name}! 👋\n\n` +
       `Ich bin Jony, dein Begleiter.\n\n` +
-      `Schreib mir einfach eine Nachricht – ich leite sie an Eugen weiter.\n\n` +
-      `📌 Deine Chat-ID: \`${chatId}\`\n` +
-      `(Speichere sie, falls du die Whitelist aktivieren willst.)`,
+      `Schreib mir einfach – ich antworte direkt.\n\n` +
+      `Verfügbare Modi:\n` +
+      `• "Jony, Party" → Party-Modus\n` +
+      `• "Jony, Freund" → Freund-Modus (Standard)\n\n` +
+      `📌 Deine Chat-ID: \`${chatId}\``,
       { parse_mode: 'Markdown' }
     );
   });
 
-  // ---- /id Command (Chat-ID anzeigen) ----
+  // ---- /id Command ----
   bot.command('id', async (ctx) => {
     await ctx.reply(`Deine Chat-ID: \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
   });
@@ -74,10 +77,20 @@ export async function initTelegram() {
       await ctx.reply('⛔ Dieser Bot ist privat.');
       return;
     }
-    await ctx.reply('✅ Jony ist online und bereit.');
+    const info = getTelegramSessionInfo(chatId);
+    const roleText = info ? `Rolle: ${info.role}, Verlauf: ${info.historyLength}` : 'Keine aktive Session';
+    await ctx.reply(`✅ Jony ist online.\n${roleText}`);
   });
 
-  // ---- Eingehende Nachrichten ----
+  // ---- /reset Command ----
+  bot.command('reset', async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!isAllowed(chatId)) return;
+    clearTelegramSession(chatId);
+    await ctx.reply('🔄 Session zurückgesetzt. Wir fangen neu an.');
+  });
+
+  // ---- Eingehende Text-Nachrichten ----
   bot.on('message:text', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) return;
@@ -90,7 +103,7 @@ export async function initTelegram() {
 
     console.log(`📩 Telegram von ${fromName} ${username} (${chatId}): "${text.substring(0, 80)}"`);
 
-    // Event an Listener weitergeben
+    // Event an Listener weitergeben (falls App offen ist)
     const payload = {
       chatId,
       fromName,
@@ -108,9 +121,25 @@ export async function initTelegram() {
         console.error('❌ Telegram-Listener-Fehler:', e.message);
       }
     }
+
+    // ==================== AUTONOME ANTWORT ====================
+    try {
+      // Typing-Indikator senden
+      await ctx.replyWithChatAction('typing');
+
+      const reply = await generateTelegramReply(chatId, text, null);
+
+      if (reply && reply.trim()) {
+        await ctx.reply(reply);
+        console.log(`📤 Telegram-Antwort gesendet an ${chatId}`);
+      }
+    } catch (e) {
+      console.error('❌ Telegram-Antwort-Fehler:', e.message);
+      await ctx.reply('Sorry, ich hab grad Probleme. Versuch\'s nochmal.').catch(() => {});
+    }
   });
 
-  // ---- Bot-Info holen ----
+  // ---- Bot-Info ----
   try {
     const me = await bot.api.getMe();
     botUsername = me.username;
@@ -123,22 +152,14 @@ export async function initTelegram() {
   return bot;
 }
 
-// ==================== SENDEN ====================
+// ==================== SENDEN (falls manuell aus App nötig) ====================
 
 export async function sendTelegramMessage(chatId, text) {
-  if (!bot) {
-    throw new Error('Telegram-Bot nicht initialisiert');
-  }
-
+  if (!bot) throw new Error('Telegram-Bot nicht initialisiert');
   const cleanText = sanitizeText(text);
-  if (!cleanText) {
-    throw new Error('Leerer Nachrichtentext');
-  }
-
+  if (!cleanText) throw new Error('Leerer Nachrichtentext');
   console.log(`📤 Sende Telegram an ${chatId}: "${cleanText.substring(0, 80)}"`);
-
   await bot.api.sendMessage(chatId, cleanText);
-
   return { success: true, to: chatId };
 }
 
@@ -155,9 +176,7 @@ export function getTelegramWebhookPath() {
 
 export async function setTelegramWebhook(publicDomain) {
   if (!bot) return;
-
   const webhookUrl = `https://${publicDomain}${getTelegramWebhookPath()}`;
-
   try {
     await bot.api.setWebhook(webhookUrl, {
       secret_token: WEBHOOK_SECRET,
@@ -170,9 +189,7 @@ export async function setTelegramWebhook(publicDomain) {
 }
 
 export async function getTelegramWebhookInfo() {
-  if (!bot) {
-    return { error: 'Bot nicht initialisiert' };
-  }
+  if (!bot) return { error: 'Bot nicht initialisiert' };
   try {
     const info = await bot.api.getWebhookInfo();
     return {

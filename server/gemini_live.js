@@ -1319,42 +1319,8 @@ export function setupGeminiWebSocket(server) {
 
 // ==================== TELEGRAM → APP FORWARDING ====================
 
+// ==================== TELEGRAM (nur Log, kein App-Push) ====================
+
 onTelegramMessage((payload) => {
-  const msg = {
-    type: 'telegram_incoming',
-    chatId: payload.chatId,
-    fromName: payload.fromName,
-    username: payload.username,
-    text: payload.text,
-    isGroup: payload.isGroup,
-    chatTitle: payload.chatTitle,
-    timestamp: payload.timestamp,
-  };
-
-  console.log(`📨 Telegram eingehend: ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
-  console.log(`   → Leite an ${activeClients.size} aktive Clients weiter`);
-
-  for (const c of activeClients) {
-    try {
-      c.send(JSON.stringify(msg));
-    } catch (e) {}
-  }
-
-  for (const c of activeClients) {
-    if (c._session && c._currentAgent === 'jony') {
-      try {
-        c._session.sendClientContent({
-          turns: [{
-            role: 'user',
-            parts: [{
-              text: `[TELEGRAM-NACHRICHT EINGEHEND] Von ${payload.fromName} (Chat-ID: ${payload.chatId}): "${payload.text}". ` +
-                    `Der Nutzer hat diese Nachricht NICHT gesagt – sie kam über Telegram. ` +
-                    `Reagiere NUR, wenn der Nutzer dich darauf anspricht. Sonst schweige.`
-            }],
-          }],
-          turnComplete: false,
-        });
-      } catch (e) {}
-    }
-  }
+  console.log(`📨 Telegram (App-Push deaktiviert): ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
 });
