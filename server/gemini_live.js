@@ -5,8 +5,8 @@ import { WebSocketServer } from 'ws';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const IMAGE_MODEL = 'gemini-2.5-flash-image-preview';
-const TEXT_MODEL = 'gemini-2.5-flash';
+const IMAGE_MODEL = 'gemini-3.8-flash-image-preview';
+const TEXT_MODEL = 'gemini-3.8-flash';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
