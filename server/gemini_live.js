@@ -855,7 +855,7 @@ async function generateImageWithCloudflare(englishPrompt) {
     },
     body: JSON.stringify({
       prompt: englishPrompt,
-      steps: 4,
+      steps: 8,
     }),
   });
 
