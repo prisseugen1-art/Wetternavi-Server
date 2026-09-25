@@ -2,17 +2,23 @@
 
 import { GoogleGenAI, Modality } from '@google/genai';
 import { WebSocketServer } from 'ws';
+import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-  // Fallbacks weiter unten
-const IMAGE_MODEL = 'gemini-2.5-flash-image';
-const TEXT_MODEL = 'gemini-3.8-flash';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';   // oder 'llama-3.1-8b-instant' (schneller, günstiger)
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
+
+// ==================== GROQ CLIENT ====================
+
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: 'https://api.groq.com/openai/v1',
+});
 
 // ==================== NAME-PATTERN ====================
 
@@ -179,7 +185,7 @@ Skripte werden als TEXT in der App angezeigt – nicht gesprochen.
 Deine Stimme nutzt du nur für KURZE Ansagen (max 1-2 Sätze).
 
 DEINE AUFGABE:
-Karussells erstellen (5-10 Slides) – aber NUR über das Tool generate_script.
+Karussells erstellen (1-10 Slides) – aber NUR über das Tool generate_script.
 Du LIEST NICHTS vor. Du SPRICHST NICHTS vom Skript.
 Du SCHREIBST NICHTS vom Skript-Inhalt in deine Antwort.
 
@@ -193,9 +199,9 @@ WORKFLOW:
 2. SKRIPT GENERIEREN
    - Sage NUR: "Alles klar, ich erstelle das Skript."
    - Rufe SOFORT generate_script auf mit:
-     * topic: das Thema (z.B. "Angeln")
-     * audience: Zielgruppe (z.B. "Anfänger", "Profi-Angler")
-     * focus: Kernaussage (z.B. "Ausrüstung für Raubgewässer")
+     * topic: das Thema
+     * audience: Zielgruppe
+     * focus: Kernaussage
      * slide_count: 1-10 (Standard 8)
    - Das Tool liefert das Skript direkt an die App.
    - Nach dem Tool: Sage NUR: "Skript ist da. Schau in die App."
@@ -209,7 +215,7 @@ WORKFLOW:
 
 STIL:
 - Direkt, präzise, kurz.
-- 1-2 Sätze pro Antwort (außer bei Rückfragen zur Klärung).
+- 1-2 Sätze pro Antwort.
 - KEIN Smalltalk, keine Witze.
 
 ⚠️ WICHTIG bei Tool-Fehlern:
@@ -221,9 +227,9 @@ STIL:
 VERBOTEN:
 - Skript vorlesen
 - Skript-Inhalt in Antwort ausgeben
-- Slides einzeln aufzählen ("Slide 1: ...", "Slide 2: ...")
+- Slides einzeln aufzählen
 - Bilder ohne Skript-Bestätigung generieren
-- Mehr als 2 Sätze pro Antwort (außer bei echten Rückfragen)
+- Mehr als 2 Sätze pro Antwort
 - Tools mehrfach hintereinander aufrufen wenn Fehler`;
 
 function buildBusinessPrompt(profile) {
@@ -573,8 +579,8 @@ function buildBusinessTools() {
             type: 'OBJECT',
             properties: {
               topic: { type: 'STRING', description: 'Das Thema, z.B. "Angeln"' },
-              audience: { type: 'STRING', description: 'Zielgruppe, z.B. "Anfänger", "Profi-Angler"' },
-              focus: { type: 'STRING', description: 'Kernaussage, z.B. "Ausrüstung für Raubgewässer"' },
+              audience: { type: 'STRING', description: 'Zielgruppe, z.B. "Anfänger"' },
+              focus: { type: 'STRING', description: 'Kernaussage' },
               slide_count: { type: 'INTEGER', description: 'Anzahl Slides (1-10). Standard: 8.' },
             },
             required: ['topic'],
@@ -709,10 +715,15 @@ async function getUserPreferences(userId) {
   return { preferences: data.data || {} };
 }
 
-// ==================== SCRIPT GENERATION (Text-only) ====================
+// ==================== SCRIPT GENERATION (Groq – kostenlos) ====================
 
 async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
-  console.log(`📝 Generiere Skript: "${topic}" (Zielgruppe: ${audience || '-'}, Fokus: ${focus || '-'})`);
+  console.log(`📝 Groq generiert Skript: "${topic}" (Zielgruppe: ${audience || '-'}, Fokus: ${focus || '-'})`);
+
+  if (!process.env.GROQ_API_KEY) {
+    console.error('❌ GROQ_API_KEY fehlt!');
+    return { error: 'GROQ_API_KEY ist nicht konfiguriert.' };
+  }
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
@@ -723,85 +734,65 @@ Zielgruppe: ${audience || 'Allgemein'}
 Fokus: ${focus || 'Tipps, Fakten und Mehrwert'}
 Anzahl Slides: ${count}
 
-Antworte NUR mit einem JSON-Array. KEINE Erklärungen, KEIN Markdown, KEINE Kommentare.
-Format:
-[
-  {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Erklärender Text (max 20 Wörter)", "image_prompt": "Bildbeschreibung mit Stil, Farben, Motiv"},
-  {"slide": 2, "title": "...", "body": "...", "image_prompt": "..."}
-]
+Antworte NUR mit einem JSON-Objekt in diesem Format:
+{
+  "slides": [
+    {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Erklärender Text (max 20 Wörter)", "image_prompt": "Bildbeschreibung mit Stil, Farben, Motiv"},
+    {"slide": 2, "title": "...", "body": "...", "image_prompt": "..."}
+  ]
+}
 
 Regeln:
 - Slide 1: Hook (neugierig machend)
-- Slides 2-${count-1}: Kerninhalt
+- Slides 2-${count - 1}: Kerninhalt
 - Slide ${count}: Call-to-Action
 - Titel: max 5 Wörter
 - Body: max 20 Wörter
 - image_prompt: 1-2 Sätze, beschreibt Motiv, Stil, Farben, Stimmung
-- Sprache: Deutsch`;
+- Sprache: Deutsch
+
+NUR das JSON, sonst nichts.`;
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'Du bist ein Assistent, der Instagram-Karussell-Skripte als JSON erstellt. Antworte ausschließlich mit gültigem JSON.'
+        },
+        { role: 'user', content: prompt }
+      ],
+      model: GROQ_MODEL,
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    });
 
-    // Text-Modell mit Fallback
-    const textModels = [
-      TEXT_MODEL,
-      'gemini-3.8-flash',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-    ];
-
-    let response = null;
-    let lastError = null;
-
-    for (const modelName of textModels) {
-      try {
-        console.log(`   Versuch Text-Modell: ${modelName}`);
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
-        console.log(`   ✅ Klappt mit: ${modelName}`);
-        break;
-      } catch (e) {
-        lastError = e;
-        const errMsg = e.message || String(e);
-        if (errMsg.includes('not found') || errMsg.includes('NOT_FOUND') || errMsg.includes('no longer available')) {
-          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
-          continue;
-        } else {
-          throw e;
-        }
-      }
-    }
-
-    if (!response) {
-      console.error('❌ Kein Text-Modell verfügbar.');
-      return { error: 'Kein Text-Modell verfügbar: ' + (lastError?.message || '?') };
-    }
-
-    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const text = completion.choices[0]?.message?.content || '';
+    console.log(`   Groq Antwort (${text.length} Zeichen):`, text.substring(0, 150) + '...');
 
     // JSON extrahieren
     let slides = null;
     try {
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        slides = JSON.parse(jsonMatch[0]);
-      } else {
-        slides = JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // Kann entweder {slides: [...]} oder direkt [...] sein
+      if (Array.isArray(parsed)) {
+        slides = parsed;
+      } else if (parsed.slides && Array.isArray(parsed.slides)) {
+        slides = parsed.slides;
       }
     } catch (e) {
       console.error('❌ JSON-Parse-Fehler:', e.message);
-      console.error('   Text war:', text.substring(0, 200));
+      console.error('   Text war:', text.substring(0, 300));
       return { error: 'Skript-JSON konnte nicht geparst werden' };
     }
 
-    if (!Array.isArray(slides) || slides.length === 0) {
+    if (!slides || slides.length === 0) {
       return { error: 'Skript ist leer oder ungültig' };
     }
 
-    console.log(`✅ Skript mit ${slides.length} Slides generiert`);
+    console.log(`✅ Skript mit ${slides.length} Slides via Groq (${GROQ_MODEL})`);
 
+    // An App senden
     clientWs.send(JSON.stringify({
       type: 'script',
       topic: topic,
@@ -811,91 +802,52 @@ Regeln:
     return {
       success: true,
       slide_count: slides.length,
+      model: GROQ_MODEL,
       message: `Skript mit ${slides.length} Slides erstellt und in App angezeigt. ` +
                `Sage dem Nutzer NUR: "Skript ist da, schau in die App." ` +
                `Wiederhole NIEMALS den Inhalt.`,
     };
   } catch (e) {
-    console.error('❌ Script-Generation-Fehler:', e.message);
+    console.error('❌ Groq-Fehler:', e.message);
     return { error: 'Skript-Generierung fehlgeschlagen: ' + e.message };
   }
 }
 
-// ==================== IMAGE GENERATION ====================
+// ==================== IMAGE GENERATION (Pollinations.AI – kostenlos) ====================
 
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
-  console.log(`🎨 Generiere Bild für Slide ${slideNumber}...`);
-
-  // Fallback-Liste an Modellnamen (wird durchprobiert)
-  const imageModels = [
-    IMAGE_MODEL,
-    
-    'gemini-2.5-flash-image-preview',
-    'gemini-2.5-flash-image-generation',
-    'gemini-2.0-flash-preview-image-generation',
-    
-  ];
+  console.log(`🎨 Pollinations.AI generiert Bild für Slide ${slideNumber}...`);
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    // Prompt URL-kodieren + anreichern für bessere Qualität
+    const enhancedPrompt = `${prompt}. Instagram carousel slide, high quality, professional photography, sharp focus, vibrant colors`;
+    const encodedPrompt = encodeURIComponent(enhancedPrompt);
 
-    let response = null;
-    let usedModel = null;
-    let lastError = null;
+    // Pollinations.AI URL
+    // Model: flux (beste Qualität), width/height 1024 (1:1), nologo=true (kein Wasserzeichen)
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux&width=1024&height=1024&nologo=true&enhance=true`;
 
-    for (const modelName of imageModels) {
-      try {
-        console.log(`   Versuch Image-Modell: ${modelName}`);
-        response = await ai.models.generateContent({
-          model: modelName,
-          contents: [{
-            role: 'user',
-            parts: [{ text: `Instagram-Karussell-Bild (1:1).\n\n${prompt}` }],
-          }],
-          config: { responseModalities: ['IMAGE'] },
-        });
-        usedModel = modelName;
-        console.log(`   ✅ Klappt mit: ${modelName}`);
-        break;
-      } catch (e) {
-        lastError = e;
-        const errMsg = e.message || String(e);
-        if (errMsg.includes('not found') || errMsg.includes('NOT_FOUND') || errMsg.includes('not supported')) {
-          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
-          continue;
-        } else {
-          throw e;
-        }
-      }
+    console.log(`   URL: ${imageUrl.substring(0, 120)}...`);
+
+    // Bild abrufen (kann 10-30 Sek dauern bei Pollinations)
+    const response = await fetch(imageUrl);
+
+    if (!response.ok) {
+      throw new Error(`Pollinations HTTP ${response.status}`);
     }
 
-    if (!response) {
-      console.error('❌ Kein Image-Modell verfügbar. Letzter Fehler:', lastError?.message);
-      return {
-        error: 'Kein Image-Modell verfügbar. Prüfe /api/debug/models im Browser.',
-        slide: slideNumber,
-      };
+    // Bild als Buffer holen
+    const arrayBuffer = await response.arrayBuffer();
+    const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
+    const mimeType = response.headers.get('content-type') || 'image/jpeg';
+
+    if (!imageBase64 || imageBase64.length < 1000) {
+      return { error: 'Pollinations lieferte kein gültiges Bild', slide: slideNumber };
     }
 
-    let imageBase64 = null;
-    let mimeType = 'image/png';
+    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen, ${mimeType})`);
 
-    if (response?.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData?.data) {
-          imageBase64 = part.inlineData.data;
-          mimeType = part.inlineData.mimeType || 'image/png';
-          break;
-        }
-      }
-    }
-
-    if (!imageBase64) {
-      return { error: 'Keine Bilddaten erhalten', slide: slideNumber };
-    }
-
-    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
-
+    // An App senden
     clientWs.send(JSON.stringify({
       type: 'image',
       slide: slideNumber,
@@ -903,10 +855,13 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       data: imageBase64,
     }));
 
-    return { success: true, slide: slideNumber, model: usedModel };
+    return { success: true, slide: slideNumber, model: 'pollinations-flux' };
   } catch (e) {
-    console.error('❌ Image-Generation-Fehler:', e.message);
-    return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
+    console.error('❌ Pollinations-Fehler:', e.message);
+    return {
+      error: 'Bildgenerierung fehlgeschlagen: ' + e.message,
+      slide: slideNumber,
+    };
   }
 }
 
