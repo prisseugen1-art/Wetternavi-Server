@@ -5,7 +5,8 @@ import { WebSocketServer } from 'ws';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const IMAGE_MODEL = 'gemini-3.8-flash-image-preview';  // Fallbacks weiter unten
+  // Fallbacks weiter unten
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
 const TEXT_MODEL = 'gemini-3.8-flash';
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
@@ -828,14 +829,11 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
   // Fallback-Liste an Modellnamen (wird durchprobiert)
   const imageModels = [
     IMAGE_MODEL,
-    'gemini-3.8-flash-image',
-    'gemini-3.8-flash-image-generation',
-    'gemini-3.8-flash-image-preview',
-    'gemini-2.5-flash-image',
+    
     'gemini-2.5-flash-image-preview',
     'gemini-2.5-flash-image-generation',
     'gemini-2.0-flash-preview-image-generation',
-    'gemini-2.0-flash-exp-image-generation',
+    
   ];
 
   try {
