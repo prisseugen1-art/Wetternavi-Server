@@ -6,7 +6,17 @@ import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';   // oder 'llama-3.1-8b-instant' (schneller, günstiger)
+// Groq Free-Tier: aktuell verfügbare Modelle (Stand Sept 2026)
+// llama-3.3-70b-versatile & llama-3.1-8b-instant wurden am 16.08.2026
+// für Free/Developer-Tier dekommissioniert.
+const GROQ_MODEL = 'openai/gpt-oss-120b';   // beste Qualität im Free-Tier
+const GROQ_FALLBACKS = [
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.8-27b',
+  'qwen/qwen3.6-27b',
+  'groq/compound',
+];
 const SAMPLE_RATE_IN = 16000;
 const SAMPLE_RATE_OUT = 24000;
 const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -308,7 +318,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const agentConfig = AGENTS[agentType] || AGENTS.jony;
 
-  // Profil aus DB anreichern
   if (userProfile.user_id) {
     try {
       const dbRes = await fetch(SELF_URL + '/api/profile/' + userProfile.user_id);
@@ -410,7 +419,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // ==================== AGENT- UND ROLLEN-WECHSEL ====================
     let targetAgent = agentType;
     let targetRole = clientWs._currentRole || 'freund';
 
@@ -435,7 +443,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       }
     }
 
-    // ---- Agent-Wechsel durchführen ----
     if (targetAgent !== agentType) {
       console.log(`🔄 Agent-Wechsel: ${agentType} → ${targetAgent} (Rolle: ${targetRole})`);
       try { await clientWs._session?.close(); } catch (e) {}
@@ -448,7 +455,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       return;
     }
 
-    // ---- Rollenwechsel innerhalb Jony ----
     if (agentType === 'jony' && targetRole !== clientWs._currentRole) {
       clientWs._currentRole = targetRole;
       console.log(`🎭 Rollenwechsel: → ${targetRole}`);
@@ -463,7 +469,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       }
     }
 
-    // ---- Modus-Wechsel (Silent/Normal) nur bei Jony ----
     if (agentType === 'jony' && userProfile.user_id) {
       const current = clientWs._lastMode || 'normal';
       const mode = await detectMode(
@@ -753,64 +758,79 @@ Regeln:
 
 NUR das JSON, sonst nichts.`;
 
-  try {
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: 'Du bist ein Assistent, der Instagram-Karussell-Skripte als JSON erstellt. Antworte ausschließlich mit gültigem JSON.'
-        },
-        { role: 'user', content: prompt }
-      ],
-      model: GROQ_MODEL,
-      temperature: 0.7,
-      response_format: { type: 'json_object' },
-    });
-
-    const text = completion.choices[0]?.message?.content || '';
-    console.log(`   Groq Antwort (${text.length} Zeichen):`, text.substring(0, 150) + '...');
-
-    // JSON extrahieren
-    let slides = null;
+  // Fallback-Kette durchprobieren
+  let lastError = null;
+  for (const modelName of GROQ_FALLBACKS) {
     try {
-      const parsed = JSON.parse(text);
-      // Kann entweder {slides: [...]} oder direkt [...] sein
-      if (Array.isArray(parsed)) {
-        slides = parsed;
-      } else if (parsed.slides && Array.isArray(parsed.slides)) {
-        slides = parsed.slides;
+      console.log(`   Versuch Groq-Modell: ${modelName}`);
+      const completion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: 'system',
+            content: 'Du bist ein Assistent, der Instagram-Karussell-Skripte als JSON erstellt. Antworte ausschließlich mit gültigem JSON.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        model: modelName,
+        temperature: 0.7,
+        response_format: { type: 'json_object' },
+      });
+
+      const text = completion.choices[0]?.message?.content || '';
+      console.log(`   ✅ Klappt mit: ${modelName}`);
+      console.log(`   Groq Antwort (${text.length} Zeichen):`, text.substring(0, 150) + '...');
+
+      // JSON extrahieren
+      let slides = null;
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          slides = parsed;
+        } else if (parsed.slides && Array.isArray(parsed.slides)) {
+          slides = parsed.slides;
+        }
+      } catch (e) {
+        console.error('❌ JSON-Parse-Fehler:', e.message);
+        console.error('   Text war:', text.substring(0, 300));
+        return { error: 'Skript-JSON konnte nicht geparst werden' };
       }
+
+      if (!slides || slides.length === 0) {
+        return { error: 'Skript ist leer oder ungültig' };
+      }
+
+      console.log(`✅ Skript mit ${slides.length} Slides via Groq (${modelName})`);
+
+      clientWs.send(JSON.stringify({
+        type: 'script',
+        topic: topic,
+        slides: slides,
+      }));
+
+      return {
+        success: true,
+        slide_count: slides.length,
+        model: modelName,
+        message: `Skript mit ${slides.length} Slides erstellt und in App angezeigt. ` +
+                 `Sage dem Nutzer NUR: "Skript ist da, schau in die App." ` +
+                 `Wiederhole NIEMALS den Inhalt.`,
+      };
     } catch (e) {
-      console.error('❌ JSON-Parse-Fehler:', e.message);
-      console.error('   Text war:', text.substring(0, 300));
-      return { error: 'Skript-JSON konnte nicht geparst werden' };
+      lastError = e;
+      const errMsg = e.message || String(e);
+      if (errMsg.includes('404') || errMsg.includes('does not exist') || errMsg.includes('no access')) {
+        console.log(`   ⏭️  ${modelName} nicht verfügbar`);
+        continue;
+      } else {
+        console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
+        // Bei anderen Fehlern auch weiterversuchen
+        continue;
+      }
     }
-
-    if (!slides || slides.length === 0) {
-      return { error: 'Skript ist leer oder ungültig' };
-    }
-
-    console.log(`✅ Skript mit ${slides.length} Slides via Groq (${GROQ_MODEL})`);
-
-    // An App senden
-    clientWs.send(JSON.stringify({
-      type: 'script',
-      topic: topic,
-      slides: slides,
-    }));
-
-    return {
-      success: true,
-      slide_count: slides.length,
-      model: GROQ_MODEL,
-      message: `Skript mit ${slides.length} Slides erstellt und in App angezeigt. ` +
-               `Sage dem Nutzer NUR: "Skript ist da, schau in die App." ` +
-               `Wiederhole NIEMALS den Inhalt.`,
-    };
-  } catch (e) {
-    console.error('❌ Groq-Fehler:', e.message);
-    return { error: 'Skript-Generierung fehlgeschlagen: ' + e.message };
   }
+
+  console.error('❌ Alle Groq-Modelle fehlgeschlagen. Letzter Fehler:', lastError?.message);
+  return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
 
 // ==================== IMAGE GENERATION (Pollinations.AI – kostenlos) ====================
@@ -819,24 +839,18 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
   console.log(`🎨 Pollinations.AI generiert Bild für Slide ${slideNumber}...`);
 
   try {
-    // Prompt URL-kodieren + anreichern für bessere Qualität
     const enhancedPrompt = `${prompt}. Instagram carousel slide, high quality, professional photography, sharp focus, vibrant colors`;
     const encodedPrompt = encodeURIComponent(enhancedPrompt);
-
-    // Pollinations.AI URL
-    // Model: flux (beste Qualität), width/height 1024 (1:1), nologo=true (kein Wasserzeichen)
     const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux&width=1024&height=1024&nologo=true&enhance=true`;
 
     console.log(`   URL: ${imageUrl.substring(0, 120)}...`);
 
-    // Bild abrufen (kann 10-30 Sek dauern bei Pollinations)
     const response = await fetch(imageUrl);
 
     if (!response.ok) {
       throw new Error(`Pollinations HTTP ${response.status}`);
     }
 
-    // Bild als Buffer holen
     const arrayBuffer = await response.arrayBuffer();
     const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = response.headers.get('content-type') || 'image/jpeg';
@@ -847,7 +861,6 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
 
     console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen, ${mimeType})`);
 
-    // An App senden
     clientWs.send(JSON.stringify({
       type: 'image',
       slide: slideNumber,
@@ -950,7 +963,6 @@ export function setupGeminiWebSocket(server) {
       }
     });
 
-    // Proaktiv-Timer
     clientWs._proactiveTimer = setInterval(async () => {
       if (!clientWs._session) return;
       if (clientWs._currentAgent !== 'jony') return;
