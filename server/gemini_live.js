@@ -78,7 +78,7 @@ function buildProactivePrompt(role) {
   return null;
 }
 
-// ==================== HARTE SPRACHREGEL (für ALLE Agenten) ====================
+// ==================== HARTE SPRACHREGEL ====================
 
 const LANGUAGE_LOCK = `
 ===========================================
@@ -101,14 +101,6 @@ VERBOTEN (auch wenn der Nutzer es provoziert):
 - Französisch sprechen ❌
 - Italienisch sprechen ❌
 - Jede andere Sprache außer Deutsch/Russisch ❌
-
-Auch NICHT bei:
-- Kurzen Wortfetzen
-- Unklaren Aussagen
-- Gemischtsprachigen Sätzen
-- Übersetzungsanfragen (dafür gibt es den Dolmetscher-Modus, den wir hier NICHT nutzen)
-
-Bei gemischten Sätzen: Erkenne die HAUPTSPRACHE. Ist sie nicht DE/RU → Deutsch.
 
 Diese Regel hat HÖCHSTE Priorität. Sie überschreibt alles andere.
 `;
@@ -815,10 +807,17 @@ NUR das JSON.`;
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
 
-// ==================== IMAGE GENERATION (Pollinations.AI) ====================
+// ==================== IMAGE GENERATION (Cloudflare Workers AI) ====================
 
 /**
- * Wandelt deutschen Prompt in präzisen englischen Prompt um (via Groq).
+ * Wartet N ms
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Übersetzt deutschen Prompt ins Englische (FLUX versteht Englisch besser).
  */
 async function translateToEnglishImagePrompt(germanPrompt) {
   try {
@@ -849,104 +848,106 @@ async function translateToEnglishImagePrompt(germanPrompt) {
 }
 
 /**
- * Wartet N ms
+ * Generiert ein Bild über Cloudflare Workers AI (FLUX.1-schnell).
  */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function generateImageWithCloudflare(englishPrompt) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !apiToken) {
+    throw new Error('CLOUDFLARE_ACCOUNT_ID oder CLOUDFLARE_API_TOKEN fehlt.');
+  }
+
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+
+  const seed = Math.floor(Math.random() * 1000000);
+
+  console.log(`   Cloudflare Request (Seed: ${seed})...`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt: englishPrompt,
+      seed: seed,
+      steps: 4,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Cloudflare HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.success || !data.result?.image) {
+    throw new Error(`Cloudflare-Fehler: ${JSON.stringify(data.errors || data)}`);
+  }
+
+  const imageBase64 = data.result.image;
+  console.log(`   ✅ Cloudflare lieferte Bild (${imageBase64.length} Zeichen)`);
+
+  return { imageBase64, mimeType: 'image/jpeg' };
 }
 
 /**
- * Pollinations.AI mit Retry-Logik bei 429.
+ * Vollständiger Flow: Übersetzen → Cloudflare → an App senden.
  */
-async function pollinationsFetch(url, maxRetries = 3) {
-  let lastError = null;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`   Pollinations Versuch ${attempt}/${maxRetries}...`);
-      const response = await fetch(url);
-
-      if (response.status === 429) {
-        const waitMs = 5000 * attempt; // 5s, 10s, 15s
-        console.log(`   ⏸️  429 Rate Limit – warte ${waitMs / 1000}s`);
-        await sleep(waitMs);
-        lastError = new Error('HTTP 429 Rate Limit');
-        continue;
-      }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return response;
-    } catch (e) {
-      lastError = e;
-      if (attempt < maxRetries) {
-        await sleep(3000);
-        continue;
-      }
-    }
-  }
-  throw lastError || new Error('Pollinations fehlgeschlagen');
-}
-
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
-  console.log(`🎨 Pollinations.AI generiert Slide ${slideNumber}...`);
+  console.log(`🎨 Generiere Slide ${slideNumber} via Cloudflare Workers AI...`);
 
-  // Delay zwischen Bildern (mind. 3 Sek, um Rate Limit zu vermeiden)
+  // Rate-Limit-Prevention: min. 2 Sek zwischen Bildern
   const lastImgTime = clientWs._lastImageTime || 0;
   const timeSince = Date.now() - lastImgTime;
-  const minGap = 3500;
+  const minGap = 2000;
   if (timeSince < minGap) {
     const wait = minGap - timeSince;
-    console.log(`   ⏱️  Warte ${Math.round(wait / 1000)}s (Rate Limit Prevention)`);
     await sleep(wait);
   }
   clientWs._lastImageTime = Date.now();
 
   try {
-    // 1. Prompt ins Englische übersetzen (Flux versteht Englisch besser)
+    // 1. Prompt ins Englische übersetzen
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
 
-    // 2. Pollinations braucht einen möglichst sauberen Prompt
-    //    - KEIN "Instagram carousel slide" (macht generisch)
-    //    - KEIN enhance=true (verfälscht)
-    //    - Zufälliger Seed für Varianz bei Re-Generation
-    const seed = Math.floor(Math.random() * 1000000);
-    const encodedPrompt = encodeURIComponent(englishPrompt);
+    // 2. Bei Cloudflare generieren (mit Retry)
+    let result = null;
+    let lastError = null;
 
-    // flux-realism gibt fotorealistischere Bilder
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}` +
-                     `?model=flux-realism` +
-                     `&width=1024&height=1024` +
-                     `&nologo=true` +
-                     `&seed=${seed}`;
-                     // enhance NICHT nutzen!
-
-    console.log(`   URL: ${imageUrl.substring(0, 130)}...`);
-
-    // 3. Mit Retry-Logik abrufen
-    const response = await pollinationsFetch(imageUrl);
-
-    const arrayBuffer = await response.arrayBuffer();
-    const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
-    const mimeType = response.headers.get('content-type') || 'image/jpeg';
-
-    if (!imageBase64 || imageBase64.length < 1000) {
-      return { error: 'Ungültiges Bild empfangen', slide: slideNumber };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`   Versuch ${attempt}/3...`);
+        result = await generateImageWithCloudflare(englishPrompt);
+        break;
+      } catch (e) {
+        lastError = e;
+        console.log(`   ⏭️  Versuch ${attempt} fehlgeschlagen: ${e.message}`);
+        if (attempt < 3) {
+          await sleep(3000 * attempt);
+        }
+      }
     }
 
-    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
+    if (!result) {
+      throw lastError || new Error('Cloudflare fehlgeschlagen');
+    }
+
+    console.log(`✅ Slide ${slideNumber} generiert via Cloudflare`);
 
     clientWs.send(JSON.stringify({
       type: 'image',
       slide: slideNumber,
-      mimeType,
-      data: imageBase64,
+      mimeType: result.mimeType,
+      data: result.imageBase64,
     }));
 
-    return { success: true, slide: slideNumber, model: 'pollinations-flux-realism', seed };
+    return { success: true, slide: slideNumber, model: 'cloudflare-flux-schnell' };
   } catch (e) {
-    console.error('❌ Pollinations-Fehler:', e.message);
+    console.error('❌ Cloudflare-Fehler:', e.message);
     return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
   }
 }
