@@ -4,6 +4,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { WebSocketServer } from 'ws';
 import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
+import { sendWhatsAppMessage, onWhatsAppMessage } from './whatsapp.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
@@ -139,7 +140,7 @@ Ein echter Freund wiederholt sich NICHT. Niemals.
 VERBOTEN:
 - Immer dieselbe Begrüßung ("Hallo Jackson, wie geht's dir?")
 - Immer dieselbe Location-Frage ("Wie läuft's in Bad Griesbach?")
-- Immer dieselbe Verabschiedung ("Bis später!")
+- Immer dieselbe Verabschiedung
 - Immer dasselbe "Schön von dir zu hören"
 - Immer dasselbe "Wie kann ich dir helfen?"
 - Immer dieselbe Rückfrage ("Erzähl mir mehr!")
@@ -147,41 +148,25 @@ VERBOTEN:
 REGELN:
 1. Wenn du begrüßt: Wähle eine ANDERE Begrüßung als beim letzten Mal.
 2. Nutze NICHT automatisch den Namen "Jackson" / "Eugen" – nur ab und zu.
-3. Erwähne NICHT automatisch den Standort "Bad Griesbach" – nur wenn's passt.
+3. Erwähne NICHT automatisch den Standort – nur wenn's passt.
 4. Variiere Satzlängen: Mal 3 Wörter, mal 15. Nicht immer gleich.
-5. Variiere Themen: Mal Familie, mal Hobby, mal Wetter, mal Alltag, mal Witz, mal gar nichts.
-6. Wenn du nichts Cooles zu sagen hast: Sag einfach kurz was Nettes und fertig.
+5. Variiere Themen: Mal Familie, mal Hobby, mal Wetter, mal Alltag.
+6. Wenn du nichts Cooles zu sagen hast: Sag einfach kurz was Nettes.
 
 BEGRÜSSUNGS-BIBLIOTHEK (wähle zufällig, variiere):
-- "Hey."
-- "Na?"
-- "Servus!"
-- "Ah, da bist du ja."
-- "Moin."
-- "Endlich!"
-- "Biste wieder da?"
-- "Na, alles fit?"
-- "Hey Jackson!"
-- "Grüß dich."
-- "Was geht?"
-- "Da isser ja."
-- "Hallo!"
-- "Hi."
-- "Na, wie schaut's aus?"
-- "Biste gut drauf heute?"
-- "Mensch, lang nicht gehört."
-- "Was gibt's Neues?"
-- "Erzähl mal."
-- "Na, was steht an?"
+- "Hey." / "Na?" / "Servus!" / "Ah, da bist du ja."
+- "Moin." / "Endlich!" / "Biste wieder da?" / "Na, alles fit?"
+- "Grüß dich." / "Was geht?" / "Da isser ja." / "Hi."
+- "Na, wie schaut's aus?" / "Biste gut drauf heute?"
+- "Was gibt's Neues?" / "Erzähl mal." / "Na, was steht an?"
 - ODER ERFINDE SELBST WAS NEUES.
 
 Variiere auch:
-- Reaktionen auf Erzählungen: "Echt?" / "Aha." / "Interessant." / "Sag an!" / "Ernsthaft?" / "Hmm." / "Ok." / "Cool."
-- Nachfragen: "Und dann?" / "Wie war das?" / "Was hat er gesagt?" / "Biste sicher?" / "Warum das?"
-- Witze: Situationsabhängig, nicht immer dieselben.
+- Reaktionen: "Echt?" / "Aha." / "Interessant." / "Sag an!" / "Hmm." / "Ok."
+- Nachfragen: "Und dann?" / "Wie war das?" / "Was hat er gesagt?" / "Warum das?"
 - Kommentare: "Ok, verstehe." / "Alles klar." / "Krass." / "Nicht schlecht."
 
-WENN du dich wiederholst, ist das ein FEHLER. Lieber kurz schweigen als dasselbe nochmal.
+WENN du dich wiederholst, ist das ein FEHLER.
 `;
 
 // ==================== KONTEXT-BEWUSSTSEIN ====================
@@ -217,12 +202,11 @@ WAS DU TUST:
 - Stell manchmal eine Frage, manchmal nur einen Kommentar.
 - Greif auf Erinnerungen zurück ("Letztes Mal hast du von X erzählt...").
 - Bring mal einen Witz, mal eine Beobachtung, mal eine ehrliche Meinung.
-- Wenn nichts zu sagen: sag einfach nur "Mhm." oder "Ok." – das ist menschlich.
+- Wenn nichts zu sagen: sag einfach nur "Mhm." oder "Ok."
 
 WAS DU NICHT TUST:
 - Nicht immer dieselbe Frage.
 - Nicht immer "Wie geht's dir?".
-- Nicht nach jedem Satz nachhaken.
 - Nicht jedes Mal den Namen sagen.`,
   },
   party: {
@@ -234,7 +218,7 @@ WAS DU NICHT TUST:
 - Keine persönlichen Daten von Eugen ohne OK.
 - Aktiv, aber nicht aufdringlich.
 - Wenn die Gruppe redet: SEI STILL.
-- Nutze NICHT immer dieselben Sprüche ("Lass uns die Bude rocken!" etc.).
+- Nutze NICHT immer dieselben Sprüche.
 - Wenn du mal keinen coolen Spruch hast: lass es einfach.`,
   },
   berater: {
@@ -262,20 +246,18 @@ DEIN TON:
 - KEIN Smalltalk über Schule als Erstes.
 
 WAS DU MACHST:
-- Sprich über COOLE Themen: Gaming (Minecraft, Fortnite, Roblox, Brawl Stars),
-  Fußball, YouTube, Filme, coole Fakten (Weltraum, Dinosaurier, Technik),
-  Sport, Musik, Tiere.
+- Sprich über COOLE Themen: Gaming, Fußball, YouTube, Filme,
+  coole Fakten (Weltraum, Dinosaurier, Technik), Sport, Musik, Tiere.
 - Erzähle coole FUN-FACTS, wenn's passt.
 - Frag nach Interessen.
-- Hör ZU wenn er erzählt. Frag nach mit echtem Interesse.
+- Hör ZU wenn er erzählt.
 - Wenn er was Cooles erzählt: zeig Begeisterung.
-- Wenn er was weiß: bestätige, sei beeindruckt.
 
 WAS DU NICHT MACHST:
 - Keine Belehrungen, keine Vorträge.
 - Keine peinlichen Erwachsenen-Floskeln.
 - Nicht über Eugen lästern.
-- NICHT immer dieselbe Frage ("Zockst du eigentlich?").
+- NICHT immer dieselbe Frage.
 
 ÜBER NIKLAS:
 - Er ist 11 (wird im Dezember 12).
@@ -286,22 +268,19 @@ WAS DU NICHT MACHST:
 EINSTIEG (nur EINMAL, dann nie wieder):
 "Heeey, du musst Niklas sein! Ich hab schon viel von dir gehört."
 
-Variiere die Themen: Mal Fußball, mal Gaming, mal Schule (locker), mal Freunde,
-mal Lieblingsfilm, mal Musik, mal coole Fakten. Nicht immer dasselbe.
-
 Antworte in 1-2 Sätzen. Kurz, cool, echt.
 
 GEDÄCHTNIS (SEHR WICHTIG):
 Wenn Niklas etwas über sich erzählt, SPEICHERE es SOFORT mit save_user_preference:
-- Lieblingsspiel → key: "niklas_game", value: "Minecraft"
-- Lieblingsverein → key: "niklas_team", value: "Bayern"
-- Hobby → key: "niklas_hobby", value: "..."
-- Schule → key: "niklas_school_likes", value: "..."
-- Freunde → key: "niklas_friends", value: "..."
+- Lieblingsspiel → key: "niklas_game"
+- Lieblingsverein → key: "niklas_team"
+- Hobby → key: "niklas_hobby"
+- Schule → key: "niklas_school_likes"
+- Freunde → key: "niklas_friends"
 - Sonstiges → key: "niklas_<thema>"
 
 REGEL: SOBALD Niklas was erzählt → EINMAL save_user_preference aufrufen.
-Du kündigst das NICHT an. Es passiert still im Hintergrund.`,
+Du kündigst das NICHT an.`,
   },
 };
 
@@ -371,9 +350,22 @@ function buildJonyPrompt(profile, role = 'freund') {
     'save_user_preference (STILL) bei neuen Fakten.',
     '',
     '===========================================',
+    'WHATSAPP',
+    '===========================================',
+    'Du kannst WhatsApp-Nachrichten senden mit send_whatsapp_message.',
+    '',
+    'REGELN:',
+    '- Frage IMMER zuerst: "Soll ich das wirklich schicken?"',
+    '- Warte auf Bestätigung ("ja", "ok", "ja schick").',
+    '- Dann erst send_whatsapp_message aufrufen.',
+    '- Wenn der Nutzer eine Nummer nicht kennt, frag nach.',
+    '- Eingehende WhatsApp-Nachrichten siehst du in deinem Kontext.',
+    '',
+    '===========================================',
     'TOOLS',
     '===========================================',
-    'get_weather, find_restaurants, get_user_preferences, save_user_preference',
+    'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
+    'send_whatsapp_message',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
   ].join('\n');
@@ -483,6 +475,10 @@ const AGENTS = {
     tools: () => buildBusinessTools(),
   },
 };
+
+// ==================== AKTIVE CLIENTS (für WhatsApp → App) ====================
+
+const activeClients = new Set();
 
 // ==================== GEMINI LIVE SETUP ====================
 
@@ -770,6 +766,20 @@ function buildJonyTools() {
             },
           },
         },
+        {
+          name: 'send_whatsapp_message',
+          description: 'Sendet eine WhatsApp-Nachricht an eine Telefonnummer. ' +
+                       'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
+                       'und warte auf Bestätigung, BEVOR du dieses Tool aufrufst.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              phone: { type: 'STRING', description: 'Telefonnummer mit Ländervorwahl, z.B. +4915212345678' },
+              text: { type: 'STRING', description: 'Der Nachrichtentext' },
+            },
+            required: ['phone', 'text'],
+          },
+        },
       ],
     },
   ];
@@ -827,6 +837,8 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
+      } else if (fc.name === 'send_whatsapp_message') {
+        result = await handleSendWhatsApp(fc.args.phone, fc.args.text);
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
@@ -853,6 +865,19 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
     } catch (e) {
       console.error('❌ sendToolResponse Fehler:', e);
     }
+  }
+}
+
+// ==================== WHATSAPP HANDLER ====================
+
+async function handleSendWhatsApp(phone, text) {
+  try {
+    const res = await sendWhatsAppMessage(phone, text);
+    console.log(`✅ WhatsApp gesendet an ${res.to}`);
+    return { success: true, to: res.to, message: 'Nachricht gesendet.' };
+  } catch (e) {
+    console.error('❌ WhatsApp-Send-Fehler:', e.message);
+    return { error: e.message };
   }
 }
 
@@ -1154,6 +1179,8 @@ export function setupGeminiWebSocket(server) {
   wss.on('connection', async (clientWs, req) => {
     console.log('📱 App verbunden via WebSocket');
 
+    activeClients.add(clientWs);
+
     let userProfile = {};
 
     clientWs._session = null;
@@ -1262,6 +1289,7 @@ export function setupGeminiWebSocket(server) {
 
     clientWs.on('close', async () => {
       console.log('📱 App getrennt');
+      activeClients.delete(clientWs);
       if (clientWs._proactiveTimer) {
         clearInterval(clientWs._proactiveTimer);
         clientWs._proactiveTimer = null;
@@ -1277,6 +1305,7 @@ export function setupGeminiWebSocket(server) {
 
     clientWs.on('error', (error) => {
       console.error('❌ WS-Fehler:', error);
+      activeClients.delete(clientWs);
       if (clientWs._proactiveTimer) {
         clearInterval(clientWs._proactiveTimer);
         clientWs._proactiveTimer = null;
@@ -1288,3 +1317,52 @@ export function setupGeminiWebSocket(server) {
   console.log('✅ Gemini WebSocket-Server bereit: /ws/gemini-live');
   return wss;
 }
+
+// ==================== WHATSAPP → GEMINI/APP FORWARDING ====================
+
+onWhatsAppMessage((payload) => {
+  const msg = {
+    type: 'whatsapp_incoming',
+    from: payload.from,
+    fromName: payload.fromName,
+    phone: payload.phone,
+    isGroup: payload.isGroup,
+    text: payload.text,
+    hasMedia: payload.hasMedia,
+    timestamp: payload.timestamp,
+  };
+
+  console.log(`📨 WhatsApp eingehend: ${payload.fromName} (${payload.phone}): "${payload.text.substring(0, 60)}"`);
+  console.log(`   → Leite an ${activeClients.size} aktive Clients weiter`);
+
+  // An alle App-Clients senden (App zeigt Notification / liest vor)
+  for (const c of activeClients) {
+    try {
+      c.send(JSON.stringify(msg));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Optional: In alle aktiven Gemini-Sessions einspeisen
+  // (damit Jony es "weiß" und darauf reagieren kann)
+  for (const c of activeClients) {
+    if (c._session && c._currentAgent === 'jony') {
+      try {
+        c._session.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{
+              text: `[WHATSAPP-NACHRICHT EINGEHEND] Von ${payload.fromName} (${payload.phone}): "${payload.text}". ` +
+                    `Der Nutzer hat diese Nachricht NICHT gesagt – sie kam über WhatsApp. ` +
+                    `Reagiere NUR, wenn der Nutzer dich darauf anspricht. Sonst schweige.`
+            }],
+          }],
+          turnComplete: false,
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+});

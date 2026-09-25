@@ -7,6 +7,7 @@ import pg from 'pg';
 import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket } from './server/gemini_live.js';
+import { initWhatsApp, getWhatsAppStatus, getWhatsAppQr, disconnectWhatsApp } from './server/whatsapp.js';
 
 dotenv.config();
 
@@ -217,6 +218,34 @@ app.get('/api/debug/home/:userId', async (req, res) => {
   }
 });
 
+// -------- Debug: Verfügbare Modelle --------
+app.get('/api/debug/models', async (req, res) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'No GEMINI_API_KEY' });
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!data.models) return res.json(data);
+    const imageModels = data.models
+      .filter(m =>
+        m.name.includes('image') ||
+        m.name.includes('imagen') ||
+        (m.supportedGenerationMethods || []).includes('generateContent')
+      )
+      .map(m => ({
+        name: m.name.replace('models/', ''),
+        methods: m.supportedGenerationMethods || [],
+      }));
+    res.json({
+      total: data.models.length,
+      image_and_content_models: imageModels,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // -------- Profil: Speichern --------
 app.post('/api/profile/save', async (req, res) => {
   try {
@@ -259,7 +288,7 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
-// -------- Create Web Call (Retell) --------
+// -------- Create Web Call (Retell Backup) --------
 app.post('/api/create-web-call', async (req, res) => {
   try {
     const userId = req.body.user_id;
@@ -434,6 +463,40 @@ app.post('/api/search-restaurant', async (req, res) => {
   }
 });
 
+// ========== WHATSAPP ==========
+
+// -------- Status --------
+app.get('/api/whatsapp/status', (req, res) => {
+  try {
+    res.json(getWhatsAppStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// -------- QR-Code (als String) --------
+app.get('/api/whatsapp/qr', (req, res) => {
+  try {
+    const qr = getWhatsAppQr();
+    if (!qr) {
+      return res.status(404).json({ error: 'Kein QR-Code verfügbar', hint: 'Session läuft bereits oder ist getrennt' });
+    }
+    res.json({ qr });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// -------- Trennen --------
+app.post('/api/whatsapp/disconnect', async (req, res) => {
+  try {
+    await disconnectWhatsApp();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ========== SENSOR-BUS ==========
 const sensorBus = new SensorBus();
 sensorBus.onEvent((e) => console.log('📡 SENSOR-EVENT:', JSON.stringify(e.toJSON())));
@@ -445,5 +508,14 @@ setupGeminiWebSocket(server);
 server.listen(PORT, async () => {
   console.log(`🚀 Server läuft auf http://0.0.0.0:${PORT}`);
   console.log(`🔌 WebSocket: ws://0.0.0.0:${PORT}/ws/gemini-live`);
+
   await initDb();
+
+  // WhatsApp initialisieren (nach Server-Start)
+  try {
+    await initWhatsApp();
+    console.log('📱 WhatsApp initialisiert');
+  } catch (e) {
+    console.error('❌ WhatsApp-Init-Fehler:', e.message);
+  }
 });
