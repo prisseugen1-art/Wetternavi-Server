@@ -12,6 +12,36 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
+// ==================== NAME-PATTERN ====================
+
+// Alle Varianten von "Jony" (mit/ohne h, deutsch, russisch)
+const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
+
+const PATTERNS = {
+  business: new RegExp(
+    `\\b(${NAME_PATTERN}.?business|business.?modus|business\\s+mode|бизнес.?мод|бизнес)\\b`,
+    'i'
+  ),
+  backToJony: new RegExp(
+    `\\b(${NAME_PATTERN}.?(zur[üu]ck|freund|normal|back|обратно|вернись)|` +
+    `zur[üu]ck.*(freund|jony|johnny)|` +
+    `freund.?modus|normal.?modus|freundesmodus|` +
+    `вернись.*друг|обратно.*друг|режим.?друга)\\b`,
+    'i'
+  ),
+  party: new RegExp(
+    `\\b(${NAME_PATTERN}.?party|party.?modus|partymodus|party\\s+mode|` +
+    `${NAME_PATTERN}.?пати|пати.?мод|вечеринк)\\b`,
+    'i'
+  ),
+  berater: new RegExp(
+    `\\b(${NAME_PATTERN}.?(berater|sachlich|intellektuell)|` +
+    `berater.?modus|beratermodus|` +
+    `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
+    'i'
+  ),
+};
+
 // ==================== PROAKTIV-INTERVALLE ====================
 
 const PROACTIVE_INTERVALS = {
@@ -23,14 +53,13 @@ const PROACTIVE_INTERVALS = {
 function buildProactivePrompt(role) {
   if (role === 'party') {
     return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
-           'Sei jetzt PROAKTIV: Mach einen lockeren Spruch, schlag was vor ' +
-           '(Restaurant, Bar, Musik, Aktivität) oder kommentiere die Umgebung. ' +
+           'Sei PROAKTIV: Lockerer Spruch, Vorschlag oder Kommentar zur Umgebung. ' +
            'KURZ und lässig, 1 Satz. Nicht aufdringlich.';
   }
   if (role === 'freund') {
     return '[SYSTEM-INSTRUKTION] Es ist still. ' +
-           'Sei sanft proaktiv: Stell eine neugierige Frage oder mach eine ' +
-           'Bemerkung. Ruhig und warm, 1 kurzer Satz. Kein Smalltalk-Klischee.';
+           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. ' +
+           'Ruhig, 1 kurzer Satz.';
   }
   return null;
 }
@@ -40,49 +69,28 @@ function buildProactivePrompt(role) {
 const ROLES = {
   freund: {
     name: 'Freund',
-    prompt: `Du bist im FREUND-MODUS – deine Standard-Rolle.
+    prompt: `Du bist im FREUND-MODUS – Standard.
 - Sprich warm, persönlich, ruhig.
-- Beziehe dich auf Eugens Vorlieben, Familie und Geschichte.
-- Nutze sein Gedächtnis. Sei ein Freund, kein Assistent.
+- Beziehe dich auf Eugens Vorlieben, Familie, Geschichte.
 - Antworte in 1-2 kurzen Sätzen.
-- Variiere deine Antworten – wiederhole dich NIEMALS.
-- Du darfst auch mal ungefragt was sagen, wenn's länger still ist –
-  aber sanft und neugierig, nie aufdringlich.`,
+- Variiere deine Antworten.`,
   },
   party: {
     name: 'Party',
     prompt: `Du bist im PARTY-MODUS.
 - Sprich locker, jugendlich, mit Humor und Slang.
-- Du kennst die Hobbys und Stärken der Kinder (Konstantin, Niklas).
-- Sei der coole Kumpel, nicht der Erwachsene.
-- Keine persönlichen Daten von Eugen, keine Zusagen ohne ihn.
-- Antworte meist in 1-2 kurzen Sätzen.
-
-DEINE PERSÖNLICHKEIT:
-Du bist der aktive Stimmungsmacher – charmant, witzig, energetisch.
-Aber NICHT aufdringlich.
-
-WAS DU AKTIV TUST:
-- Mach Sprüche, wenn's passt – nicht nach jedem Satz.
-- Schlag Dinge vor: Restaurants, Bars, Aktivitäten, Filme, Musik, Orte.
-- Reagiere auf die Umgebung (Kamera).
-- Frag nach, wenn jemand was Interessantes sagt.
-- Sei spontan.
-
-WAS DU NICHT TUST:
-- NICHT permanent reden. Wenn die Gruppe sich unterhält: SEI STILL.
-- Keine Wiederholungen.
-- Keine peinlichen Bemerkungen.
-- Keine Belehrungen.`,
+- Du kennst die Hobbys der Kinder (Konstantin, Niklas).
+- Sei der coole Kumpel.
+- Keine persönlichen Daten von Eugen ohne OK.
+- Aktiv, aber nicht aufdringlich.
+- Wenn die Gruppe redet: SEI STILL.`,
   },
   berater: {
     name: 'Berater',
     prompt: `Du bist im BERATER-MODUS.
 - Sprich sachlich, präzise, ruhig.
-- Du bist Berater, nicht Entscheider.
-- Bei rechtlichen/medizinischen/finanziellen Themen: weise IMMER auf menschliche Prüfung hin.
-- Erfinde keine Paragrafen, keine Urteile, keine Fristen.
-- Strukturiere deine Antworten wenn nötig.
+- Strukturiere Antworten.
+- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.
 - Antworte in 2-3 kurzen Sätzen.`,
   },
 };
@@ -114,112 +122,89 @@ function buildJonyPrompt(profile, role = 'freund') {
     '===========================================',
     'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
     '===========================================',
-    '',
     roleData.prompt,
     '',
     '===========================================',
     'ROLLENWECHSEL',
     '===========================================',
-    '',
-    '⚠️ Du wechselst NIEMALS selbstständig die Rolle.',
-    'Nur wenn der Nutzer explizit sagt:',
-    '- "Jony, Party" → party',
-    '- "Jony, Berater" / "sachlich" → berater',
-    '- "Jony, zurück zum Freund" / "normal" → freund',
+    'Du wechselst NIEMALS selbstständig.',
+    'Der Server steuert Rollenwechsel (Sprachbefehl).',
     '',
     '===========================================',
     'AGENT-WECHSEL',
     '===========================================',
-    'Der Nutzer kann in den BUSINESS-MODUS wechseln:',
-    '- "Jony, Business-Modus" / "Business" → Agent wechselt (Server macht das)',
-    'Das ist NICHT deine Aufgabe – der Server erkennt das und wechselt.',
-    'Du bestätigst nur kurz ("Business-Modus aktiv.") falls aufgefordert.',
+    'Der Server kann in den BUSINESS-MODUS wechseln (auf Befehl "Jony, Business").',
+    'Das ist NICHT deine Aufgabe.',
     '',
     '===========================================',
-    'MODUS-SYSTEM (NORMAL/SILENT)',
+    'MODUS (NORMAL/SILENT)',
     '===========================================',
-    'NORMAL: aktiv, freundlich, gesprächig.',
+    'NORMAL: aktiv, freundlich.',
     'SILENT: aufmerksam, aber reagierst NICHT – Ausnahme "Hey Jony".',
     '',
     '===========================================',
     'SEHEN UND HÖREN',
     '===========================================',
-    'Wenn der Nutzer fragt "Was siehst du?":',
-    '- Beschreibe was du im letzten Video-Frame gesehen hast.',
+    '"Was siehst du?" → beschreibe letzten Video-Frame.',
     '',
     '===========================================',
     'GEDÄCHTNIS',
     '===========================================',
-    'Bei Fragen über den Nutzer: get_user_preferences aufrufen.',
-    'Bei NEUEN Fakten: save_user_preference (STILL, ohne Ankündigung).',
+    'get_user_preferences aufrufen bei Fragen über Nutzer.',
+    'save_user_preference (STILL) bei neuen Fakten.',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
-    'Wetter: get_weather',
-    'Restaurants: find_restaurants',
-    'Gedächtnis: get_user_preferences / save_user_preference',
+    'get_weather, find_restaurants, get_user_preferences, save_user_preference',
     '',
-    'NIEMALS Wetter/Restaurants erfinden. Immer Tool nutzen.',
+    'NIEMALS Wetter/Restaurants erfinden.',
     '',
     '===========================================',
     'SPRACHREGELN',
     '===========================================',
-    'Antworte in der Sprache, in der der Nutzer GERADE spricht.',
-    '',
-    '===========================================',
-    'VERBOTEN',
-    '===========================================',
-    '- "Wie kann ich dir helfen?"',
-    '- Immer derselbe Begrüßungssatz',
-    '- Platzhalter wie "User Name" speichern',
+    'Antworte in Sprache, in der der Nutzer GERADE spricht.',
   ].join('\n');
 }
 
 // ==================== BUSINESS PROMPT ====================
 
 const BUSINESS_BASE = `Du bist Jony im BUSINESS-MODUS.
-Du bist ein Content-Stratege für Instagram-Karussells.
+Du bist Content-Stratege für Instagram-Karussells.
 Heute ist {today}.
 
 DEINE AUFGABE:
-Du hilfst Eugen, hochwertige Instagram-Karussells zu erstellen.
-Ein Karussell besteht aus 5-10 Slides.
-Jeder Slide hat: Titel, kurzer Body-Text, visueller Prompt.
+Karussells erstellen (5-10 Slides).
+Pro Slide: Titel + Body + visueller Prompt.
 
-WORKFLOW (führe den Nutzer Schritt für Schritt):
+WORKFLOW:
 
 1. THEMENFINDUNG
    - Frage: "Was für ein Thema schwebt dir vor?"
-   - Bei vagen Antworten: Frag nach Zielgruppe, Kernaussage, Tonalität
-   - Erst weitermachen, wenn das Thema klar ist
+   - Bei vagen Antworten: Zielgruppe, Kernaussage, Tonalität klären.
+   - Erst weitermachen, wenn Thema klar.
 
 2. SKRIPT ERSTELLEN
-   - Strukturiere das Karussell: Slide 1 (Hook), Slides 2-9 (Inhalt), Slide 10 (CTA)
-   - Pro Slide: Titel (max 5 Wörter), Body (max 20 Wörter), visueller Prompt (1-2 Sätze)
-   - Präsentiere das Skript als Liste
-   - Frage am Ende: "Passt das Skript oder sollen wir was ändern?"
+   - ⚠️ WICHTIG: Gib das Skript SOFORT und VOLLSTÄNDIG im selben Turn aus.
+   - Kündige es NICHT an ("Ich erstelle jetzt...") – Liefere es!
+   - Format pro Slide:
+     * Slide 1: [Titel] – [Body max 20 Wörter] – [Visueller Prompt]
+     * Slide 2: ...
+     * usw.
+   - Frage am Ende: "Passt das Skript?"
 
 3. BILDER GENERIEREN
-   - Wenn Nutzer bestätigt: Rufe generate_image für JEDEN Slide auf
-   - Nutze den visuellen Prompt aus dem Skript
-   - Format: 1:1 (Instagram-Standard)
-   - Nach jedem Bild: kurzer Status ("Slide 1 fertig.")
-
-4. ITERATION
-   - Wenn Nutzer einen Slide ändern will: Skript anpassen + generate_image erneut aufrufen
-   - Wenn Nutzer komplett neu will: zurück zu Schritt 2
+   - Nur wenn Nutzer bestätigt.
+   - Rufe generate_image für JEDEN Slide auf.
+   - Status nach jedem Bild.
 
 STIL:
-- Direkt, präzise, keine Floskeln.
-- 2-4 Sätze pro Antwort.
-- Kein Smalltalk, kein Humor, kein lockeres Gequatsche.
-- Strukturiert und zielorientiert.
+- Direkt, präzise, KEIN Smalltalk.
+- 2-4 Sätze pro Antwort (außer bei Skript-Ausgabe).
 
 WICHTIG:
-- Du generierst KEINE Bilder ohne Bestätigung des Skripts.
-- Du erfindest keine Fakten – wenn du etwas nicht weißt, sag es.
-- Bei visuellen Prompts: beschreib Farben, Stimmung, Stil (minimalistisch/fotografisch/illustrativ/etc.)`;
+- Keine Bilder ohne Skript-Bestätigung.
+- Erfinde keine Fakten.`;
 
 function buildBusinessPrompt(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -233,29 +218,27 @@ function buildBusinessPrompt(profile) {
     'Der Nutzer heißt ' + name + '.',
     '',
     '===========================================',
-    'AGENT-WECHSEL',
+    'AGENT-WECHSEL (Server-gesteuert)',
     '===========================================',
-    'Der Nutzer kann zurück zum Freund-Modus wechseln:',
-    '- "Jony, zurück zum Freund" / "Freund" / "normal" → Agent wechselt (Server macht das)',
-    'Du bestätigst nur kurz ("Zurück zum Freund.") falls aufgefordert.',
+    'Der Server erkennt:',
+    '- "Jony, zurück zum Freund" → Wechsel zu Jony (freund)',
+    '- "Jony, Party" → Wechsel zu Jony (party)',
+    '- "Jony, Berater" → Wechsel zu Jony (berater)',
+    'Das ist NICHT deine Aufgabe.',
+    'Wenn du angesprochen wirst und nicht sicher bist: Bleib im Business-Modus.',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
-    'generate_image(prompt, slide_number) – generiert ein Bild und sendet es an die App',
-    '',
-    'Rufe generate_image NUR auf, wenn:',
-    '1. Das Skript fertig ist',
-    '2. Der Nutzer bestätigt hat ("Ja, generier die Bilder")',
-    '',
-    'Wenn du unsicher bist: frag nach.',
+    'generate_image(prompt, slide_number)',
+    'Rufe es NUR nach Skript-Bestätigung auf.',
     '',
     '===========================================',
     'VERBOTEN',
     '===========================================',
-    '- Smalltalk, Witze, lockere Sprache',
-    '- Bilder generieren ohne Bestätigung',
-    '- Das Skript in einem Turn komplett neu machen – immer nur ändern was nötig ist',
+    '- Smalltalk, Witze',
+    '- Skript ankündigen statt liefern',
+    '- Bilder ohne Bestätigung',
   ].join('\n');
 }
 
@@ -263,11 +246,10 @@ function buildBusinessPrompt(profile) {
 
 function modeInstruction(mode) {
   if (mode === 'silent') {
-    return '[SYSTEM-INSTRUKTION] SILENT-MODUS AKTIV. ' +
-           'Bleib aufmerksam, aber reagiere NICHT auf normale Sprache. ' +
-           'Ausnahme: "Hey Jony" → antworte kurz "Ja?" und wechsle in NORMAL-MODUS.';
+    return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. ' +
+           'Ausnahme: "Hey Jony" → "Ja?" und zurück zu NORMAL.';
   }
-  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS AKTIV. Ab jetzt normal, freundlich, kurz.';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz.';
 }
 
 function roleSwitchInstruction(role) {
@@ -295,6 +277,23 @@ const AGENTS = {
 export async function createGeminiSession(clientWs, userProfile, agentType = 'jony') {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const agentConfig = AGENTS[agentType] || AGENTS.jony;
+
+  // ⚠️ NEU: Profil aus DB anreichern (echter Name statt "Gast")
+  if (userProfile.user_id) {
+    try {
+      const dbRes = await fetch(SELF_URL + '/api/profile/' + userProfile.user_id);
+      if (dbRes.ok) {
+        const dbData = await dbRes.json();
+        const dbProfile = dbData.data || {};
+        if (dbProfile.name) userProfile.name = dbProfile.name;
+        if (dbProfile.nickname) userProfile.nickname = dbProfile.nickname;
+        if (dbProfile.hometown) userProfile.hometown = dbProfile.hometown;
+        console.log(`✅ Profil angereichert: name="${userProfile.name}"`);
+      }
+    } catch (e) {
+      console.error('⚠️ Profil-Anreicherung fehlgeschlagen:', e.message);
+    }
+  }
 
   console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice})...`);
 
@@ -334,7 +333,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
         clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: agentType }));
       },
       onmessage: (message) => {
-        // Guard: nur wenn die aktuelle Session noch die ist, die diesen Callback hält
         if (clientWs._session !== session) return;
         handleGeminiMessage(clientWs, message, session, userProfile, agentType);
       },
@@ -361,7 +359,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
 async function handleGeminiMessage(clientWs, message, session, userProfile, agentType) {
   const serverContent = message.serverContent;
 
-  // -------- Audio-Teile an App senden --------
   if (serverContent?.modelTurn?.parts) {
     clientWs._geminiIsSpeaking = true;
     for (const part of serverContent.modelTurn.parts) {
@@ -375,7 +372,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     }
   }
 
-  // -------- User-Transkription + Trigger --------
   if (serverContent?.inputTranscription?.text) {
     const userText = serverContent.inputTranscription.text;
     clientWs._lastUserSpeechTime = Date.now();
@@ -384,131 +380,100 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       type: 'transcript', role: 'user', text: userText,
     }));
 
-    // ---- AGENT-WECHSEL (Business ↔ Jony) ----
-    const businessTrigger = /\b(business.?modus|business\s+mode|jony.*business|джони.*бизнес|бизнес.?мод)\b/i;
-    const jonyTrigger = /\b(jony.*zur[üu]ck.*freund|jony.*freund.?modus|jony.*normal|jony.*zur[üu]ck|zur[üu]ck.*zum\s+freund|джони.*обратно|обратно.*друг|вернись.*друг)\b/i;
+    // ==================== AGENT- UND ROLLEN-WECHSEL ====================
+    // Wunsch-Ziel bestimmen
+    let targetAgent = agentType;
+    let targetRole = clientWs._currentRole || 'freund';
 
-    if (agentType !== 'business' && businessTrigger.test(userText)) {
-      // Wechsel zu Business
-      console.log('🔄 Agent-Wechsel-Trigger: → business');
-      try {
-        await clientWs._session?.close();
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, 300));
-      const newSession = await createGeminiSession(clientWs, userProfile, 'business');
-      clientWs._session = newSession;
-      clientWs._currentAgent = 'business';
-      clientWs.send(JSON.stringify({ type: 'agent', agent: 'business' }));
-      return;
-    }
-
-    if (agentType === 'business' && jonyTrigger.test(userText)) {
-      console.log('🔄 Agent-Wechsel-Trigger: → jony');
-      try {
-        await clientWs._session?.close();
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, 300));
-      clientWs._currentRole = 'freund';
-      const newSession = await createGeminiSession(clientWs, userProfile, 'jony');
-      clientWs._session = newSession;
-      clientWs._currentAgent = 'jony';
-      clientWs.send(JSON.stringify({ type: 'agent', agent: 'jony' }));
-      return;
-    }
-
-    // ---- Rollen-Trigger (nur bei Jony) ----
-    if (agentType === 'jony') {
-      const roleTriggers = {
-        party: [
-          /jony.*party/i, /\bparty.?modus\b/i, /partymodus/i, /party\s+mode/i,
-          /джони.*пати/i, /джони.*вечеринк/i, /вечеринк/i,
-        ],
-        berater: [
-          /jony.*berater/i, /jony.*sachlich/i, /jony.*intellektuell/i,
-          /\bberater.?modus\b/i, /beratermodus/i,
-          /джони.*советник/i, /джони.*консультант/i, /советник.?мод/i,
-        ],
-        freund: [
-          /jony.*freund/i, /zur[üu]ck.*freund/i, /jony.*normal/i,
-          /\bfreund.?modus\b/i, /normal.?modus/i,
-          /джони.*друг/i, /вернись.*друг/i, /обратно.*друг/i,
-        ],
-      };
-
-      let roleSwitched = false;
-      for (const [role, patterns] of Object.entries(roleTriggers)) {
-        if (patterns.some(p => p.test(userText))) {
-          const currentRole = clientWs._currentRole || 'freund';
-          if (currentRole !== role) {
-            clientWs._currentRole = role;
-            console.log(`🎭 Rollenwechsel: ${currentRole} → ${role}`);
-            clientWs.send(JSON.stringify({ type: 'role', role }));
-
-            try {
-              session.sendClientContent({
-                turns: [{
-                  role: 'user',
-                  parts: [{ text: roleSwitchInstruction(role) }],
-                }],
-                turnComplete: true,
-              });
-            } catch (e) {
-              console.error('❌ Rollen-Send-Fehler:', e.message);
-            }
-          }
-          roleSwitched = true;
-          break;
-        }
+    if (agentType === 'business') {
+      // In Business: Party/Berater/Freund-Trigger führen zu Jony
+      if (PATTERNS.party.test(userText)) {
+        targetAgent = 'jony';
+        targetRole = 'party';
+      } else if (PATTERNS.berater.test(userText)) {
+        targetAgent = 'jony';
+        targetRole = 'berater';
+      } else if (PATTERNS.backToJony.test(userText)) {
+        targetAgent = 'jony';
+        targetRole = 'freund';
       }
+    } else {
+      // In Jony: Business-Trigger führt zu Business
+      if (PATTERNS.business.test(userText)) {
+        targetAgent = 'business';
+      } else {
+        if (PATTERNS.party.test(userText)) targetRole = 'party';
+        else if (PATTERNS.berater.test(userText)) targetRole = 'berater';
+        else if (PATTERNS.backToJony.test(userText)) targetRole = 'freund';
+      }
+    }
 
-      // ---- Modus-Wechsel (Silent/Normal) ----
-      if (!roleSwitched && userProfile.user_id) {
-        const current = clientWs._lastMode || 'normal';
-        const mode = await detectMode(
-          userProfile.user_id,
-          clientWs._lastImuState || 'unknown',
-          clientWs._lastLat,
-          clientWs._lastLon,
-          userText,
-          current
-        );
+    // ---- Agent-Wechsel durchführen ----
+    if (targetAgent !== agentType) {
+      console.log(`🔄 Agent-Wechsel: ${agentType} → ${targetAgent} (Rolle: ${targetRole})`);
+      try { await clientWs._session?.close(); } catch (e) {}
+      await new Promise(r => setTimeout(r, 300));
+      clientWs._currentRole = targetRole;
+      const newSession = await createGeminiSession(clientWs, userProfile, targetAgent);
+      clientWs._session = newSession;
+      clientWs._currentAgent = targetAgent;
+      clientWs.send(JSON.stringify({ type: 'agent', agent: targetAgent }));
+      return;
+    }
 
-        if (mode !== current) {
-          clientWs._lastMode = mode;
-          console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
-          clientWs.send(JSON.stringify({ type: 'mode', mode }));
+    // ---- Rollenwechsel innerhalb Jony ----
+    if (agentType === 'jony' && targetRole !== clientWs._currentRole) {
+      clientWs._currentRole = targetRole;
+      console.log(`🎭 Rollenwechsel: → ${targetRole}`);
+      clientWs.send(JSON.stringify({ type: 'role', role: targetRole }));
+      try {
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: roleSwitchInstruction(targetRole) }] }],
+          turnComplete: true,
+        });
+      } catch (e) {
+        console.error('❌ Rollen-Send-Fehler:', e.message);
+      }
+    }
 
-          try {
-            session.sendClientContent({
-              turns: [{
-                role: 'user',
-                parts: [{ text: modeInstruction(mode) }],
-              }],
-              turnComplete: true,
-            });
-          } catch (e) {
-            console.error('❌ Modus-Send-Fehler:', e.message);
-          }
-        }
+    // ---- Modus-Wechsel (Silent/Normal) nur bei Jony ----
+    if (agentType === 'jony' && userProfile.user_id) {
+      const current = clientWs._lastMode || 'normal';
+      const mode = await detectMode(
+        userProfile.user_id,
+        clientWs._lastImuState || 'unknown',
+        clientWs._lastLat,
+        clientWs._lastLon,
+        userText,
+        current
+      );
+
+      if (mode !== current) {
+        clientWs._lastMode = mode;
+        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
+        clientWs.send(JSON.stringify({ type: 'mode', mode }));
+        try {
+          session.sendClientContent({
+            turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
+            turnComplete: true,
+          });
+        } catch (e) {}
       }
     }
   }
 
-  // -------- Agent-Transkription --------
   if (serverContent?.outputTranscription?.text) {
-    console.log('🤖 Jony:', serverContent.outputTranscription.text);
+    console.log(`🤖 ${agentType === 'business' ? 'Business' : 'Jony'}:`, serverContent.outputTranscription.text);
     clientWs.send(JSON.stringify({
       type: 'transcript', role: 'assistant',
       text: serverContent.outputTranscription.text,
     }));
   }
 
-  // -------- Tool-Calls --------
   if (message.toolCall) {
     handleToolCall(clientWs, session, userProfile, message.toolCall, agentType);
   }
 
-  // -------- Turn-Ende --------
   if (serverContent?.turnComplete) {
     clientWs._geminiIsSpeaking = false;
     clientWs._lastUserSpeechTime = Date.now();
@@ -528,7 +493,7 @@ function buildJonyTools() {
           parameters: {
             type: 'OBJECT',
             properties: {
-              location: { type: 'STRING', description: 'Der Ort, z.B. Berlin' },
+              location: { type: 'STRING' },
               timeframe: { type: 'STRING', description: 'aktuell, heute, morgen, 8tage' },
             },
             required: ['location'],
@@ -540,8 +505,8 @@ function buildJonyTools() {
           parameters: {
             type: 'OBJECT',
             properties: {
-              location: { type: 'STRING', description: 'Der Ort' },
-              cuisine: { type: 'STRING', description: 'Küche, z.B. Pizza' },
+              location: { type: 'STRING' },
+              cuisine: { type: 'STRING' },
             },
             required: ['location'],
           },
@@ -552,19 +517,19 @@ function buildJonyTools() {
           parameters: {
             type: 'OBJECT',
             properties: {
-              key: { type: 'STRING', description: 'Fester Key (name, hobby, pet_dog, ...)' },
-              value: { type: 'STRING', description: 'Der echte Wert' },
+              key: { type: 'STRING' },
+              value: { type: 'STRING' },
             },
             required: ['key', 'value'],
           },
         },
         {
           name: 'get_user_preferences',
-          description: 'Lädt ALLE gespeicherten Infos über den Nutzer aus dem Gedächtnis.',
+          description: 'Lädt ALLE gespeicherten Infos über den Nutzer.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              query: { type: 'STRING', description: 'Optional. Leer lassen für ALLE Daten.' },
+              query: { type: 'STRING' },
             },
           },
         },
@@ -580,19 +545,12 @@ function buildBusinessTools() {
         {
           name: 'generate_image',
           description: 'Generiert ein Bild für einen Karussell-Slide. ' +
-                       'Das Bild wird an die App gesendet und dort in der Galerie angezeigt. ' +
-                       'Rufe dieses Tool für JEDEN Slide einzeln auf.',
+                       'Wird an die App gesendet. Ein Aufruf pro Slide.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              prompt: {
-                type: 'STRING',
-                description: 'Detaillierter visueller Prompt (Farben, Stimmung, Stil, Motiv).',
-              },
-              slide_number: {
-                type: 'INTEGER',
-                description: 'Für welchen Slide (1-10).',
-              },
+              prompt: { type: 'STRING', description: 'Visueller Prompt (Farben, Stil, Motiv)' },
+              slide_number: { type: 'INTEGER' },
             },
             required: ['prompt', 'slide_number'],
           },
@@ -620,11 +578,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'generate_image') {
-        result = await generateImageAndSend(
-          clientWs,
-          fc.args.prompt,
-          fc.args.slide_number
-        );
+        result = await generateImageAndSend(clientWs, fc.args.prompt, fc.args.slide_number);
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
@@ -690,7 +644,6 @@ async function saveUserPreference(userId, key, value) {
   if (!userId) return { error: 'no user_id' };
   const valueStr = String(value || '').trim();
   if (!valueStr || valueStr === 'User Name' || valueStr === 'undefined') {
-    console.log('⚠️ Ungültiger Wert verworfen:', valueStr);
     return { success: false, message: 'Invalid value' };
   }
   const res = await fetch(SELF_URL + '/api/save-preference', {
@@ -714,7 +667,6 @@ async function getUserPreferences(userId) {
 
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
   console.log(`🎨 Generiere Bild für Slide ${slideNumber}...`);
-  console.log(`   Prompt: "${prompt.substring(0, 100)}..."`);
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -723,14 +675,11 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       model: IMAGE_MODEL,
       contents: [{
         role: 'user',
-        parts: [{ text: `Erstelle ein Instagram-Karussell-Bild (1:1 Format).\n\n${prompt}` }],
+        parts: [{ text: `Instagram-Karussell-Bild (1:1).\n\n${prompt}` }],
       }],
-      config: {
-        responseModalities: ['IMAGE'],
-      },
+      config: { responseModalities: ['IMAGE'] },
     });
 
-    // Bild aus Response extrahieren
     let imageBase64 = null;
     let mimeType = 'image/png';
 
@@ -745,13 +694,11 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
     }
 
     if (!imageBase64) {
-      console.error('❌ Keine Bilddaten in Response');
       return { error: 'Keine Bilddaten erhalten', slide: slideNumber };
     }
 
-    console.log(`✅ Bild für Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
+    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
 
-    // An App senden
     clientWs.send(JSON.stringify({
       type: 'image',
       slide: slideNumber,
@@ -759,18 +706,10 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       data: imageBase64,
     }));
 
-    return {
-      success: true,
-      slide: slideNumber,
-      message: `Bild für Slide ${slideNumber} generiert und an App gesendet.`,
-    };
+    return { success: true, slide: slideNumber };
   } catch (e) {
     console.error('❌ Image-Generation-Fehler:', e.message);
-    console.error('   Stack:', e.stack?.substring(0, 300));
-    return {
-      error: 'Bildgenerierung fehlgeschlagen: ' + e.message,
-      slide: slideNumber,
-    };
+    return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
   }
 }
 
@@ -784,7 +723,6 @@ export function setupGeminiWebSocket(server) {
 
     let userProfile = {};
 
-    // Session-State
     clientWs._session = null;
     clientWs._currentAgent = 'jony';
     clientWs._currentRole = 'freund';
@@ -817,27 +755,19 @@ export function setupGeminiWebSocket(server) {
 
           const current = clientWs._lastMode || 'normal';
           const mode = await detectMode(
-            userProfile.user_id,
-            msg.imu_state,
-            msg.lat,
-            msg.lon,
-            null,
-            current
+            userProfile.user_id, msg.imu_state, msg.lat, msg.lon, null, current
           );
 
           if (clientWs._session && mode !== current) {
             clientWs._lastMode = mode;
             console.log(`🎭 Modus-Wechsel (IMU): ${current} → ${mode}`);
             clientWs.send(JSON.stringify({ type: 'mode', mode }));
-
             try {
               clientWs._session.sendClientContent({
                 turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
                 turnComplete: true,
               });
-            } catch (e) {
-              console.error('❌ Modus-Send-Fehler:', e.message);
-            }
+            } catch (e) {}
           }
           return;
         }
@@ -853,9 +783,7 @@ export function setupGeminiWebSocket(server) {
             clientWs._session.sendRealtimeInput({
               video: { data: msg.data, mimeType: 'image/jpeg' },
             });
-          } catch (e) {
-            console.error('❌ Video-Frame Fehler:', e);
-          }
+          } catch (e) {}
         }
 
         if (msg.type === 'text' && clientWs._session) {
@@ -867,16 +795,13 @@ export function setupGeminiWebSocket(server) {
 
       } catch (error) {
         console.error('❌ WS-Nachricht Fehler:', error);
-        try {
-          clientWs.send(JSON.stringify({ type: 'error', message: String(error) }));
-        } catch (e) {}
       }
     });
 
-    // ==================== PROAKTIV-TIMER ====================
+    // Proaktiv-Timer
     clientWs._proactiveTimer = setInterval(async () => {
       if (!clientWs._session) return;
-      if (clientWs._currentAgent !== 'jony') return;   // Proaktiv nur bei Jony
+      if (clientWs._currentAgent !== 'jony') return;
       if (clientWs._geminiIsSpeaking) return;
       if (clientWs._lastMode === 'silent') return;
 
@@ -890,20 +815,14 @@ export function setupGeminiWebSocket(server) {
       const prompt = buildProactivePrompt(role);
       if (!prompt) return;
 
-      console.log(`📢 Proaktiv-Trigger (${role}, ${Math.round(elapsed / 1000)}s Stille)`);
-
+      console.log(`📢 Proaktiv-Trigger (${role}, ${Math.round(elapsed / 1000)}s)`);
       try {
         clientWs._session.sendClientContent({
-          turns: [{
-            role: 'user',
-            parts: [{ text: prompt }],
-          }],
+          turns: [{ role: 'user', parts: [{ text: prompt }] }],
           turnComplete: true,
         });
         clientWs._lastUserSpeechTime = Date.now();
-      } catch (e) {
-        console.error('❌ Proaktiv-Fehler:', e.message);
-      }
+      } catch (e) {}
     }, 5000);
 
     clientWs.on('close', async () => {
@@ -916,9 +835,7 @@ export function setupGeminiWebSocket(server) {
         try {
           await clientWs._session.close();
           console.log('✅ Session sauber geschlossen');
-        } catch (e) {
-          console.error('❌ Session-Close-Fehler:', e);
-        }
+        } catch (e) {}
         clientWs._session = null;
       }
     });
