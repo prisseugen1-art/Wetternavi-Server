@@ -349,7 +349,7 @@ function buildJonyPrompt(profile, role = 'freund') {
     'get_user_preferences aufrufen bei Fragen über Nutzer.',
     'save_user_preference (STILL) bei neuen Fakten.',
     '',
-        '===========================================',
+    '===========================================',
     'TELEGRAM',
     '===========================================',
     'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
@@ -765,9 +765,7 @@ function buildJonyTools() {
             },
           },
         },
-        
-         
-        
+        {
           name: 'send_telegram_message',
           description: 'Sendet eine Telegram-Nachricht an einen Chat. ' +
                        'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
@@ -838,7 +836,6 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
         result = await getUserPreferences(userProfile.user_id);
-
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
       } else if (fc.name === 'generate_script') {
@@ -870,9 +867,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
   }
 }
 
-// ==================== MESSENGER HANDLER ====================
-
-
+// ==================== TELEGRAM HANDLER ====================
 
 async function handleSendTelegram(chatId, text) {
   try {
@@ -1321,8 +1316,6 @@ export function setupGeminiWebSocket(server) {
   console.log('✅ Gemini WebSocket-Server bereit: /ws/gemini-live');
   return wss;
 }
-
-
 
 // ==================== TELEGRAM → APP FORWARDING ====================
 
