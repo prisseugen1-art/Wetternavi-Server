@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
 import { sendWhatsAppMessage, onWhatsAppMessage } from './whatsapp.js';
+import { sendTelegramMessage, onTelegramMessage } from './telegram.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
@@ -350,22 +351,22 @@ function buildJonyPrompt(profile, role = 'freund') {
     'save_user_preference (STILL) bei neuen Fakten.',
     '',
     '===========================================',
-    'WHATSAPP',
+    'WHATSAPP + TELEGRAM',
     '===========================================',
-    'Du kannst WhatsApp-Nachrichten senden mit send_whatsapp_message.',
+    'Du kannst WhatsApp senden mit send_whatsapp_message.',
+    'Du kannst Telegram senden mit send_telegram_message.',
     '',
-    'REGELN:',
+    'REGELN für beide:',
     '- Frage IMMER zuerst: "Soll ich das wirklich schicken?"',
     '- Warte auf Bestätigung ("ja", "ok", "ja schick").',
-    '- Dann erst send_whatsapp_message aufrufen.',
-    '- Wenn der Nutzer eine Nummer nicht kennt, frag nach.',
-    '- Eingehende WhatsApp-Nachrichten siehst du in deinem Kontext.',
+    '- Dann erst das Tool aufrufen.',
+    '- Eingehende Nachrichten siehst du in deinem Kontext.',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'send_whatsapp_message',
+    'send_whatsapp_message, send_telegram_message',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
   ].join('\n');
@@ -476,7 +477,7 @@ const AGENTS = {
   },
 };
 
-// ==================== AKTIVE CLIENTS (für WhatsApp → App) ====================
+// ==================== AKTIVE CLIENTS ====================
 
 const activeClients = new Set();
 
@@ -780,6 +781,20 @@ function buildJonyTools() {
             required: ['phone', 'text'],
           },
         },
+        {
+          name: 'send_telegram_message',
+          description: 'Sendet eine Telegram-Nachricht an einen Chat. ' +
+                       'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
+                       'und warte auf Bestätigung, BEVOR du dieses Tool aufrufst.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              chat_id: { type: 'STRING', description: 'Telegram Chat-ID (z.B. "123456789")' },
+              text: { type: 'STRING', description: 'Der Nachrichtentext' },
+            },
+            required: ['chat_id', 'text'],
+          },
+        },
       ],
     },
   ];
@@ -839,6 +854,8 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'send_whatsapp_message') {
         result = await handleSendWhatsApp(fc.args.phone, fc.args.text);
+      } else if (fc.name === 'send_telegram_message') {
+        result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
@@ -868,7 +885,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
   }
 }
 
-// ==================== WHATSAPP HANDLER ====================
+// ==================== MESSENGER HANDLER ====================
 
 async function handleSendWhatsApp(phone, text) {
   try {
@@ -877,6 +894,17 @@ async function handleSendWhatsApp(phone, text) {
     return { success: true, to: res.to, message: 'Nachricht gesendet.' };
   } catch (e) {
     console.error('❌ WhatsApp-Send-Fehler:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleSendTelegram(chatId, text) {
+  try {
+    const res = await sendTelegramMessage(chatId, text);
+    console.log(`✅ Telegram gesendet an ${res.to}`);
+    return { success: true, to: res.to, message: 'Nachricht gesendet.' };
+  } catch (e) {
+    console.error('❌ Telegram-Send-Fehler:', e.message);
     return { error: e.message };
   }
 }
@@ -1318,7 +1346,7 @@ export function setupGeminiWebSocket(server) {
   return wss;
 }
 
-// ==================== WHATSAPP → GEMINI/APP FORWARDING ====================
+// ==================== WHATSAPP → APP FORWARDING ====================
 
 onWhatsAppMessage((payload) => {
   const msg = {
@@ -1335,17 +1363,12 @@ onWhatsAppMessage((payload) => {
   console.log(`📨 WhatsApp eingehend: ${payload.fromName} (${payload.phone}): "${payload.text.substring(0, 60)}"`);
   console.log(`   → Leite an ${activeClients.size} aktive Clients weiter`);
 
-  // An alle App-Clients senden (App zeigt Notification / liest vor)
   for (const c of activeClients) {
     try {
       c.send(JSON.stringify(msg));
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
-  // Optional: In alle aktiven Gemini-Sessions einspeisen
-  // (damit Jony es "weiß" und darauf reagieren kann)
   for (const c of activeClients) {
     if (c._session && c._currentAgent === 'jony') {
       try {
@@ -1360,9 +1383,49 @@ onWhatsAppMessage((payload) => {
           }],
           turnComplete: false,
         });
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
+    }
+  }
+});
+
+// ==================== TELEGRAM → APP FORWARDING ====================
+
+onTelegramMessage((payload) => {
+  const msg = {
+    type: 'telegram_incoming',
+    chatId: payload.chatId,
+    fromName: payload.fromName,
+    username: payload.username,
+    text: payload.text,
+    isGroup: payload.isGroup,
+    chatTitle: payload.chatTitle,
+    timestamp: payload.timestamp,
+  };
+
+  console.log(`📨 Telegram eingehend: ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
+  console.log(`   → Leite an ${activeClients.size} aktive Clients weiter`);
+
+  for (const c of activeClients) {
+    try {
+      c.send(JSON.stringify(msg));
+    } catch (e) {}
+  }
+
+  for (const c of activeClients) {
+    if (c._session && c._currentAgent === 'jony') {
+      try {
+        c._session.sendClientContent({
+          turns: [{
+            role: 'user',
+            parts: [{
+              text: `[TELEGRAM-NACHRICHT EINGEHEND] Von ${payload.fromName} (Chat-ID: ${payload.chatId}): "${payload.text}". ` +
+                    `Der Nutzer hat diese Nachricht NICHT gesagt – sie kam über Telegram. ` +
+                    `Reagiere NUR, wenn der Nutzer dich darauf anspricht. Sonst schweige.`
+            }],
+          }],
+          turnComplete: false,
+        });
+      } catch (e) {}
     }
   }
 });

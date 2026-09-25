@@ -8,6 +8,7 @@ import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket } from './server/gemini_live.js';
 import { initWhatsApp, getWhatsAppStatus, getWhatsAppQr, disconnectWhatsApp } from './server/whatsapp.js';
+import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus } from './server/telegram.js';
 
 dotenv.config();
 
@@ -465,7 +466,6 @@ app.post('/api/search-restaurant', async (req, res) => {
 
 // ========== WHATSAPP ==========
 
-// -------- Status --------
 app.get('/api/whatsapp/status', (req, res) => {
   try {
     res.json(getWhatsAppStatus());
@@ -474,7 +474,6 @@ app.get('/api/whatsapp/status', (req, res) => {
   }
 });
 
-// -------- QR-Code (als String) --------
 app.get('/api/whatsapp/qr', (req, res) => {
   try {
     const qr = getWhatsAppQr();
@@ -487,7 +486,6 @@ app.get('/api/whatsapp/qr', (req, res) => {
   }
 });
 
-// -------- Trennen --------
 app.post('/api/whatsapp/disconnect', async (req, res) => {
   try {
     await disconnectWhatsApp();
@@ -496,6 +494,26 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ========== TELEGRAM ==========
+
+app.get('/api/telegram/status', (req, res) => {
+  try {
+    res.json(getTelegramStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Webhook-Route registrieren (falls Bot initialisiert)
+const telegramWebhookPath = getTelegramWebhookPath();
+if (telegramWebhookPath) {
+  const telegramCallback = getTelegramWebhookCallback();
+  if (telegramCallback) {
+    app.post(telegramWebhookPath, telegramCallback);
+    console.log(`📱 Telegram-Webhook-Route registriert: ${telegramWebhookPath}`);
+  }
+}
 
 // ========== SENSOR-BUS ==========
 const sensorBus = new SensorBus();
@@ -511,11 +529,25 @@ server.listen(PORT, async () => {
 
   await initDb();
 
-  // WhatsApp initialisieren (nach Server-Start)
+  // WhatsApp initialisieren
   try {
     await initWhatsApp();
     console.log('📱 WhatsApp initialisiert');
   } catch (e) {
     console.error('❌ WhatsApp-Init-Fehler:', e.message);
+  }
+
+  // Telegram initialisieren
+  try {
+    const tgBot = await initTelegram();
+    if (tgBot) {
+      const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+      if (domain) {
+        await setTelegramWebhook(domain);
+      }
+      console.log('📱 Telegram initialisiert');
+    }
+  } catch (e) {
+    console.error('❌ Telegram-Init-Fehler:', e.message);
   }
 });
