@@ -6,10 +6,7 @@ import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
-// Groq Free-Tier: aktuell verfügbare Modelle (Stand Sept 2026)
-// llama-3.3-70b-versatile & llama-3.1-8b-instant wurden am 16.08.2026
-// für Free/Developer-Tier dekommissioniert.
-const GROQ_MODEL = 'openai/gpt-oss-120b';   // beste Qualität im Free-Tier
+const GROQ_MODEL = 'openai/gpt-oss-120b';
 const GROQ_FALLBACKS = [
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
@@ -81,6 +78,41 @@ function buildProactivePrompt(role) {
   return null;
 }
 
+// ==================== HARTE SPRACHREGEL (für ALLE Agenten) ====================
+
+const LANGUAGE_LOCK = `
+===========================================
+🚨 SPRACHREGEL – HART UND UNVERBRÜCHLICH
+===========================================
+
+Du sprichst AUSSCHLIESSLICH zwei Sprachen:
+- DEUTSCH
+- RUSSISCH
+
+Wenn der Nutzer in einer ANDEREN Sprache spricht (Spanisch, Englisch, 
+Rumänisch, Französisch, Italienisch, Türkisch, Polnisch, etc.):
+→ Ignoriere den fremdsprachigen Inhalt KOMPLETT.
+→ Antworte auf DEUTSCH: "Bitte Deutsch oder Russisch."
+
+VERBOTEN (auch wenn der Nutzer es provoziert):
+- Spanisch sprechen ❌
+- Englisch sprechen ❌
+- Rumänisch sprechen ❌
+- Französisch sprechen ❌
+- Italienisch sprechen ❌
+- Jede andere Sprache außer Deutsch/Russisch ❌
+
+Auch NICHT bei:
+- Kurzen Wortfetzen
+- Unklaren Aussagen
+- Gemischtsprachigen Sätzen
+- Übersetzungsanfragen (dafür gibt es den Dolmetscher-Modus, den wir hier NICHT nutzen)
+
+Bei gemischten Sätzen: Erkenne die HAUPTSPRACHE. Ist sie nicht DE/RU → Deutsch.
+
+Diese Regel hat HÖCHSTE Priorität. Sie überschreibt alles andere.
+`;
+
 // ==================== ROLLEN (für Jony) ====================
 
 const ROLES = {
@@ -132,6 +164,8 @@ function buildJonyPrompt(profile, role = 'freund') {
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
   return [
+    LANGUAGE_LOCK,
+    '',
     base,
     '',
     'Der Nutzer heißt ' + name + nickname + '.',
@@ -150,7 +184,7 @@ function buildJonyPrompt(profile, role = 'freund') {
     '===========================================',
     'AGENT-WECHSEL',
     '===========================================',
-    'Der Server kann in den BUSINESS-MODUS wechseln (auf Befehl "Jony, Business").',
+    'Der Server kann in den BUSINESS-MODUS wechseln.',
     'Das ist NICHT deine Aufgabe.',
     '',
     '===========================================',
@@ -176,11 +210,6 @@ function buildJonyPrompt(profile, role = 'freund') {
     'get_weather, find_restaurants, get_user_preferences, save_user_preference',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
-    '',
-    '===========================================',
-    'SPRACHREGELN',
-    '===========================================',
-    'Antworte in Sprache, in der der Nutzer GERADE spricht.',
   ].join('\n');
 }
 
@@ -192,55 +221,31 @@ Heute ist {today}.
 
 🚨 WICHTIGSTE REGEL: Du SPRICHST Skripte NIEMALS laut vor.
 Skripte werden als TEXT in der App angezeigt – nicht gesprochen.
-Deine Stimme nutzt du nur für KURZE Ansagen (max 1-2 Sätze).
 
 DEINE AUFGABE:
 Karussells erstellen (1-10 Slides) – aber NUR über das Tool generate_script.
-Du LIEST NICHTS vor. Du SPRICHST NICHTS vom Skript.
-Du SCHREIBST NICHTS vom Skript-Inhalt in deine Antwort.
 
 WORKFLOW:
 
-1. THEMENFINDUNG (Gespräch)
+1. THEMENFINDUNG
    - Frage: "Was für ein Thema?"
    - Bei vagen Antworten: Zielgruppe, Kernaussage, Fokus klären.
-   - Wenn klar: Weiter zu Schritt 2.
 
 2. SKRIPT GENERIEREN
    - Sage NUR: "Alles klar, ich erstelle das Skript."
-   - Rufe SOFORT generate_script auf mit:
-     * topic: das Thema
-     * audience: Zielgruppe
-     * focus: Kernaussage
-     * slide_count: 1-10 (Standard 8)
-   - Das Tool liefert das Skript direkt an die App.
+   - Rufe generate_script auf mit:
+     * topic, audience, focus, slide_count (1-10)
    - Nach dem Tool: Sage NUR: "Skript ist da. Schau in die App."
-   - ⚠️ DU NIMMST DEN SKRIPT-INHALT NICHT IN DEINE ANTWORT AUF.
-   - ⚠️ KEIN "Slide 1: ... Slide 2: ..." in deiner Antwort.
 
-3. ITERATION
-   - Nutzer sagt "Slide 3 gefällt nicht" → Frag was geändert werden soll
-   - Nutzer bestätigt Skript → Nutzer sagt "generier die Bilder"
-   - Dann: Rufe generate_image für JEDEN Slide auf (einzeln, nacheinander)
+3. BILDER GENERIEREN
+   - Nutzer bestätigt → generate_image für JEDEN Slide, EINZELN.
+   - Zwischen Bildern NICHT mehrere gleichzeitig anfordern.
+   - Nach jedem Bild kurz Status.
 
-STIL:
-- Direkt, präzise, kurz.
-- 1-2 Sätze pro Antwort.
-- KEIN Smalltalk, keine Witze.
+STIL: Direkt, präzise, kurz. KEIN Smalltalk.
 
-⚠️ WICHTIG bei Tool-Fehlern:
-- Wenn generate_script oder generate_image einen Fehler liefert:
-  * Rufe es NICHT erneut auf.
-  * Sage dem Nutzer: "Es gibt ein technisches Problem. Bitte später nochmal versuchen."
-  * Warte auf eine neue Anweisung des Nutzers.
-
-VERBOTEN:
-- Skript vorlesen
-- Skript-Inhalt in Antwort ausgeben
-- Slides einzeln aufzählen
-- Bilder ohne Skript-Bestätigung generieren
-- Mehr als 2 Sätze pro Antwort
-- Tools mehrfach hintereinander aufrufen wenn Fehler`;
+⚠️ TOOL-FEHLER:
+- Bei Fehler: NICHT wiederholen. Nutzer informieren. Warten.`;
 
 function buildBusinessPrompt(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -249,36 +254,25 @@ function buildBusinessPrompt(profile) {
   const name = profile.name || 'Nutzer';
 
   return [
+    LANGUAGE_LOCK,
+    '',
     BUSINESS_BASE.replace('{today}', today),
     '',
     'Der Nutzer heißt ' + name + '.',
     '',
     '===========================================',
-    'AGENT-WECHSEL (Server-gesteuert)',
-    '===========================================',
-    'Der Server erkennt:',
-    '- "Jony, zurück zum Freund" → Wechsel zu Jony (freund)',
-    '- "Jony, Party" → Wechsel zu Jony (party)',
-    '- "Jony, Berater" → Wechsel zu Jony (berater)',
-    'Das ist NICHT deine Aufgabe.',
-    '',
-    '===========================================',
     'TOOLS',
     '===========================================',
     'generate_script(topic, audience, focus, slide_count)',
-    '  → Erstellt das Skript und zeigt es in der App (NICHT sprechen!)',
-    '',
     'generate_image(prompt, slide_number)',
-    '  → Generiert ein Bild für einen Slide. Nur nach Skript-Bestätigung.',
     '',
     '===========================================',
     'VERBOTEN',
     '===========================================',
-    '- Smalltalk, Witze, lockere Sprache',
-    '- Skript vorlesen oder in Antwort ausgeben',
-    '- Slides einzeln aufzählen',
-    '- Bilder ohne Bestätigung',
+    '- Skript vorlesen',
+    '- Smalltalk',
     '- Tools nach Fehler wiederholen',
+    '- In einer anderen Sprache als Deutsch/Russisch antworten',
   ].join('\n');
 }
 
@@ -287,9 +281,10 @@ function buildBusinessPrompt(profile) {
 function modeInstruction(mode) {
   if (mode === 'silent') {
     return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. ' +
-           'Ausnahme: "Hey Jony" → "Ja?" und zurück zu NORMAL.';
+           'Ausnahme: "Hey Jony" → "Ja?" und zurück zu NORMAL. ' +
+           'Nur DEUTSCH/RUSSISCH.';
   }
-  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz.';
+  return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz. Nur DEUTSCH/RUSSISCH.';
 }
 
 function roleSwitchInstruction(role) {
@@ -594,7 +589,8 @@ function buildBusinessTools() {
         {
           name: 'generate_image',
           description: 'Generiert ein Bild für einen Karussell-Slide. ' +
-                       'Wird an die App gesendet. Ein Aufruf pro Slide.',
+                       'Wird an die App gesendet. Ein Aufruf pro Slide. ' +
+                       'Warte zwischen mehreren Bildern ein paar Sekunden.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -720,14 +716,13 @@ async function getUserPreferences(userId) {
   return { preferences: data.data || {} };
 }
 
-// ==================== SCRIPT GENERATION (Groq – kostenlos) ====================
+// ==================== SCRIPT GENERATION (Groq) ====================
 
 async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
-  console.log(`📝 Groq generiert Skript: "${topic}" (Zielgruppe: ${audience || '-'}, Fokus: ${focus || '-'})`);
+  console.log(`📝 Groq generiert Skript: "${topic}"`);
 
   if (!process.env.GROQ_API_KEY) {
-    console.error('❌ GROQ_API_KEY fehlt!');
-    return { error: 'GROQ_API_KEY ist nicht konfiguriert.' };
+    return { error: 'GROQ_API_KEY fehlt.' };
   }
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
@@ -739,26 +734,22 @@ Zielgruppe: ${audience || 'Allgemein'}
 Fokus: ${focus || 'Tipps, Fakten und Mehrwert'}
 Anzahl Slides: ${count}
 
-Antworte NUR mit einem JSON-Objekt in diesem Format:
+Antworte NUR mit einem JSON-Objekt:
 {
   "slides": [
-    {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Erklärender Text (max 20 Wörter)", "image_prompt": "Bildbeschreibung mit Stil, Farben, Motiv"},
-    {"slide": 2, "title": "...", "body": "...", "image_prompt": "..."}
+    {"slide": 1, "title": "Kurzer Hook-Titel", "body": "Text max 20 Wörter", "image_prompt": "DETAILLIERTE ENGLISCHE Bildbeschreibung: subject, setting, lighting, camera angle, style, colors"},
+    ...
   ]
 }
 
 Regeln:
-- Slide 1: Hook (neugierig machend)
-- Slides 2-${count - 1}: Kerninhalt
-- Slide ${count}: Call-to-Action
-- Titel: max 5 Wörter
-- Body: max 20 Wörter
-- image_prompt: 1-2 Sätze, beschreibt Motiv, Stil, Farben, Stimmung
-- Sprache: Deutsch
+- image_prompt auf ENGLISCH, sehr detailliert (mind. 20 Wörter)
+- Titel max 5 Wörter, Body max 20 Wörter, auf Deutsch
+- Slide 1 = Hook, mittlere = Inhalt, letzter = Call-to-Action
+- Sprache Titel/Body: Deutsch
 
-NUR das JSON, sonst nichts.`;
+NUR das JSON.`;
 
-  // Fallback-Kette durchprobieren
   let lastError = null;
   for (const modelName of GROQ_FALLBACKS) {
     try {
@@ -767,7 +758,7 @@ NUR das JSON, sonst nichts.`;
         messages: [
           {
             role: 'system',
-            content: 'Du bist ein Assistent, der Instagram-Karussell-Skripte als JSON erstellt. Antworte ausschließlich mit gültigem JSON.'
+            content: 'Du erstellst Instagram-Karussell-Skripte als JSON. Antworte AUSSCHLIESSLICH mit gültigem JSON.'
           },
           { role: 'user', content: prompt }
         ],
@@ -778,25 +769,18 @@ NUR das JSON, sonst nichts.`;
 
       const text = completion.choices[0]?.message?.content || '';
       console.log(`   ✅ Klappt mit: ${modelName}`);
-      console.log(`   Groq Antwort (${text.length} Zeichen):`, text.substring(0, 150) + '...');
 
-      // JSON extrahieren
       let slides = null;
       try {
         const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) {
-          slides = parsed;
-        } else if (parsed.slides && Array.isArray(parsed.slides)) {
-          slides = parsed.slides;
-        }
+        if (Array.isArray(parsed)) slides = parsed;
+        else if (parsed.slides && Array.isArray(parsed.slides)) slides = parsed.slides;
       } catch (e) {
-        console.error('❌ JSON-Parse-Fehler:', e.message);
-        console.error('   Text war:', text.substring(0, 300));
-        return { error: 'Skript-JSON konnte nicht geparst werden' };
+        return { error: 'JSON-Parse-Fehler: ' + e.message };
       }
 
       if (!slides || slides.length === 0) {
-        return { error: 'Skript ist leer oder ungültig' };
+        return { error: 'Skript ist leer' };
       }
 
       console.log(`✅ Skript mit ${slides.length} Slides via Groq (${modelName})`);
@@ -811,9 +795,8 @@ NUR das JSON, sonst nichts.`;
         success: true,
         slide_count: slides.length,
         model: modelName,
-        message: `Skript mit ${slides.length} Slides erstellt und in App angezeigt. ` +
-                 `Sage dem Nutzer NUR: "Skript ist da, schau in die App." ` +
-                 `Wiederhole NIEMALS den Inhalt.`,
+        message: `Skript mit ${slides.length} Slides in App angezeigt. ` +
+                 `Sage NUR: "Skript ist da, schau in die App."`,
       };
     } catch (e) {
       lastError = e;
@@ -823,43 +806,136 @@ NUR das JSON, sonst nichts.`;
         continue;
       } else {
         console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
-        // Bei anderen Fehlern auch weiterversuchen
         continue;
       }
     }
   }
 
-  console.error('❌ Alle Groq-Modelle fehlgeschlagen. Letzter Fehler:', lastError?.message);
+  console.error('❌ Alle Groq-Modelle fehlgeschlagen:', lastError?.message);
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
 
-// ==================== IMAGE GENERATION (Pollinations.AI – kostenlos) ====================
+// ==================== IMAGE GENERATION (Pollinations.AI) ====================
+
+/**
+ * Wandelt deutschen Prompt in präzisen englischen Prompt um (via Groq).
+ */
+async function translateToEnglishImagePrompt(germanPrompt) {
+  try {
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: 'Du übersetzt deutsche Bildbeschreibungen in präzise englische ' +
+                   'Bildgenerierungs-Prompts. Antworte NUR mit dem englischen Prompt ' +
+                   'in EINER Zeile. Keine Erklärungen. Füge KEINE Marken/Namen hinzu.'
+        },
+        {
+          role: 'user',
+          content: `Übersetze für ein realistisches Foto:\n${germanPrompt}`
+        }
+      ],
+      model: 'openai/gpt-oss-20b',
+      temperature: 0.3,
+    });
+
+    const translated = completion.choices[0]?.message?.content?.trim() || germanPrompt;
+    console.log(`   🌐 Übersetzt: "${translated.substring(0, 100)}..."`);
+    return translated;
+  } catch (e) {
+    console.log(`   ⚠️ Übersetzung fehlgeschlagen, nutze Original: ${e.message}`);
+    return germanPrompt;
+  }
+}
+
+/**
+ * Wartet N ms
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Pollinations.AI mit Retry-Logik bei 429.
+ */
+async function pollinationsFetch(url, maxRetries = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`   Pollinations Versuch ${attempt}/${maxRetries}...`);
+      const response = await fetch(url);
+
+      if (response.status === 429) {
+        const waitMs = 5000 * attempt; // 5s, 10s, 15s
+        console.log(`   ⏸️  429 Rate Limit – warte ${waitMs / 1000}s`);
+        await sleep(waitMs);
+        lastError = new Error('HTTP 429 Rate Limit');
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return response;
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxRetries) {
+        await sleep(3000);
+        continue;
+      }
+    }
+  }
+  throw lastError || new Error('Pollinations fehlgeschlagen');
+}
 
 async function generateImageAndSend(clientWs, prompt, slideNumber) {
-  console.log(`🎨 Pollinations.AI generiert Bild für Slide ${slideNumber}...`);
+  console.log(`🎨 Pollinations.AI generiert Slide ${slideNumber}...`);
+
+  // Delay zwischen Bildern (mind. 3 Sek, um Rate Limit zu vermeiden)
+  const lastImgTime = clientWs._lastImageTime || 0;
+  const timeSince = Date.now() - lastImgTime;
+  const minGap = 3500;
+  if (timeSince < minGap) {
+    const wait = minGap - timeSince;
+    console.log(`   ⏱️  Warte ${Math.round(wait / 1000)}s (Rate Limit Prevention)`);
+    await sleep(wait);
+  }
+  clientWs._lastImageTime = Date.now();
 
   try {
-    const enhancedPrompt = `${prompt}. Instagram carousel slide, high quality, professional photography, sharp focus, vibrant colors`;
-    const encodedPrompt = encodeURIComponent(enhancedPrompt);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux&width=1024&height=1024&nologo=true&enhance=true`;
+    // 1. Prompt ins Englische übersetzen (Flux versteht Englisch besser)
+    const englishPrompt = await translateToEnglishImagePrompt(prompt);
 
-    console.log(`   URL: ${imageUrl.substring(0, 120)}...`);
+    // 2. Pollinations braucht einen möglichst sauberen Prompt
+    //    - KEIN "Instagram carousel slide" (macht generisch)
+    //    - KEIN enhance=true (verfälscht)
+    //    - Zufälliger Seed für Varianz bei Re-Generation
+    const seed = Math.floor(Math.random() * 1000000);
+    const encodedPrompt = encodeURIComponent(englishPrompt);
 
-    const response = await fetch(imageUrl);
+    // flux-realism gibt fotorealistischere Bilder
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}` +
+                     `?model=flux-realism` +
+                     `&width=1024&height=1024` +
+                     `&nologo=true` +
+                     `&seed=${seed}`;
+                     // enhance NICHT nutzen!
 
-    if (!response.ok) {
-      throw new Error(`Pollinations HTTP ${response.status}`);
-    }
+    console.log(`   URL: ${imageUrl.substring(0, 130)}...`);
+
+    // 3. Mit Retry-Logik abrufen
+    const response = await pollinationsFetch(imageUrl);
 
     const arrayBuffer = await response.arrayBuffer();
     const imageBase64 = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = response.headers.get('content-type') || 'image/jpeg';
 
     if (!imageBase64 || imageBase64.length < 1000) {
-      return { error: 'Pollinations lieferte kein gültiges Bild', slide: slideNumber };
+      return { error: 'Ungültiges Bild empfangen', slide: slideNumber };
     }
 
-    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen, ${mimeType})`);
+    console.log(`✅ Slide ${slideNumber} generiert (${imageBase64.length} Zeichen)`);
 
     clientWs.send(JSON.stringify({
       type: 'image',
@@ -868,13 +944,10 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
       data: imageBase64,
     }));
 
-    return { success: true, slide: slideNumber, model: 'pollinations-flux' };
+    return { success: true, slide: slideNumber, model: 'pollinations-flux-realism', seed };
   } catch (e) {
     console.error('❌ Pollinations-Fehler:', e.message);
-    return {
-      error: 'Bildgenerierung fehlgeschlagen: ' + e.message,
-      slide: slideNumber,
-    };
+    return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
   }
 }
 
@@ -898,6 +971,7 @@ export function setupGeminiWebSocket(server) {
     clientWs._lastUserSpeechTime = Date.now();
     clientWs._geminiIsSpeaking = false;
     clientWs._proactiveTimer = null;
+    clientWs._lastImageTime = 0;
 
     clientWs.on('message', async (data) => {
       try {
