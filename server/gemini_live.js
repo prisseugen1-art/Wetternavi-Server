@@ -74,7 +74,7 @@ const PATTERNS = {
 
 const PROACTIVE_INTERVALS = {
   kids: 25000,
-  party: 5000,
+  party: 15000,
   freund: 45000,
   berater: 0,
 };
@@ -1205,17 +1205,55 @@ export function setupGeminiWebSocket(server) {
     clientWs._proactiveTimer = null;
     clientWs._lastImageTime = 0;
     clientWs._dolmetscherActive = false;
+    clientWs._uiMode = 'voice'; // NEU: Standard Voice
 
     clientWs.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString());
 
+        // ==================== INIT ====================
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
-          clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
+          clientWs._uiMode = msg.uiMode || 'voice';
+          console.log(`🎛️ Init-Modus: ${clientWs._uiMode}`);
+
+          if (clientWs._uiMode === 'voice') {
+            clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
+          } else {
+            console.log('💬 Chat-Modus: keine Gemini Live Session gestartet (spart Kosten)');
+            // Trotzdem "connected" melden
+            clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: 'jony' }));
+          }
           return;
         }
 
+        // ==================== MODE-SWITCH (UI) ====================
+        if (msg.type === 'mode_switch') {
+          const newMode = msg.mode || 'voice';
+          const oldMode = clientWs._uiMode;
+          clientWs._uiMode = newMode;
+          console.log(`🎛️ UI-Modus: ${oldMode} → ${newMode}`);
+
+          // Voice → Chat: Session schließen
+          if (oldMode === 'voice' && newMode === 'chat') {
+            if (clientWs._session) {
+              try { await clientWs._session.close(); } catch (e) {}
+              clientWs._session = null;
+              console.log('🔌 Live-Session geschlossen (spart Kosten im Chat-Modus)');
+            }
+          }
+
+          // Chat → Voice: Session starten
+          if (oldMode === 'chat' && newMode === 'voice') {
+            if (!clientWs._session) {
+              clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
+              console.log('🔌 Live-Session gestartet (Voice-Modus)');
+            }
+          }
+          return;
+        }
+
+        // ==================== CONTEXT (IMU) ====================
         if (msg.type === 'context') {
           clientWs._lastImuState = msg.imu_state;
           clientWs._lastLat = msg.lat;
@@ -1243,18 +1281,15 @@ export function setupGeminiWebSocket(server) {
           }
           return;
         }
-        if (msg.type === 'mode_switch') {
-          clientWs._uiMode = msg.mode || 'voice';
-          console.log(`🎛️ UI-Modus: ${clientWs._uiMode}`);
-          return;
-        }
 
+        // ==================== AUDIO ====================
         if (msg.type === 'audio' && clientWs._session) {
           clientWs._session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
+        // ==================== VIDEO ====================
         if (msg.type === 'video' && clientWs._session) {
           try {
             clientWs._session.sendRealtimeInput({
@@ -1263,6 +1298,7 @@ export function setupGeminiWebSocket(server) {
           } catch (e) {}
         }
 
+        // ==================== TEXT ====================
         if (msg.type === 'text' && clientWs._session) {
           clientWs._session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
@@ -1275,6 +1311,7 @@ export function setupGeminiWebSocket(server) {
       }
     });
 
+    // ==================== PROAKTIV-TIMER ====================
     clientWs._proactiveTimer = setInterval(async () => {
       if (!clientWs._session) return;
       if (clientWs._currentAgent !== 'jony') return;
@@ -1335,8 +1372,6 @@ export function setupGeminiWebSocket(server) {
 }
 
 // ==================== TELEGRAM → APP FORWARDING ====================
-
-// ==================== TELEGRAM (nur Log, kein App-Push) ====================
 
 onTelegramMessage((payload) => {
   console.log(`📨 Telegram (App-Push deaktiviert): ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
