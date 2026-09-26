@@ -479,6 +479,17 @@ const AGENTS = {
 
 const activeClients = new Set();
 
+// ==================== BROADCAST (für chat.js) ====================
+
+export function broadcastToClients(msg) {
+  console.log(`📢 Broadcast an ${activeClients.size} Clients: ${msg.type}`);
+  for (const c of activeClients) {
+    try {
+      c.send(JSON.stringify(msg));
+    } catch (e) {}
+  }
+}
+
 // ==================== GEMINI LIVE SETUP ====================
 
 export async function createGeminiSession(clientWs, userProfile, agentType = 'jony') {

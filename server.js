@@ -8,6 +8,7 @@ import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket } from './server/gemini_live.js';
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
+import { handleChatMessage, getChatHistory, initChatTable } from './server/chat.js';
 
 dotenv.config();
 
@@ -283,7 +284,7 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
-// -------- Retell --------
+// -------- Retell Backup --------
 app.post('/api/create-web-call', async (req, res) => {
   try {
     const userId = req.body.user_id;
@@ -353,7 +354,7 @@ app.post('/api/save-preference', async (req, res) => {
   }
 });
 
-// -------- Delete --------
+// -------- Delete User Data --------
 app.post('/api/delete-user-data', async (req, res) => {
   try {
     const userId = req.body?.user_id || req.body?.args?.user_id;
@@ -361,6 +362,7 @@ app.post('/api/delete-user-data', async (req, res) => {
     await pool.query('DELETE FROM user_data WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM user_presence WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM user_home WHERE user_id = $1', [userId]);
+    await pool.query('DELETE FROM chat_history WHERE user_id = $1', [userId]);
     console.log('🗑️ Daten gelöscht für', userId);
     res.json({ success: true });
   } catch (error) {
@@ -458,6 +460,37 @@ app.post('/api/search-restaurant', async (req, res) => {
   }
 });
 
+// ========== CHAT-MODUS (Gemini Text API) ==========
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { user_id, message, role, mode } = req.body;
+    if (!user_id || !message) {
+      return res.status(400).json({ error: 'user_id und message required' });
+    }
+
+    const result = await handleChatMessage(
+      user_id,
+      message,
+      role || 'freund',
+      mode || 'jony'
+    );
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('❌ Chat-Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/chat/history/:userId', async (req, res) => {
+  try {
+    const history = await getChatHistory(req.params.userId);
+    res.json({ user_id: req.params.userId, history });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== TELEGRAM ==========
 
 app.get('/api/telegram/status', (req, res) => {
@@ -468,7 +501,6 @@ app.get('/api/telegram/status', (req, res) => {
   }
 });
 
-// -------- Telegram Webhook-Info (Debug) --------
 app.get('/api/telegram/webhook-info', async (req, res) => {
   try {
     const info = await getTelegramWebhookInfo();
@@ -493,11 +525,17 @@ server.listen(PORT, async () => {
 
   await initDb();
 
+  // Chat-Tabelle initialisieren
+  try {
+    await initChatTable();
+  } catch (e) {
+    console.error('❌ Chat-Init-Fehler:', e.message);
+  }
+
   // ==================== TELEGRAM ====================
   try {
     const tgBot = await initTelegram();
     if (tgBot) {
-      // Webhook-Route JETZT registrieren (Bot ist initialisiert)
       const webhookPath = getTelegramWebhookPath();
       const webhookCallback = getTelegramWebhookCallback();
 
@@ -508,7 +546,6 @@ server.listen(PORT, async () => {
         console.error('❌ Telegram-Webhook-Callback nicht verfügbar!');
       }
 
-      // Webhook bei Telegram registrieren
       const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
       if (domain) {
         await setTelegramWebhook(domain);
