@@ -1243,6 +1243,11 @@ export function setupGeminiWebSocket(server) {
           }
           return;
         }
+        if (msg.type === 'mode_switch') {
+          clientWs._uiMode = msg.mode || 'voice';
+          console.log(`🎛️ UI-Modus: ${clientWs._uiMode}`);
+          return;
+        }
 
         if (msg.type === 'audio' && clientWs._session) {
           clientWs._session.sendRealtimeInput({
@@ -1276,6 +1281,7 @@ export function setupGeminiWebSocket(server) {
       if (clientWs._geminiIsSpeaking) return;
       if (clientWs._lastMode === 'silent') return;
       if (clientWs._dolmetscherActive) return;
+      if (clientWs._uiMode === 'chat') return; // Kein Proaktiv im Chat-Modus
 
       const role = clientWs._currentRole || 'freund';
       const interval = PROACTIVE_INTERVALS[role];
