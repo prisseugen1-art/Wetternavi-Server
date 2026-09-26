@@ -16,7 +16,12 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
-const CHAT_MODEL = 'gemini-2.5-flash';
+const CHAT_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+];
 
 const GROQ_FALLBACKS = [
   'openai/gpt-oss-120b',
@@ -611,16 +616,39 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   while (attempts < maxAttempts) {
     attempts++;
 
-    const response = await ai.models.generateContent({
-      model: CHAT_MODEL,
-      contents,
-      config: {
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        tools: [{ functionDeclarations: tools }],
-        temperature: 0.8,
-        maxOutputTokens: 500,
-      },
-    });
+       let response = null;
+    let usedModel = null;
+
+    for (const modelName of CHAT_MODELS) {
+      try {
+        response = await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            tools: [{ functionDeclarations: tools }],
+            temperature: 0.8,
+            maxOutputTokens: 500,
+          },
+        });
+        usedModel = modelName;
+        console.log(`   ✅ Chat-Modell: ${modelName}`);
+        break;
+      } catch (e) {
+        const errMsg = e.message || String(e);
+        if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('no longer available')) {
+          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
+          continue;
+        }
+        console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
+        continue;
+      }
+    }
+
+    if (!response) {
+      console.error('❌ Kein Chat-Modell verfügbar');
+      break;
+    }
 
     const candidate = response.candidates?.[0];
     if (!candidate) break;
