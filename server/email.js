@@ -6,6 +6,9 @@ const YAHOO_USER = process.env.YAHOO_EMAIL;
 const YAHOO_APP_PASSWORD = process.env.YAHOO_APP_PASSWORD;
 
 let transporter = null;
+let lastVerifyError = null;
+
+// ==================== INIT ====================
 
 export function initEmail() {
   if (!YAHOO_USER || !YAHOO_APP_PASSWORD) {
@@ -13,48 +16,79 @@ export function initEmail() {
     return null;
   }
 
+  console.log(`📧 Initialisiere E-Mail-Service (${YAHOO_USER})...`);
+
+  // Port 587 mit STARTTLS – funktioniert zuverlässiger von Cloud-Servern (Railway/AWS)
   transporter = nodemailer.createTransport({
     host: 'smtp.mail.yahoo.com',
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
       user: YAHOO_USER,
       pass: YAHOO_APP_PASSWORD,
     },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
+    tls: {
+      rejectUnauthorized: false,
+    },
   });
 
-  console.log(`✅ E-Mail-Service bereit (${YAHOO_USER})`);
+  // Verbindung testen (asynchron, damit Server-Start nicht blockiert)
+  transporter.verify((error, success) => {
+    if (error) {
+      lastVerifyError = error.message;
+      console.error('❌ E-Mail-Verbindung fehlgeschlagen:', error.message);
+      console.error('   Code:', error.code);
+      console.error('   → Prüfe: App-Passwort korrekt? Port 587 blockiert?');
+      transporter = null;
+    } else {
+      lastVerifyError = null;
+      console.log(`✅ E-Mail-Service bereit (${YAHOO_USER})`);
+    }
+  });
+
   return transporter;
 }
 
-/**
- * Sendet eine einfache Text-E-Mail.
- */
+// ==================== SIMPLE EMAIL ====================
+
 export async function sendEmail(to, subject, body) {
-  if (!transporter) throw new Error('E-Mail-Service nicht initialisiert');
+  if (!transporter) {
+    throw new Error('E-Mail-Service nicht initialisiert' + (lastVerifyError ? ': ' + lastVerifyError : ''));
+  }
   if (!to || !subject || !body) throw new Error('to, subject, body sind erforderlich');
 
   console.log(`📧 Sende E-Mail an ${to}: "${subject}"`);
+  const startTime = Date.now();
 
-  const info = await transporter.sendMail({
-    from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
-    to,
-    subject,
-    text: body,
-  });
+  let info;
+  try {
+    info = await transporter.sendMail({
+      from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
+      to,
+      subject,
+      text: body,
+    });
+  } catch (err) {
+    console.error(`❌ E-Mail-Fehler nach ${Date.now() - startTime}ms:`, err.message);
+    console.error(`   Code:`, err.code);
+    console.error(`   Response:`, err.response);
+    throw err;
+  }
 
-  console.log(`✅ E-Mail gesendet: ${info.messageId}`);
+  console.log(`✅ E-Mail gesendet in ${Date.now() - startTime}ms: ${info.messageId}`);
   return { success: true, messageId: info.messageId, to };
 }
 
-/**
- * Sendet ein komplettes Karussell (Bilder + Skript) per E-Mail.
- *
- * @param {string} to - Empfänger-E-Mail
- * @param {Object} carousel - { topic, slides, images }
- */
+// ==================== CAROUSEL EMAIL ====================
+
 export async function sendCarouselByEmail(to, carousel) {
-  if (!transporter) throw new Error('E-Mail-Service nicht initialisiert');
+  if (!transporter) {
+    throw new Error('E-Mail-Service nicht initialisiert' + (lastVerifyError ? ': ' + lastVerifyError : ''));
+  }
   if (!to) throw new Error('Empfänger-E-Mail erforderlich');
   if (!carousel) throw new Error('Kein Karussell gefunden');
 
@@ -86,9 +120,22 @@ export async function sendCarouselByEmail(to, carousel) {
     lines.push('(Keine Bilder generiert)');
   } else {
     for (const img of images) {
-      lines.push(`slide_${img.n}.jpg (${img.mime})`);
+      const kb = Math.round(img.data.length / 1024);
+      lines.push(`slide_${img.n}.jpg (${img.mime}, ~${kb} KB)`);
     }
   }
+  lines.push('');
+  lines.push('=========================================');
+  lines.push('WORKFLOW');
+  lines.push('=========================================');
+  lines.push('1. Anhänge herunterladen');
+  lines.push('2. Am Laptop bearbeiten (Canva, Photoshop, etc.)');
+  lines.push('3. Auf Handy synchronisieren');
+  lines.push('4. In Instagram hochladen + Musik hinzufügen');
+  lines.push('5. Posten');
+  lines.push('');
+  lines.push('Viel Erfolg! 🚀');
+  lines.push('— Jony');
 
   const body = lines.join('\n');
 
@@ -96,20 +143,38 @@ export async function sendCarouselByEmail(to, carousel) {
   const attachments = images.map((img) => ({
     filename: `slide_${img.n}.jpg`,
     content: Buffer.from(img.data, 'base64'),
-    contentType: img.mime,
+    contentType: img.mime || 'image/jpeg',
   }));
 
-  console.log(`📧 Sende Karussell "${topic}" an ${to} (${attachments.length} Bilder)`);
+  const totalKB = Math.round(attachments.reduce((s, a) => s + a.content.length, 0) / 1024);
 
-  const info = await transporter.sendMail({
-    from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
-    to,
-    subject: `Karussell: ${topic}`,
-    text: body,
-    attachments,
-  });
+  console.log(`📧 Sende Karussell "${topic}" an ${to}`);
+  console.log(`   ${attachments.length} Bilder, ~${totalKB} KB Gesamtgröße`);
+  console.log(`   Verbinde mit SMTP (Port 587, STARTTLS)...`);
 
-  console.log(`✅ Karussell-E-Mail gesendet: ${info.messageId}`);
+  const startTime = Date.now();
+
+  let info;
+  try {
+    info = await transporter.sendMail({
+      from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
+      to,
+      subject: `Karussell: ${topic}`,
+      text: body,
+      attachments,
+    });
+  } catch (err) {
+    console.error(`❌ SMTP-Fehler nach ${Date.now() - startTime}ms:`, err.message);
+    console.error(`   Code:`, err.code);
+    console.error(`   Command:`, err.command);
+    console.error(`   Response:`, err.response);
+    throw err;
+  }
+
+  console.log(`✅ Karussell-E-Mail gesendet in ${Date.now() - startTime}ms`);
+  console.log(`   Message-ID: ${info.messageId}`);
+  console.log(`   Anhänge: ${attachments.length}`);
+
   return {
     success: true,
     messageId: info.messageId,
@@ -119,9 +184,18 @@ export async function sendCarouselByEmail(to, carousel) {
   };
 }
 
+// ==================== STATUS ====================
+
 export function getEmailStatus() {
   return {
     initialized: !!transporter,
     user: YAHOO_USER || null,
+    lastVerifyError: lastVerifyError || null,
+    smtp: {
+      host: 'smtp.mail.yahoo.com',
+      port: 587,
+      secure: false,
+      requireTLS: true,
+    },
   };
 }
