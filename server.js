@@ -9,6 +9,7 @@ import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js
 import { setupGeminiWebSocket } from './server/gemini_live.js';
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
 import { handleChatMessage, getChatHistory, initChatTable } from './server/chat.js';
+import { initEmail, getEmailStatus } from './server/email.js';
 
 dotenv.config();
 
@@ -179,14 +180,12 @@ app.post('/api/debug/delete-key', async (req, res) => {
     if (!user_id || !key) {
       return res.status(400).json({ error: 'user_id and key required' });
     }
-
     await pool.query(`
       UPDATE user_data
       SET data = data - $2::text,
           updated_at = NOW()
       WHERE user_id = $1
     `, [user_id, key]);
-
     console.log(`🗑️ Key "${key}" gelöscht für ${user_id}`);
     res.json({ success: true, deleted_key: key });
   } catch (error) {
@@ -460,7 +459,7 @@ app.post('/api/search-restaurant', async (req, res) => {
   }
 });
 
-// ========== CHAT-MODUS (Gemini Text API) ==========
+// ========== CHAT-MODUS ==========
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -510,6 +509,16 @@ app.get('/api/telegram/webhook-info', async (req, res) => {
   }
 });
 
+// ========== EMAIL ==========
+
+app.get('/api/email/status', (req, res) => {
+  try {
+    res.json(getEmailStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ========== SENSOR-BUS ==========
 const sensorBus = new SensorBus();
 sensorBus.onEvent((e) => console.log('📡 SENSOR-EVENT:', JSON.stringify(e.toJSON())));
@@ -525,7 +534,6 @@ server.listen(PORT, async () => {
 
   await initDb();
 
-  // Chat-Tabelle initialisieren
   try {
     await initChatTable();
   } catch (e) {
@@ -557,5 +565,12 @@ server.listen(PORT, async () => {
     }
   } catch (e) {
     console.error('❌ Telegram-Init-Fehler:', e.message);
+  }
+
+  // ==================== EMAIL ====================
+  try {
+    initEmail();
+  } catch (e) {
+    console.error('❌ E-Mail-Init-Fehler:', e.message);
   }
 });

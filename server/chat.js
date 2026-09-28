@@ -4,6 +4,8 @@ import { GoogleGenAI } from '@google/genai';
 import pg from 'pg';
 import OpenAI from 'openai';
 import { broadcastToClients } from './gemini_live.js';
+import { sendCarouselByEmail } from './email.js';
+import { setScript, addImage, getCarousel } from './carousel_store.js';
 
 const { Pool } = pg;
 
@@ -48,8 +50,6 @@ function getTimeContext() {
   const weekday = now.toLocaleDateString('de-DE', { weekday: 'long' });
   return `${weekday}${timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay}`;
 }
-
-// ==================== SPRACHREGEL + ANTI-REPETITION ====================
 
 const LANGUAGE_RULE = `
 SPRACHREGEL: Antworte auf Deutsch oder Russisch – je nachdem, in welcher Sprache der Nutzer schreibt.
@@ -117,7 +117,7 @@ Antworte kurz: 1-3 Sätze. Chat-Stil, kein Aufsatz.`;
 const BUSINESS_PROMPT = `Du bist Jony im BUSINESS-MODUS.
 Content-Stratege für Instagram-Karussells.
 
-🚨 WICHTIG: Du SPRICHST NIEMALS Skripte laut vor (nicht relevant im Chat, aber merk dir das Prinzip).
+🚨 WICHTIG: Du SPRICHST NIEMALS Skripte laut vor.
 Das Skript wird als strukturierte Nachricht an die App gesendet.
 
 WORKFLOW:
@@ -126,6 +126,7 @@ WORKFLOW:
 3. Rufe generate_script auf
 4. Nach dem Tool: "Skript ist da. Schau in die App."
 5. Bei "mach Bilder": generate_image für JEDEN Slide einzeln
+6. Bei "schick mir das per Email": send_carousel_email(to)
 
 STIL: Direkt, präzise, kurz. KEIN Smalltalk.
 Bei Tool-Fehler: NICHT wiederholen, Nutzer informieren.`;
@@ -149,7 +150,7 @@ function buildSystemPrompt(profile, role, mode) {
       '',
       `Heute ist ${today} (${timeCtx}). Nutzer: ${name}.`,
       '',
-      'TOOLS: generate_script, generate_image',
+      'TOOLS: generate_script, generate_image, send_carousel_email',
       'Sage NIEMALS den Skript-Inhalt in deiner Antwort.',
     ].join('\n');
   }
@@ -237,7 +238,7 @@ const BUSINESS_TOOLS = [
   },
   {
     name: 'generate_image',
-    description: 'Generiert ein Bild für einen Karussell-Slide (wird an App gesendet).',
+    description: 'Generiert ein Bild für einen Karussell-Slide.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -245,6 +246,18 @@ const BUSINESS_TOOLS = [
         slide_number: { type: 'INTEGER' },
       },
       required: ['prompt', 'slide_number'],
+    },
+  },
+  {
+    name: 'send_carousel_email',
+    description: 'Sendet das zuletzt erstellte Karussell mit allen Bildern per E-Mail. ' +
+                 'Frage IMMER zuerst nach der E-Mail-Adresse.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+      },
+      required: ['to'],
     },
   },
 ];
@@ -362,7 +375,11 @@ NUR das JSON.`;
 
       console.log(`✅ Chat-Skript mit ${slides.length} Slides (${modelName})`);
 
-      // An alle verbundenen Clients broadcasten (wie im Voice-Modus)
+      // Im Server-Speicher ablegen
+      if (userId) {
+        setScript(userId, topic, slides);
+      }
+
       broadcastToClients({
         type: 'script',
         topic: topic,
@@ -428,11 +445,16 @@ async function generateImageWithCloudflare(englishPrompt) {
   return { imageBase64: data.result.image, mimeType: 'image/jpeg' };
 }
 
-async function generateImageAndBroadcast(prompt, slideNumber) {
+async function generateImageAndBroadcast(prompt, slideNumber, userId) {
   console.log(`🎨 Chat-Bild Slide ${slideNumber}`);
   try {
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
     const result = await generateImageWithCloudflare(englishPrompt);
+
+    // Im Server-Speicher ablegen
+    if (userId) {
+      addImage(userId, slideNumber, result.imageBase64, result.mimeType);
+    }
 
     broadcastToClients({
       type: 'image',
@@ -460,12 +482,18 @@ async function executeChatTool(name, args, userId) {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
   if (name === 'generate_image') {
-    return await generateImageAndBroadcast(args.prompt, args.slide_number);
+    return await generateImageAndBroadcast(args.prompt, args.slide_number, userId);
+  }
+  if (name === 'send_carousel_email') {
+    const carousel = getCarousel(userId);
+    if (!carousel) return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
+    const res = await sendCarouselByEmail(args.to, carousel);
+    return { success: true, message: `Karussell "${res.topic}" an ${args.to} gesendet.` };
   }
   return { error: 'Unbekanntes Tool: ' + name };
 }
 
-// ==================== HISTORIE (DB) ====================
+// ==================== HISTORIE ====================
 
 async function loadChatHistory(userId, limit = 10) {
   try {
@@ -545,7 +573,6 @@ async function loadUserProfile(userId) {
 function detectChatMode(message, currentMode = 'jony') {
   const t = message.toLowerCase();
 
-  // Business
   if (/business.?modus|business\s+mode|бизнес.?мод|бизнес/.test(t)) {
     return { mode: 'business', role: null };
   }
@@ -553,7 +580,6 @@ function detectChatMode(message, currentMode = 'jony') {
     return { mode: 'jony', role: 'freund' };
   }
 
-  // Wenn in Jony: Rollen
   if (currentMode === 'jony') {
     if (/party.?modus|jony.*party|partymodus|вечеринк|пати/.test(t)) {
       return { mode: 'jony', role: 'party' };
@@ -579,7 +605,6 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
 
-  // Modus-Wechsel erkennen
   let activeMode = currentMode;
   let activeRole = currentRole;
   const switchResult = detectChatMode(userMessage, currentMode);
@@ -589,17 +614,12 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
     console.log(`🎭 Chat-Wechsel: → ${activeMode}/${activeRole}`);
   }
 
-  // Profil + Historie
   const profile = await loadUserProfile(userId);
   const history = await loadChatHistory(userId, 8);
 
-  // System-Prompt
   const systemInstruction = buildSystemPrompt(profile, activeRole, activeMode);
-
-  // Tools je nach Modus
   const tools = activeMode === 'business' ? BUSINESS_TOOLS : JONY_TOOLS;
 
-  // Konversation
   const contents = [
     ...history.map(h => ({
       role: h.role === 'user' ? 'user' : 'model',
@@ -608,7 +628,6 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
     { role: 'user', parts: [{ text: userMessage }] },
   ];
 
-  // Tool-Loop
   let finalText = null;
   let attempts = 0;
   const maxAttempts = 5;
@@ -616,7 +635,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   while (attempts < maxAttempts) {
     attempts++;
 
-       let response = null;
+    let response = null;
     let usedModel = null;
 
     for (const modelName of CHAT_MODELS) {
@@ -693,7 +712,6 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
   console.log(`✅ Chat-Antwort (${finalText.length} Zeichen)`);
 
-  // Historie speichern
   await saveChatMessage(userId, 'user', userMessage);
   await saveChatMessage(userId, 'assistant', finalText);
 

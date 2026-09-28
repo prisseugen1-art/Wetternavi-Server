@@ -5,6 +5,8 @@ import { WebSocketServer } from 'ws';
 import OpenAI from 'openai';
 import { detectMode, logPresence } from './supervisor.js';
 import { sendTelegramMessage, onTelegramMessage } from './telegram.js';
+import { sendCarouselByEmail } from './email.js';
+import { setScript, addImage, getCarousel } from './carousel_store.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
@@ -185,7 +187,7 @@ function getTimeContext() {
   return `${weekday}${timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay}`;
 }
 
-// ==================== ROLLEN (für Jony) ====================
+// ==================== ROLLEN ====================
 
 const ROLES = {
   freund: {
@@ -397,6 +399,12 @@ WORKFLOW:
 3. BILDER GENERIEREN
    - Nutzer bestätigt → generate_image für JEDEN Slide, EINZELN.
 
+4. KARUSSELL PER E-MAIL SENDEN
+   - Wenn Nutzer sagt "schick mir das per E-Mail" oder ähnlich:
+     * Frage nach der E-Mail-Adresse (falls nicht bekannt)
+     * Rufe send_carousel_email(to) auf
+   - Nach Erfolg: "Karussell an [email] gesendet."
+
 STIL: Direkt, präzise, kurz. KEIN Smalltalk.
 Variiere auch hier: nicht immer dieselben Bestätigungen.
 
@@ -421,6 +429,7 @@ function buildBusinessPrompt(profile) {
     '===========================================',
     'generate_script(topic, audience, focus, slide_count)',
     'generate_image(prompt, slide_number)',
+    'send_carousel_email(to)',
     '',
     '===========================================',
     'VERBOTEN',
@@ -779,13 +788,12 @@ function buildJonyTools() {
         {
           name: 'send_telegram_message',
           description: 'Sendet eine Telegram-Nachricht an einen Chat. ' +
-                       'WICHTIG: Frage IMMER zuerst den Nutzer "Soll ich das schicken?" ' +
-                       'und warte auf Bestätigung, BEVOR du dieses Tool aufrufst.',
+                       'Frage IMMER zuerst: "Soll ich das schicken?" und warte auf Bestätigung.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              chat_id: { type: 'STRING', description: 'Telegram Chat-ID (z.B. "123456789")' },
-              text: { type: 'STRING', description: 'Der Nachrichtentext' },
+              chat_id: { type: 'STRING' },
+              text: { type: 'STRING' },
             },
             required: ['chat_id', 'text'],
           },
@@ -825,6 +833,18 @@ function buildBusinessTools() {
             required: ['prompt', 'slide_number'],
           },
         },
+        {
+          name: 'send_carousel_email',
+          description: 'Sendet das zuletzt erstellte Karussell mit allen Bildern per E-Mail. ' +
+                       'Frage IMMER zuerst nach der E-Mail-Adresse, falls nicht genannt.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+            },
+            required: ['to'],
+          },
+        },
       ],
     },
   ];
@@ -852,13 +872,21 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
+          userProfile.user_id,
           fc.args.topic,
           fc.args.audience,
           fc.args.focus,
           fc.args.slide_count
         );
       } else if (fc.name === 'generate_image') {
-        result = await generateImageAndSend(clientWs, fc.args.prompt, fc.args.slide_number);
+        result = await generateImageAndSend(
+          clientWs,
+          userProfile.user_id,
+          fc.args.prompt,
+          fc.args.slide_number
+        );
+      } else if (fc.name === 'send_carousel_email') {
+        result = await handleSendCarouselEmail(userProfile.user_id, fc.args.to);
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
@@ -878,7 +906,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
   }
 }
 
-// ==================== TELEGRAM HANDLER ====================
+// ==================== MESSENGER + EMAIL HANDLER ====================
 
 async function handleSendTelegram(chatId, text) {
   try {
@@ -887,6 +915,23 @@ async function handleSendTelegram(chatId, text) {
     return { success: true, to: res.to, message: 'Nachricht gesendet.' };
   } catch (e) {
     console.error('❌ Telegram-Send-Fehler:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleSendCarouselEmail(userId, to) {
+  try {
+    const carousel = getCarousel(userId);
+    if (!carousel) {
+      return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
+    }
+    const res = await sendCarouselByEmail(to, carousel);
+    return {
+      success: true,
+      message: `Karussell "${res.topic}" mit ${res.imageCount} Bildern an ${to} gesendet.`,
+    };
+  } catch (e) {
+    console.error('❌ E-Mail-Fehler:', e.message);
     return { error: e.message };
   }
 }
@@ -958,7 +1003,7 @@ async function getUserPreferences(userId) {
 
 // ==================== SCRIPT GENERATION ====================
 
-async function generateScriptAndSend(clientWs, topic, audience, focus, slideCount) {
+async function generateScriptAndSend(clientWs, userId, topic, audience, focus, slideCount) {
   console.log(`📝 Groq generiert Skript: "${topic}"`);
 
   if (!process.env.GROQ_API_KEY) {
@@ -1029,6 +1074,11 @@ NUR das JSON.`;
       }
 
       console.log(`✅ Skript mit ${slides.length} Slides via Groq (${modelName})`);
+
+      // Im Server-Speicher ablegen (für E-Mail-Versand)
+      if (userId) {
+        setScript(userId, topic, slides);
+      }
 
       clientWs.send(JSON.stringify({
         type: 'script',
@@ -1134,7 +1184,7 @@ async function generateImageWithCloudflare(englishPrompt) {
   return { imageBase64, mimeType: 'image/jpeg' };
 }
 
-async function generateImageAndSend(clientWs, prompt, slideNumber) {
+async function generateImageAndSend(clientWs, userId, prompt, slideNumber) {
   console.log(`🎨 Generiere Slide ${slideNumber} via Cloudflare Workers AI...`);
 
   const lastImgTime = clientWs._lastImageTime || 0;
@@ -1166,6 +1216,11 @@ async function generateImageAndSend(clientWs, prompt, slideNumber) {
     if (!result) throw lastError || new Error('Cloudflare fehlgeschlagen');
 
     console.log(`✅ Slide ${slideNumber} generiert via Cloudflare`);
+
+    // Im Server-Speicher ablegen
+    if (userId) {
+      addImage(userId, slideNumber, result.imageBase64, result.mimeType);
+    }
 
     clientWs.send(JSON.stringify({
       type: 'image',
@@ -1205,13 +1260,12 @@ export function setupGeminiWebSocket(server) {
     clientWs._proactiveTimer = null;
     clientWs._lastImageTime = 0;
     clientWs._dolmetscherActive = false;
-    clientWs._uiMode = 'voice'; // NEU: Standard Voice
+    clientWs._uiMode = 'voice';
 
     clientWs.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString());
 
-        // ==================== INIT ====================
         if (msg.type === 'init') {
           userProfile = msg.profile || {};
           clientWs._uiMode = msg.uiMode || 'voice';
@@ -1221,20 +1275,17 @@ export function setupGeminiWebSocket(server) {
             clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
           } else {
             console.log('💬 Chat-Modus: keine Gemini Live Session gestartet (spart Kosten)');
-            // Trotzdem "connected" melden
             clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: 'jony' }));
           }
           return;
         }
 
-        // ==================== MODE-SWITCH (UI) ====================
         if (msg.type === 'mode_switch') {
           const newMode = msg.mode || 'voice';
           const oldMode = clientWs._uiMode;
           clientWs._uiMode = newMode;
           console.log(`🎛️ UI-Modus: ${oldMode} → ${newMode}`);
 
-          // Voice → Chat: Session schließen
           if (oldMode === 'voice' && newMode === 'chat') {
             if (clientWs._session) {
               try { await clientWs._session.close(); } catch (e) {}
@@ -1243,7 +1294,6 @@ export function setupGeminiWebSocket(server) {
             }
           }
 
-          // Chat → Voice: Session starten
           if (oldMode === 'chat' && newMode === 'voice') {
             if (!clientWs._session) {
               clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
@@ -1253,7 +1303,6 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ==================== CONTEXT (IMU) ====================
         if (msg.type === 'context') {
           clientWs._lastImuState = msg.imu_state;
           clientWs._lastLat = msg.lat;
@@ -1282,14 +1331,12 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ==================== AUDIO ====================
         if (msg.type === 'audio' && clientWs._session) {
           clientWs._session.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
         }
 
-        // ==================== VIDEO ====================
         if (msg.type === 'video' && clientWs._session) {
           try {
             clientWs._session.sendRealtimeInput({
@@ -1298,7 +1345,6 @@ export function setupGeminiWebSocket(server) {
           } catch (e) {}
         }
 
-        // ==================== TEXT ====================
         if (msg.type === 'text' && clientWs._session) {
           clientWs._session.sendClientContent({
             turns: [{ role: 'user', parts: [{ text: msg.text }] }],
@@ -1311,14 +1357,13 @@ export function setupGeminiWebSocket(server) {
       }
     });
 
-    // ==================== PROAKTIV-TIMER ====================
     clientWs._proactiveTimer = setInterval(async () => {
       if (!clientWs._session) return;
       if (clientWs._currentAgent !== 'jony') return;
       if (clientWs._geminiIsSpeaking) return;
       if (clientWs._lastMode === 'silent') return;
       if (clientWs._dolmetscherActive) return;
-      if (clientWs._uiMode === 'chat') return; // Kein Proaktiv im Chat-Modus
+      if (clientWs._uiMode === 'chat') return;
 
       const role = clientWs._currentRole || 'freund';
       const interval = PROACTIVE_INTERVALS[role];
