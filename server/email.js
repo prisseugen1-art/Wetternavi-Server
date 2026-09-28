@@ -1,93 +1,69 @@
 // server/email.js
 
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const YAHOO_USER = process.env.YAHOO_EMAIL;
-const YAHOO_APP_PASSWORD = process.env.YAHOO_APP_PASSWORD;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Jony <onboarding@resend.dev>';
 
-let transporter = null;
-let lastVerifyError = null;
+let resend = null;
 
 // ==================== INIT ====================
 
 export function initEmail() {
-  if (!YAHOO_USER || !YAHOO_APP_PASSWORD) {
-    console.log('⚠️  YAHOO_EMAIL oder YAHOO_APP_PASSWORD fehlt – E-Mail wird übersprungen');
+  if (!RESEND_API_KEY) {
+    console.log('⚠️  RESEND_API_KEY fehlt – E-Mail wird übersprungen');
     return null;
   }
 
-  console.log(`📧 Initialisiere E-Mail-Service (${YAHOO_USER})...`);
+  console.log(`📧 Initialisiere E-Mail-Service (Resend)...`);
 
-  // Port 587 mit STARTTLS – funktioniert zuverlässiger von Cloud-Servern (Railway/AWS)
-  transporter = nodemailer.createTransport({
-    host: 'smtp.mail.yahoo.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-      user: YAHOO_USER,
-      pass: YAHOO_APP_PASSWORD,
-    },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000,
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
-
-  // Verbindung testen (asynchron, damit Server-Start nicht blockiert)
-  transporter.verify((error, success) => {
-    if (error) {
-      lastVerifyError = error.message;
-      console.error('❌ E-Mail-Verbindung fehlgeschlagen:', error.message);
-      console.error('   Code:', error.code);
-      console.error('   → Prüfe: App-Passwort korrekt? Port 587 blockiert?');
-      transporter = null;
-    } else {
-      lastVerifyError = null;
-      console.log(`✅ E-Mail-Service bereit (${YAHOO_USER})`);
-    }
-  });
-
-  return transporter;
+  try {
+    resend = new Resend(RESEND_API_KEY);
+    console.log(`✅ E-Mail-Service bereit`);
+    console.log(`   Absender: ${FROM_EMAIL}`);
+    console.log(`   Provider: Resend (HTTPS API)`);
+    return resend;
+  } catch (e) {
+    console.error('❌ Resend-Init-Fehler:', e.message);
+    resend = null;
+    return null;
+  }
 }
 
-// ==================== SIMPLE EMAIL ====================
+// ==================== SIMPLE EMAIL (freie Texte) ====================
 
 export async function sendEmail(to, subject, body) {
-  if (!transporter) {
-    throw new Error('E-Mail-Service nicht initialisiert' + (lastVerifyError ? ': ' + lastVerifyError : ''));
+  if (!resend) {
+    throw new Error('E-Mail-Service nicht initialisiert (RESEND_API_KEY fehlt?)');
   }
-  if (!to || !subject || !body) throw new Error('to, subject, body sind erforderlich');
+  if (!to || !subject || !body) {
+    throw new Error('to, subject, body sind erforderlich');
+  }
 
   console.log(`📧 Sende E-Mail an ${to}: "${subject}"`);
   const startTime = Date.now();
 
-  let info;
-  try {
-    info = await transporter.sendMail({
-      from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
-      to,
-      subject,
-      text: body,
-    });
-  } catch (err) {
-    console.error(`❌ E-Mail-Fehler nach ${Date.now() - startTime}ms:`, err.message);
-    console.error(`   Code:`, err.code);
-    console.error(`   Response:`, err.response);
-    throw err;
+  const { data, error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [to],
+    subject,
+    text: body,
+  });
+
+  if (error) {
+    console.error(`❌ Resend-Fehler nach ${Date.now() - startTime}ms:`, error);
+    throw new Error(error.message || 'Resend-Fehler');
   }
 
-  console.log(`✅ E-Mail gesendet in ${Date.now() - startTime}ms: ${info.messageId}`);
-  return { success: true, messageId: info.messageId, to };
+  console.log(`✅ E-Mail gesendet in ${Date.now() - startTime}ms (ID: ${data.id})`);
+  return { success: true, messageId: data.id, to };
 }
 
 // ==================== CAROUSEL EMAIL ====================
 
 export async function sendCarouselByEmail(to, carousel) {
-  if (!transporter) {
-    throw new Error('E-Mail-Service nicht initialisiert' + (lastVerifyError ? ': ' + lastVerifyError : ''));
+  if (!resend) {
+    throw new Error('E-Mail-Service nicht initialisiert (RESEND_API_KEY fehlt?)');
   }
   if (!to) throw new Error('Empfänger-E-Mail erforderlich');
   if (!carousel) throw new Error('Kein Karussell gefunden');
@@ -121,7 +97,7 @@ export async function sendCarouselByEmail(to, carousel) {
   } else {
     for (const img of images) {
       const kb = Math.round(img.data.length / 1024);
-      lines.push(`slide_${img.n}.jpg (${img.mime}, ~${kb} KB)`);
+      lines.push(`slide_${img.n}.jpg (~${kb} KB)`);
     }
   }
   lines.push('');
@@ -139,45 +115,43 @@ export async function sendCarouselByEmail(to, carousel) {
 
   const body = lines.join('\n');
 
-  // ---- Anhänge bauen ----
+  // ---- Anhänge vorbereiten ----
+  // Resend erwartet content als Base64-String
   const attachments = images.map((img) => ({
     filename: `slide_${img.n}.jpg`,
-    content: Buffer.from(img.data, 'base64'),
-    contentType: img.mime || 'image/jpeg',
+    content: img.data,
   }));
 
-  const totalKB = Math.round(attachments.reduce((s, a) => s + a.content.length, 0) / 1024);
+  const totalKB = Math.round(
+    attachments.reduce((s, a) => s + a.content.length, 0) / 1024
+  );
 
   console.log(`📧 Sende Karussell "${topic}" an ${to}`);
-  console.log(`   ${attachments.length} Bilder, ~${totalKB} KB Gesamtgröße`);
-  console.log(`   Verbinde mit SMTP (Port 587, STARTTLS)...`);
+  console.log(`   ${attachments.length} Bilder, ~${totalKB} KB Base64`);
+  console.log(`   Über Resend HTTPS-API...`);
 
   const startTime = Date.now();
 
-  let info;
-  try {
-    info = await transporter.sendMail({
-      from: `"Jony (WetterNavi)" <${YAHOO_USER}>`,
-      to,
-      subject: `Karussell: ${topic}`,
-      text: body,
-      attachments,
-    });
-  } catch (err) {
-    console.error(`❌ SMTP-Fehler nach ${Date.now() - startTime}ms:`, err.message);
-    console.error(`   Code:`, err.code);
-    console.error(`   Command:`, err.command);
-    console.error(`   Response:`, err.response);
-    throw err;
+  const { data, error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [to],
+    subject: `Karussell: ${topic}`,
+    text: body,
+    attachments,
+  });
+
+  if (error) {
+    console.error(`❌ Resend-Fehler nach ${Date.now() - startTime}ms:`, error);
+    throw new Error(error.message || 'Resend-Fehler');
   }
 
   console.log(`✅ Karussell-E-Mail gesendet in ${Date.now() - startTime}ms`);
-  console.log(`   Message-ID: ${info.messageId}`);
+  console.log(`   Message-ID: ${data.id}`);
   console.log(`   Anhänge: ${attachments.length}`);
 
   return {
     success: true,
-    messageId: info.messageId,
+    messageId: data.id,
     to,
     topic,
     imageCount: attachments.length,
@@ -188,14 +162,9 @@ export async function sendCarouselByEmail(to, carousel) {
 
 export function getEmailStatus() {
   return {
-    initialized: !!transporter,
-    user: YAHOO_USER || null,
-    lastVerifyError: lastVerifyError || null,
-    smtp: {
-      host: 'smtp.mail.yahoo.com',
-      port: 587,
-      secure: false,
-      requireTLS: true,
-    },
+    initialized: !!resend,
+    provider: 'resend',
+    from: FROM_EMAIL,
+    hasApiKey: !!RESEND_API_KEY,
   };
 }
