@@ -65,7 +65,6 @@ export async function sendCarouselByEmail(to, carousel) {
 
   const { topic, slides = [], images = [] } = carousel;
 
-  // ---- Text-Body bauen ----
   const lines = [];
   lines.push(`Karussell: ${topic}`);
   lines.push(`Erstellt am: ${new Date().toLocaleString('de-DE')}`);
@@ -87,6 +86,7 @@ export async function sendCarouselByEmail(to, carousel) {
   lines.push('BILDER');
   lines.push('=========================================');
   lines.push('');
+
   if (images.length === 0) {
     lines.push('(Keine Bilder generiert)');
   } else {
@@ -95,6 +95,7 @@ export async function sendCarouselByEmail(to, carousel) {
       lines.push(`slide_${img.n}.jpg (~${kb} KB)`);
     }
   }
+
   lines.push('');
   lines.push('=========================================');
   lines.push('WORKFLOW');
@@ -110,7 +111,6 @@ export async function sendCarouselByEmail(to, carousel) {
 
   const body = lines.join('\n');
 
-  // ---- Anhänge vorbereiten ----
   const attachments = images.map((img) => ({
     Filename: `slide_${img.n}.jpg`,
     ContentType: img.mime || 'image/jpeg',
