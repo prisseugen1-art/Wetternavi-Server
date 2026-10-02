@@ -1,70 +1,65 @@
 // server/email.js
 
-import { Resend } from 'resend';
+import Mailjet from 'node-mailjet';
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Jony <onboarding@resend.dev>';
+const MJ_APIKEY_PUBLIC = process.env.MJ_APIKEY_PUBLIC;
+const MJ_APIKEY_PRIVATE = process.env.MJ_APIKEY_PRIVATE;
+const FROM_EMAIL = process.env.MJ_FROM_EMAIL || 'eugenp.wetternavi@yahoo.com';
 
-let resend = null;
+let mailjet = null;
 
 // ==================== INIT ====================
 
 export function initEmail() {
-  if (!RESEND_API_KEY) {
-    console.log('⚠️  RESEND_API_KEY fehlt – E-Mail wird übersprungen');
+  if (!MJ_APIKEY_PUBLIC || !MJ_APIKEY_PRIVATE) {
+    console.log('⚠️  MJ_APIKEY fehlt – E-Mail wird übersprungen');
     return null;
   }
-
-  console.log(`📧 Initialisiere E-Mail-Service (Resend)...`);
-
+  console.log('📧 Initialisiere E-Mail-Service (Mailjet)...');
   try {
-    resend = new Resend(RESEND_API_KEY);
-    console.log(`✅ E-Mail-Service bereit`);
-    console.log(`   Absender: ${FROM_EMAIL}`);
-    console.log(`   Provider: Resend (HTTPS API)`);
-    return resend;
+    mailjet = Mailjet.apiConnect(MJ_APIKEY_PUBLIC, MJ_APIKEY_PRIVATE);
+    console.log(`✅ E-Mail-Service bereit (${FROM_EMAIL})`);
+    return mailjet;
   } catch (e) {
-    console.error('❌ Resend-Init-Fehler:', e.message);
-    resend = null;
+    console.error('❌ Mailjet-Init-Fehler:', e.message);
+    mailjet = null;
     return null;
   }
 }
 
-// ==================== SIMPLE EMAIL (freie Texte) ====================
+// ==================== SIMPLE EMAIL ====================
 
 export async function sendEmail(to, subject, body) {
-  if (!resend) {
-    throw new Error('E-Mail-Service nicht initialisiert (RESEND_API_KEY fehlt?)');
-  }
-  if (!to || !subject || !body) {
-    throw new Error('to, subject, body sind erforderlich');
-  }
+  if (!mailjet) throw new Error('E-Mail-Service nicht initialisiert');
+  if (!to || !subject || !body) throw new Error('to, subject, body sind erforderlich');
 
   console.log(`📧 Sende E-Mail an ${to}: "${subject}"`);
-  const startTime = Date.now();
 
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: [to],
-    subject,
-    text: body,
+  const request = mailjet.post('send', { version: 'v3.1' }).request({
+    Messages: [{
+      From: { Email: FROM_EMAIL, Name: 'Jony (WetterNavi)' },
+      To: [{ Email: to }],
+      Subject: subject,
+      TextPart: body,
+    }],
   });
 
-  if (error) {
-    console.error(`❌ Resend-Fehler nach ${Date.now() - startTime}ms:`, error);
-    throw new Error(error.message || 'Resend-Fehler');
+  const result = await request;
+  const msg = result.body?.Messages?.[0];
+
+  if (msg?.Status === 'error') {
+    const errText = (msg.Errors || []).map(e => e.ErrorMessage).join('; ');
+    throw new Error(errText || 'Mailjet-Fehler');
   }
 
-  console.log(`✅ E-Mail gesendet in ${Date.now() - startTime}ms (ID: ${data.id})`);
-  return { success: true, messageId: data.id, to };
+  console.log(`✅ E-Mail gesendet an ${to}`);
+  return { success: true, to };
 }
 
 // ==================== CAROUSEL EMAIL ====================
 
 export async function sendCarouselByEmail(to, carousel) {
-  if (!resend) {
-    throw new Error('E-Mail-Service nicht initialisiert (RESEND_API_KEY fehlt?)');
-  }
+  if (!mailjet) throw new Error('E-Mail-Service nicht initialisiert');
   if (!to) throw new Error('Empfänger-E-Mail erforderlich');
   if (!carousel) throw new Error('Kein Karussell gefunden');
 
@@ -116,42 +111,37 @@ export async function sendCarouselByEmail(to, carousel) {
   const body = lines.join('\n');
 
   // ---- Anhänge vorbereiten ----
-  // Resend erwartet content als Base64-String
   const attachments = images.map((img) => ({
-    filename: `slide_${img.n}.jpg`,
-    content: img.data,
+    Filename: `slide_${img.n}.jpg`,
+    ContentType: img.mime || 'image/jpeg',
+    Base64Content: img.data,
   }));
 
-  const totalKB = Math.round(
-    attachments.reduce((s, a) => s + a.content.length, 0) / 1024
-  );
-
   console.log(`📧 Sende Karussell "${topic}" an ${to}`);
-  console.log(`   ${attachments.length} Bilder, ~${totalKB} KB Base64`);
-  console.log(`   Über Resend HTTPS-API...`);
+  console.log(`   ${attachments.length} Bilder`);
 
-  const startTime = Date.now();
-
-  const { data, error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: [to],
-    subject: `Karussell: ${topic}`,
-    text: body,
-    attachments,
+  const request = mailjet.post('send', { version: 'v3.1' }).request({
+    Messages: [{
+      From: { Email: FROM_EMAIL, Name: 'Jony (WetterNavi)' },
+      To: [{ Email: to }],
+      Subject: `Karussell: ${topic}`,
+      TextPart: body,
+      Attachments: attachments,
+    }],
   });
 
-  if (error) {
-    console.error(`❌ Resend-Fehler nach ${Date.now() - startTime}ms:`, error);
-    throw new Error(error.message || 'Resend-Fehler');
+  const result = await request;
+  const msg = result.body?.Messages?.[0];
+
+  if (msg?.Status === 'error') {
+    const errText = (msg.Errors || []).map(e => e.ErrorMessage).join('; ');
+    throw new Error(errText || 'Mailjet-Fehler');
   }
 
-  console.log(`✅ Karussell-E-Mail gesendet in ${Date.now() - startTime}ms`);
-  console.log(`   Message-ID: ${data.id}`);
-  console.log(`   Anhänge: ${attachments.length}`);
+  console.log(`✅ Karussell-E-Mail gesendet an ${to} (${attachments.length} Bilder)`);
 
   return {
     success: true,
-    messageId: data.id,
     to,
     topic,
     imageCount: attachments.length,
@@ -162,9 +152,9 @@ export async function sendCarouselByEmail(to, carousel) {
 
 export function getEmailStatus() {
   return {
-    initialized: !!resend,
-    provider: 'resend',
+    initialized: !!mailjet,
+    provider: 'mailjet',
     from: FROM_EMAIL,
-    hasApiKey: !!RESEND_API_KEY,
+    hasApiKeys: !!(MJ_APIKEY_PUBLIC && MJ_APIKEY_PRIVATE),
   };
 }
