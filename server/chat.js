@@ -144,6 +144,14 @@ function buildSystemPrompt(profile, role, mode) {
   const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
 
+  // ⬇️ NEU: Standort-Zeile bauen
+  const locationInfo = profile.current_city
+    ? `Aktueller Standort: ${profile.current_city}` +
+      (profile.current_lat != null && profile.current_lon != null
+        ? ` (GPS: ${profile.current_lat.toFixed(3)}, ${profile.current_lon.toFixed(3)})`
+        : '')
+    : `Standort: ${profile.hometown || 'unbekannt'}`;
+
   if (mode === 'business') {
     return [
       LANGUAGE_RULE,
@@ -168,13 +176,18 @@ function buildSystemPrompt(profile, role, mode) {
     BASE_PROMPT,
     '',
     `Heute ist ${today} (${timeCtx}). Nutzer: ${name} (${profile.nickname || '-'}).`,
-    `Standort: ${profile.hometown || 'unbekannt'}.`,
+    locationInfo,
     '',
     `ROLLE: ${roleData.name.toUpperCase()}`,
     roleData.prompt,
     '',
     'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences',
     'NIEMALS Wetter/Restaurants erfinden.',
+    '',
+    'STANDORT-REGEL:',
+    '- Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
+    '  nutze diesen Wert als location-Parameter für get_weather/find_restaurants.',
+    '- Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
   ].join('\n');
 }
 
@@ -265,6 +278,15 @@ const BUSINESS_TOOLS = [
     },
   },
 ];
+
+// ==================== HILFSFUNKTIONEN ====================
+
+// ⬇️ NEU: erkennt "hier", "bei mir", "mein Standort" usw.
+function isHereKeyword(loc) {
+  if (!loc || typeof loc !== 'string') return false;
+  const t = loc.toLowerCase().trim();
+  return /^(hier|hier\s+bei\s+mir|bei\s+mir|mein\s+standort|meine\s+position|aktueller\s+standort|vor\s+ort|hier\s+vor\s+ort|здесь|тут|у\s+меня|моё\s+местоположение)$/.test(t);
+}
 
 // ==================== TOOL IMPLEMENTATIONS ====================
 
@@ -379,7 +401,6 @@ NUR das JSON.`;
 
       console.log(`✅ Chat-Skript mit ${slides.length} Slides (${modelName})`);
 
-      // Im Server-Speicher ablegen
       if (userId) {
         setScript(userId, topic, slides);
       }
@@ -455,7 +476,6 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
     const result = await generateImageWithCloudflare(englishPrompt);
 
-    // Im Server-Speicher ablegen
     if (userId) {
       addImage(userId, slideNumber, result.imageBase64, result.mimeType);
     }
@@ -477,9 +497,22 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 // ==================== TOOL DISPATCH ====================
 
-async function executeChatTool(name, args, userId) {
-  if (name === 'get_weather') return await fetchWeather(args.location, args.timeframe);
-  if (name === 'find_restaurants') return await fetchRestaurants(args.location, args.cuisine);
+// ⬇️ NEU: currentLocation wird durchgereicht und "hier" ersetzt
+async function executeChatTool(name, args, userId, currentLocation = null) {
+  if (name === 'get_weather') {
+    let loc = args.location;
+    if (isHereKeyword(loc) && currentLocation?.city) {
+      loc = currentLocation.city;
+    }
+    return await fetchWeather(loc, args.timeframe);
+  }
+  if (name === 'find_restaurants') {
+    let loc = args.location;
+    if (isHereKeyword(loc) && currentLocation?.city) {
+      loc = currentLocation.city;
+    }
+    return await fetchRestaurants(loc, args.cuisine);
+  }
   if (name === 'save_user_preference') return await savePref(userId, args.key, args.value);
   if (name === 'get_user_preferences') return await getPrefs(userId);
   if (name === 'generate_script') {
@@ -604,7 +637,14 @@ function detectChatMode(message, currentMode = 'jony') {
 
 // ==================== HAUPTFUNKTION ====================
 
-export async function handleChatMessage(userId, userMessage, currentRole = 'freund', currentMode = 'jony') {
+// ⬇️ NEU: currentLocation Parameter
+export async function handleChatMessage(
+  userId,
+  userMessage,
+  currentRole = 'freund',
+  currentMode = 'jony',
+  currentLocation = null
+) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
@@ -621,7 +661,15 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   const profile = await loadUserProfile(userId);
   const history = await loadChatHistory(userId, 8);
 
-  const systemInstruction = buildSystemPrompt(profile, activeRole, activeMode);
+  // ⬇️ NEU: aktuellen Standort ins Profil mergen
+  const enrichedProfile = {
+    ...profile,
+    current_lat: currentLocation?.lat,
+    current_lon: currentLocation?.lon,
+    current_city: currentLocation?.city || profile.hometown,
+  };
+
+  const systemInstruction = buildSystemPrompt(enrichedProfile, activeRole, activeMode);
   const tools = activeMode === 'business' ? BUSINESS_TOOLS : JONY_TOOLS;
 
   const contents = [
@@ -688,7 +736,8 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
         let toolResult;
         try {
-          toolResult = await executeChatTool(fc.name, fc.args || {}, userId);
+          // ⬇️ NEU: currentLocation wird durchgereicht
+          toolResult = await executeChatTool(fc.name, fc.args || {}, userId, currentLocation);
         } catch (e) {
           toolResult = { error: e.message };
         }

@@ -463,16 +463,22 @@ app.post('/api/search-restaurant', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { user_id, message, role, mode } = req.body;
+    const { user_id, message, role, mode, lat, lon, city } = req.body;
     if (!user_id || !message) {
       return res.status(400).json({ error: 'user_id und message required' });
     }
+
+    // Standort aus Request bauen (GPS bevorzugt, sonst nur Stadt)
+    const currentLocation = (lat && lon)
+      ? { lat: parseFloat(lat), lon: parseFloat(lon), city: city || null }
+      : (city ? { city } : null);
 
     const result = await handleChatMessage(
       user_id,
       message,
       role || 'freund',
-      mode || 'jony'
+      mode || 'jony',
+      currentLocation
     );
     res.json({ success: true, ...result });
   } catch (error) {
@@ -480,6 +486,7 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 app.get('/api/chat/history/:userId', async (req, res) => {
   try {

@@ -30,6 +30,15 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+// ==================== HILFSFUNKTIONEN ====================
+
+// ⬇️ NEU: erkennt "hier", "bei mir", "mein Standort" usw.
+function isHereKeyword(loc) {
+  if (!loc || typeof loc !== 'string') return false;
+  const t = loc.toLowerCase().trim();
+  return /^(hier|hier\s+bei\s+mir|bei\s+mir|mein\s+standort|meine\s+position|aktueller\s+standort|vor\s+ort|hier\s+vor\s+ort|здесь|тут|у\s+меня|моё\s+местоположение)$/.test(t);
+}
+
 // ==================== NAME-PATTERN ====================
 
 const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
@@ -307,6 +316,14 @@ function buildJonyPrompt(profile, role = 'freund') {
   const name = profile.name || 'Nutzer';
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
+  // ⬇️ NEU: aktueller Standort-Zusatz (nur wenn vorhanden)
+  const locationLine = profile.current_city
+    ? `Aktueller Standort: ${profile.current_city}` +
+      (profile.current_lat != null && profile.current_lon != null
+        ? ` (GPS: ${profile.current_lat.toFixed(3)}, ${profile.current_lon.toFixed(3)})`
+        : '')
+    : null;
+
   return [
     LANGUAGE_RULE,
     '',
@@ -316,6 +333,7 @@ function buildJonyPrompt(profile, role = 'freund') {
     '',
     'Der Nutzer heißt ' + name + nickname + '.',
     'Aber nutze seinen Namen NICHT in jeder Antwort. Nur manchmal.',
+    ...(locationLine ? ['', locationLine] : []),
     '',
     '===========================================',
     'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
@@ -350,6 +368,13 @@ function buildJonyPrompt(profile, role = 'freund') {
     '===========================================',
     'get_user_preferences aufrufen bei Fragen über Nutzer.',
     'save_user_preference (STILL) bei neuen Fakten.',
+    '',
+    '===========================================',
+    'STANDORT-REGEL',
+    '===========================================',
+    'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
+    'nutze das als location für get_weather / find_restaurants.',
+    'Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
     '',
     '===========================================',
     'TELEGRAM',
@@ -400,10 +425,15 @@ WORKFLOW:
    - Nutzer bestätigt → generate_image für JEDEN Slide, EINZELN.
 
 4. KARUSSELL PER E-MAIL SENDEN
-   - Wenn Nutzer sagt "schick mir das per E-Mail" oder ähnlich:
-     * Frage nach der E-Mail-Adresse (falls nicht bekannt)
-     * Rufe send_carousel_email(to) auf
-   - Nach Erfolg: "Karussell an [email] gesendet."
+
+   ⛔ NIEMALS direkt senden. IMMER erst fragen.
+
+   Ablauf:
+   a) Nutzer will senden → Frage: "Soll ich das Karussell an [adresse] senden?"
+   b) WARTE auf "ja" / "ok" / "schick" / "los"
+   c) ERST DANN send_carousel_email(to)
+
+   Ohne Bestätigung → NICHT senden.
 
 STIL: Direkt, präzise, kurz. KEIN Smalltalk.
 Variiere auch hier: nicht immer dieselben Bestätigungen.
@@ -519,6 +549,14 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     } catch (e) {
       console.error('⚠️ Profil-Anreicherung fehlgeschlagen:', e.message);
     }
+  }
+
+  // ⬇️ NEU: aktuellen Standort aus IMU-Kontext ins Profil mergen
+  if (clientWs._lastLat != null && clientWs._lastLon != null) {
+    userProfile.current_lat = clientWs._lastLat;
+    userProfile.current_lon = clientWs._lastLon;
+    userProfile.current_city = userProfile.hometown;
+    console.log(`📍 Standort ins Profil: ${userProfile.current_city} (${userProfile.current_lat}, ${userProfile.current_lon})`);
   }
 
   console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice})...`);
@@ -860,9 +898,27 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
 
     try {
       if (fc.name === 'get_weather') {
-        result = await fetchWeather(fc.args.location, fc.args.timeframe);
+        // ⬇️ NEU: "hier" → aktuellen Standort nutzen
+        let loc = fc.args.location;
+        if (isHereKeyword(loc)) {
+          if (userProfile.current_city) {
+            loc = userProfile.current_city;
+          } else if (userProfile.hometown) {
+            loc = userProfile.hometown;
+          }
+        }
+        result = await fetchWeather(loc, fc.args.timeframe);
       } else if (fc.name === 'find_restaurants') {
-        result = await fetchRestaurants(fc.args.location, fc.args.cuisine);
+        // ⬇️ NEU: "hier" → aktuellen Standort nutzen
+        let loc = fc.args.location;
+        if (isHereKeyword(loc)) {
+          if (userProfile.current_city) {
+            loc = userProfile.current_city;
+          } else if (userProfile.hometown) {
+            loc = userProfile.hometown;
+          }
+        }
+        result = await fetchRestaurants(loc, fc.args.cuisine);
       } else if (fc.name === 'save_user_preference') {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
@@ -1075,7 +1131,6 @@ NUR das JSON.`;
 
       console.log(`✅ Skript mit ${slides.length} Slides via Groq (${modelName})`);
 
-      // Im Server-Speicher ablegen (für E-Mail-Versand)
       if (userId) {
         setScript(userId, topic, slides);
       }
@@ -1217,7 +1272,6 @@ async function generateImageAndSend(clientWs, userId, prompt, slideNumber) {
 
     console.log(`✅ Slide ${slideNumber} generiert via Cloudflare`);
 
-    // Im Server-Speicher ablegen
     if (userId) {
       addImage(userId, slideNumber, result.imageBase64, result.mimeType);
     }
@@ -1310,6 +1364,15 @@ export function setupGeminiWebSocket(server) {
 
           if (userProfile.user_id) {
             await logPresence(userProfile.user_id, msg.imu_state, msg.lat, msg.lon);
+          }
+
+          // ⬇️ NEU: Standort im Profil aktualisieren, damit Tools ihn nutzen
+          if (msg.lat != null && msg.lon != null) {
+            userProfile.current_lat = msg.lat;
+            userProfile.current_lon = msg.lon;
+            if (!userProfile.current_city) {
+              userProfile.current_city = userProfile.hometown;
+            }
           }
 
           const current = clientWs._lastMode || 'normal';
