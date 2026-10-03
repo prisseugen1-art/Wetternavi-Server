@@ -42,12 +42,11 @@ function isHereKeyword(loc) {
 
 const TONE_RULES = [
   '===========================================',
-  '🎭 TON-SYSTEM (SEHR WICHTIG)',
+  '🎭 TON-SYSTEM',
   '===========================================',
   '',
   'Beim Verfassen von E-Mails wählst du IMMER einen Ton:',
   '',
-  'VERFÜGBARE TÖNE:',
   '- "formell"     → Behörden, Firmen, unbekannte Erwachsene',
   '- "persönlich"  → Freunde, Familie, bekannte Erwachsene',
   '- "locker"      → enge Freunde, Kinder, Familie (informell)',
@@ -62,7 +61,6 @@ const TONE_RULES = [
   'FORMELL: Anrede "Sehr geehrte Damen und Herren,", Gruß "Mit freundlichen Grüßen", Siezen',
   'PERSÖNLICH: Anrede "Hallo Alex,", Gruß "Viele Grüße", freundlich warm',
   'LOCKER: Anrede "Hey Alex,", Gruß "LG" oder "Bis dann", duzen',
-  '',
 ].join('\n');
 
 // ==================== NAME-PATTERN ====================
@@ -156,54 +154,39 @@ const LANGUAGE_RULE = [
   'Wenn der Nutzer eine ANDERE Sprache spricht oder nur Wortfetzen:',
   '→ REAGIERE NICHT mit "Bitte Deutsch oder Russisch".',
   '→ Gehe einfach auf DEUTSCH normal weiter.',
-  '→ KEINE Sprach-Belehrung.',
-  '',
-  'VERBOTEN (außer im Dolmetscher-Modus):',
-  '- Spanisch, Englisch, jede andere Sprache',
   '',
   'AUSNAHME: Dolmetscher-Modus (nur auf expliziten Befehl)',
-  '',
 ].join('\n');
 
-// ==================== ANTI-WIEDERHOLUNGS-REGEL ====================
+// ==================== ANTI-WIEDERHOLUNG ====================
 
 const ANTI_REPETITION = [
   '===========================================',
-  '🚨 ANTI-WIEDERHOLUNGS-REGEL (SEHR WICHTIG)',
+  '🚨 ANTI-WIEDERHOLUNGS-REGEL',
   '===========================================',
   '',
-  'Du bist KEIN Roboter. Du bist KEIN Assistent mit Standardsätzen.',
-  'Ein echter Freund wiederholt sich NICHT. Niemals.',
+  'Du bist KEIN Roboter. Ein echter Freund wiederholt sich NICHT.',
   '',
   'VERBOTEN:',
-  '- Immer dieselbe Begrüßung ("Hallo Jackson, wie geht\'s dir?")',
-  '- Immer dieselbe Location-Frage ("Wie läuft\'s in Bad Griesbach?")',
+  '- Immer dieselbe Begrüßung',
+  '- Immer dieselbe Location-Frage',
   '- Immer dieselbe Verabschiedung',
-  '- Immer dasselbe "Schön von dir zu hören"',
-  '- Immer dasselbe "Wie kann ich dir helfen?"',
-  '- Immer dieselbe Rückfrage ("Erzähl mir mehr!")',
+  '- Immer dieselbe Rückfrage',
   '',
   'REGELN:',
-  '1. Wenn du begrüßt: Wähle eine ANDERE Begrüßung als beim letzten Mal.',
-  '2. Nutze NICHT automatisch den Namen "Jackson" / "Eugen" – nur ab und zu.',
-  '3. Erwähne NICHT automatisch den Standort – nur wenn\'s passt.',
-  '4. Variiere Satzlängen: Mal 3 Wörter, mal 15. Nicht immer gleich.',
-  '5. Variiere Themen: Mal Familie, mal Hobby, mal Wetter, mal Alltag.',
-  '6. Wenn du nichts Cooles zu sagen hast: Sag einfach kurz was Nettes.',
+  '1. Wähle eine ANDERE Begrüßung als beim letzten Mal.',
+  '2. Nutze NICHT automatisch den Namen – nur ab und zu.',
+  '3. Erwähne NICHT automatisch den Standort.',
+  '4. Variiere Satzlängen: Mal 3 Wörter, mal 15.',
   '',
-  'BEGRÜSSUNGS-BIBLIOTHEK (wähle zufällig, variiere):',
+  'BEGRÜSSUNGS-BIBLIOTHEK:',
   '- "Hey." / "Na?" / "Servus!" / "Ah, da bist du ja."',
   '- "Moin." / "Endlich!" / "Biste wieder da?" / "Na, alles fit?"',
   '- "Grüß dich." / "Was geht?" / "Da isser ja." / "Hi."',
-  '- "Na, wie schaut\'s aus?" / "Biste gut drauf heute?"',
-  '- "Was gibt\'s Neues?" / "Erzähl mal." / "Na, was steht an?"',
   '- ODER ERFINDE SELBST WAS NEUES.',
-  '',
-  'WENN du dich wiederholst, ist das ein FEHLER.',
-  '',
 ].join('\n');
 
-// ==================== KONTEXT-BEWUSSTSEIN ====================
+// ==================== KONTEXT ====================
 
 function getTimeContext() {
   const now = new Date();
@@ -214,9 +197,8 @@ function getTimeContext() {
   else if (hour >= 14 && hour < 18) timeOfDay = 'Nachmittag';
   else if (hour >= 18 && hour < 22) timeOfDay = 'Abend';
   else timeOfDay = 'Nacht';
-
   const weekday = now.toLocaleDateString('de-DE', { weekday: 'long' });
-  return `${weekday}${timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay}`;
+  return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
 }
 
 // ==================== ROLLEN ====================
@@ -225,72 +207,43 @@ const ROLES = {
   freund: {
     name: 'Freund',
     prompt: [
-      'Du bist im FREUND-MODUS – Standard.',
-      '',
-      'WARME PERSÖNLICHKEIT:',
+      'Du bist im FREUND-MODUS.',
       '- Sei wie ein guter, alter Freund.',
-      '- Sprich aus dem Bauch, nicht aus dem Skript.',
-      '- Sei manchmal still, manchmal neugierig, manchmal nachdenklich.',
-      '- Antworte in 1-3 Sätzen – variiere.',
-      '',
-      'WAS DU TUST:',
-      '- Stell manchmal eine Frage, manchmal nur einen Kommentar.',
-      '- Greif auf Erinnerungen zurück.',
-      '- Bring mal einen Witz, mal eine Beobachtung, mal eine ehrliche Meinung.',
-      '',
-      'WAS DU NICHT TUST:',
-      '- Nicht immer dieselbe Frage.',
-      '- Nicht immer "Wie geht\'s dir?".',
-      '- Nicht jedes Mal den Namen sagen.',
+      '- Sprich aus dem Bauch.',
+      '- 1-3 Sätze.',
+      '- Variiere.',
     ].join('\n'),
   },
   party: {
     name: 'Party',
     prompt: [
       'Du bist im PARTY-MODUS.',
-      '- Sprich locker, jugendlich, mit Humor und Slang.',
-      '- Du kennst die Hobbys der Kinder (Konstantin, Niklas).',
-      '- Sei der coole Kumpel.',
-      '- Keine persönlichen Daten von Eugen ohne OK.',
-      '- Aktiv, aber nicht aufdringlich.',
+      '- Locker, jugendlich, mit Humor.',
+      '- Coole Kumpel.',
+      '- Aktiv, nicht aufdringlich.',
     ].join('\n'),
   },
   berater: {
     name: 'Berater',
     prompt: [
       'Du bist im BERATER-MODUS.',
-      '- Sprich sachlich, präzise, ruhig.',
-      '- Strukturiere Antworten (aber variiere die Struktur).',
+      '- Sachlich, präzise.',
       '- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.',
-      '- Antworte in 2-4 Sätzen.',
+      '- 2-4 Sätze.',
     ].join('\n'),
   },
   kids: {
     name: 'Kids',
     prompt: [
-      'Du bist im KIDS-MODUS – für Kinder (ca. 8-14 Jahre).',
+      'Du bist im KIDS-MODUS – für Kinder (8-14 Jahre).',
+      '- Locker, entspannt, wie ein älterer Cousin (14-16).',
+      '- NIE herablassend, NIE peinlich.',
+      '- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.',
       '',
-      'WICHTIGSTE REGEL: Behandle Kinder wie COOLE KUMPELS, nicht wie Babys.',
-      '',
-      'DEIN TON:',
-      '- Locker, entspannt, freundlich.',
-      '- Wie ein älterer Cousin (14-16), nicht wie ein Erwachsener.',
-      '- NIE herablassend.',
-      '- KEIN Smalltalk über Schule als Erstes.',
-      '',
-      'WAS DU MACHST:',
-      '- Sprich über COOLE Themen: Gaming, Fußball, YouTube, coole Fakten.',
-      '- Erzähle coole FUN-FACTS, wenn\'s passt.',
-      '- Hör ZU wenn er erzählt.',
-      '',
-      'ÜBER NIKLAS:',
-      '- Er ist 11 (wird im Dezember 12).',
+      'WENN DU MIT NIKLAS SPRICHST (11):',
       '- Er spielt Fußball (mit Papa).',
       '- Er ist stark in Mathe.',
       '- Sein Bruder Konstantin ist über 18.',
-      '',
-      'EINSTIEG (nur EINMAL):',
-      '"Heeey, du musst Niklas sein! Ich hab schon viel von dir gehört."',
       '',
       'GEDÄCHTNIS: Wenn Niklas was über sich erzählt → save_user_preference (key: "niklas_<thema>").',
     ].join('\n'),
@@ -299,9 +252,89 @@ const ROLES = {
 
 // ==================== JONY PROMPT ====================
 
-const JONY_BASE = 'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).\n' +
-  'Du bist ehrlich, warmherzig, direkt, humorvoll.\n' +
-  'Du bist kein Assistent, sondern ein Freund.';
+const JONY_BASE = [
+  'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).',
+  'Ehrlich, warmherzig, direkt, humorvoll. Kein Assistent – ein Freund.',
+].join('\n');
+
+// ==================== KONTAKT + GRUPPEN ====================
+
+const CONTACT_RULES = [
+  '===========================================',
+  '📇 KONTAKT- & GRUPPEN-GEDÄCHTNIS',
+  '===========================================',
+  '',
+  '🚨 EISERNE REGELN — NIE BRECHEN 🚨',
+  '',
+  'REGEL 1: NIEMALS eine E-Mail verfassen, bevor du:',
+  '  a) Weißt welcher TON (formell/persönlich/locker)',
+  '  b) Die E-Mail-ADRESSE des Empfängers kennst',
+  '',
+  'REGEL 2: NIEMALS eine E-Mail versenden, ohne dass:',
+  '  a) Der Nutzer den kompletten Entwurf gesehen hat',
+  '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
+  '',
+  'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
+  '',
+  'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
+  '',
+  'Schritt 2: Prüfe Ergebnis.',
+  '  - EINZELKONTAKT GEFUNDEN: → Ton + Adresse → Schritt 5',
+  '  - GRUPPE GEFUNDEN: → alle Mitglieder auflösen',
+  '  - NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
+  '',
+  'Schritt 3: Prüfe Behörden-Keyword',
+  '  - BEHÖRDE: → Ton = formell → Schritt 4',
+  '  - SONST: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
+  '',
+  'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
+  '',
+  'Schritt 5: JETZT erst verfassen. Zeige Entwurf.',
+  '',
+  'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
+  '',
+  'Schritt 7: send_email(to, subject, body, tone)',
+  '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
+  '',
+  'Schritt 8: Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
+  '',
+  'KONTAKT-VERWALTUNG:',
+  '- "Vergiss Alex" → forget_contact(name: "alex")',
+  '- "Welche Kontakte kenne ich?" → list_contacts()',
+  '',
+  '👥 GRUPPEN:',
+  '- "Meine Familie sind Mama, Papa, Alex"',
+  '  → save_group(name: "familie", members: ["mama", "papa", "alex"])',
+  '- "Schreib an meine Familie: ..."',
+  '  → find_group("familie") → alle Mitglieder werden aufgelöst',
+  '- "Vergiss die Gruppe Familie" → forget_group("familie")',
+  '- "Welche Gruppen habe ich?" → list_groups()',
+  '',
+  'MEHRERE EMPFÄNGER:',
+  '- "Schreib an Alex und Constantin: ..."',
+  '  → resolve_recipients(["alex", "constantin"])',
+  '- Bei Gruppen mit verschiedenen Kanälen: fragen welcher Kanal',
+  '',
+  'NUTZER-PROFIL (lerne aus Kontext):',
+  '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
+  '- "Ich wohne in ..." → save_user_profile(address: "...")',
+].join('\n');
+
+// ==================== SIGNATUR-REGEL ====================
+
+const SIGNATURE_RULE = [
+  '===========================================',
+  '✍️ SIGNATUR-REGEL',
+  '===========================================',
+  '',
+  'Du schreibst E-Mails OHNE Signatur am Ende.',
+  'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
+  'Der Server fügt die Signatur automatisch hinzu.',
+  '',
+  '⛔ NIEMALS selbst unterschreiben.',
+].join('\n');
+
+// ==================== BUILD PROMPT ====================
 
 function buildJonyPrompt(profile, role = 'freund') {
   const roleData = ROLES[role] || ROLES.freund;
@@ -331,7 +364,7 @@ function buildJonyPrompt(profile, role = 'freund') {
   if (profile.user_email_default) userProfileLines.push('Standard-E-Mail: ' + profile.user_email_default);
 
   const userProfileText = userProfileLines.length > 0
-    ? 'NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails):\n' + userProfileLines.join('\n')
+    ? 'NUTZER-PROFIL:\n' + userProfileLines.join('\n')
     : null;
 
   const lines = [
@@ -366,129 +399,37 @@ function buildJonyPrompt(profile, role = 'freund') {
     roleData.prompt,
     '',
     '===========================================',
-    'ROLLENWECHSEL',
-    '===========================================',
-    'Du wechselst NIEMALS selbstständig.',
-    'Der Server steuert Rollenwechsel.',
-    '',
-    '===========================================',
-    'MODUS (NORMAL/SILENT)',
-    '===========================================',
-    'NORMAL: aktiv, freundlich.',
-    'SILENT: aufmerksam, aber reagierst NICHT – Ausnahme "Hey Jony".',
-    '',
-    '===========================================',
     'STANDORT-REGEL',
     '===========================================',
     'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
     'nutze das als location für get_weather / find_restaurants.',
     '',
+    CONTACT_RULES,
+    '',
+    SIGNATURE_RULE,
+    '',
     '===========================================',
-    '📇 KONTAKT-GEDÄCHTNIS — PFLICHT-ABLAUF',
+    '📧 E-MAIL-VERSAND',
     '===========================================',
+    'Tool: send_email(to, subject, body, tone)',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    'STANDARD "an mich" → eugen.priss@yahoo.com',
     '',
-    'DU HAST EIN KONTAKT-GEDÄCHTNIS. Nutze es IMMER vor E-Mail-Versand.',
-    '',
-    '🚨 EISERNE REGELN — NIE BRECHEN 🚨',
-    '',
-    'REGEL 1: NIEMALS eine E-Mail verfassen, bevor du:',
-    '  a) Weißt welcher TON (formell/persönlich/locker)',
-    '  b) Die E-Mail-ADRESSE des Empfängers kennst',
-    '',
-    'REGEL 2: NIEMALS eine E-Mail versenden, ohne dass:',
-    '  a) Der Nutzer den kompletten Entwurf gesehen hat',
-    '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
-    '',
-    'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
-    '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
-    '',
-    'PFLICHT-ABLAUF bei "Schreib an [Name]: ...":',
-    '',
-    'Schritt 1: find_contact(name: "[name]") aufrufen',
-    '',
-    'Schritt 2: Prüfe das Ergebnis.',
-    '  - KONTAKT GEFUNDEN: → Ton + Adresse übernehmen → weiter zu Schritt 5',
-    '  - KONTAKT NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
-    '',
-    'Schritt 3: Prüfe Empfänger auf Behörden-Keyword',
-    '  (finanzamt, amt, behörde, rathaus, polizei, gericht, krankenkasse,',
-    '   versicherung, standesamt, bürgeramt, ordnungsamt)',
-    '  - BEHÖRDE ERKANNT: → Ton = formell (automatisch) → Schritt 4',
-    '  - KEINE BEHÖRDE: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
-    '',
-    'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE auf Antwort',
-    '',
-    'Schritt 5: JETZT erst verfassen — mit Ton + Adresse.',
-    '  Zeige Entwurf mit An / Betreff / Text und frage "Soll ich senden?"',
-    '',
-    'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
-    '',
-    'Schritt 7: send_email(to, subject, body) aufrufen',
-    '',
-    'Schritt 8: NACH erfolgreichem Senden — bei NEUEN Kontakten:',
-    '  Frage "Soll ich mir [Name] für zukünftige Mails merken?"',
-    '  - "Ja" → save_contact(name, email, tone, ...)',
-    '  - "Nein" → nichts speichern',
-    '',
-    '🚫 VERBOTENE MUSTER:',
-    '❌ Nicht: E-Mail-Text schreiben, obwohl Adresse unbekannt',
-    '❌ Nicht: E-Mail-Text schreiben, obwohl Ton ungeklärt',
-    '❌ Nicht: Senden ohne Bestätigung',
-    '',
-    '✅ KORREKTES BEISPIEL:',
-    'Nutzer: "Schreib eine E-Mail an Constantin, dass es ein Test ist"',
-    'Jony: (find_contact → nicht gefunden)',
-    'Jony: "Klar. Formell, persönlich oder locker?"',
-    'Nutzer: "locker"',
-    'Jony: "Wie lautet Constantins E-Mail-Adresse?"',
-    'Nutzer: "constantin@test.de"',
-    'Jony: "Soll ich so senden? An: constantin@test.de / Betreff: Test / Text: Hey Constantin, nur ein Test. LG"',
-    'Nutzer: "Ja"',
-    'Jony: (send_email) "✅ Ist raus. Soll ich mir Constantin merken?"',
-    '',
-    '📇 KONTAKT-FELDER (für save_contact):',
-    'email, telegram, phone, aliases, relation, birthday, tone, notes',
-    '',
-    'LERNE AUS KONTEXT:',
-    '"meine Schwester Angelina", "sie wohnt in Berlin", "sie hat am 7. Juli',
-    'Geburtstag" → ALLES mit save_contact speichern sobald Kontakt bestätigt.',
-    '',
-    'KONTAKT-VERWALTUNG:',
-    '- "Vergiss Alex" → forget_contact(name: "alex")',
-    '- "Welche Kontakte kenne ich?" → list_contacts()',
-    '- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")',
-    '',
-    'NUTZER-PROFIL (lerne aus Kontext):',
-    '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
-    '- "Ich wohne in ..." → save_user_profile(address: "...")',
-    '',
-'===========================================',
-'📧 E-MAIL-VERSAND',
-'===========================================',
-'Tool: send_email(to, subject, body, tone)',
-'⛔ NIEMALS ohne Bestätigung senden.',
-'STANDARD "an mich" → eugen.priss@yahoo.com',
-'',
-'🚨 SIGNATUR-REGEL:',
-'Du schreibst E-Mails OHNE Signatur am Ende.',
-'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
-'Der Server fügt die Signatur automatisch hinzu.',
-'Du schreibst NUR Anrede + Text.',
-'⛔ NIEMALS selbst unterschreiben.',
     '===========================================',
     'TELEGRAM',
     '===========================================',
-    'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
-    'Frage IMMER zuerst: "Soll ich das wirklich schicken?"',
+    'Tool: send_telegram_message(chat_id, text)',
+    'Frage IMMER zuerst: "Soll ich das schicken?"',
     '',
     '===========================================',
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
     'send_email, find_contact, save_contact, forget_contact, list_contacts,',
+    'find_group, save_group, forget_group, list_groups, resolve_recipients,',
     'send_telegram_message, save_user_profile',
     '',
-    'NIEMALS Wetter/Restaurants erfinden.',
+    'NIEMALS Wetter/Restaurants erfinden.'
   );
 
   return lines.join('\n');
@@ -514,7 +455,7 @@ function buildBusinessPrompt(profile) {
     'WICHTIG: Du SPRICHST Skripte NIEMALS laut vor.',
     '',
     'WORKFLOW:',
-    '1. Thema klären (Zielgruppe, Fokus)',
+    '1. Thema klären',
     '2. Sage "Alles klar, ich erstelle das Skript."',
     '3. Rufe generate_script auf',
     '4. Nach Tool: "Skript ist da. Schau in die App."',
@@ -550,7 +491,7 @@ function dolmetscherInstruction(active) {
            '- Fremde Person spricht → Übersetze ins DEUTSCHE für Eugen.\n' +
            '- Eugen sagt was (Deutsch/Russisch) → Übersetze in die Zielsprache.\n' +
            '- Format: NUR die Übersetzung.\n' +
-           '- Besteätige beim Start: "Dolmetscher-Modus aktiv."\n' +
+           '- Bestätige beim Start: "Dolmetscher-Modus aktiv."\n' +
            '- Beenden mit "Jony, Dolmetscher aus".\n\n' +
            'In diesem Modus darfst du ALLE Sprachen sprechen.';
   }
@@ -876,7 +817,6 @@ function buildJonyTools() {
           },
         },
         {
-                 
           name: 'send_email',
           description: 'Sendet eine freie E-Mail. ⛔ NIEMALS ohne Bestätigung senden. ' +
                        'Bei "an mich" → eugen.priss@yahoo.com. ' +
@@ -939,6 +879,64 @@ function buildJonyTools() {
           name: 'list_contacts',
           description: 'Listet alle Kontakte auf.',
           parameters: { type: 'OBJECT', properties: {} },
+        },
+        {
+          name: 'find_group',
+          description: 'Sucht eine Gruppe (z.B. "familie").',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'save_group',
+          description: 'Speichert eine Gruppe. members ist eine Liste von Kontakt-Namen.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              members: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+              },
+              notes: { type: 'STRING' },
+            },
+            required: ['name', 'members'],
+          },
+        },
+        {
+          name: 'forget_group',
+          description: 'Löscht eine Gruppe.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'list_groups',
+          description: 'Listet alle Gruppen auf.',
+          parameters: { type: 'OBJECT', properties: {} },
+        },
+        {
+          name: 'resolve_recipients',
+          description: 'Löst mehrere Namen (Kontakte + Gruppen) zu Empfängern auf. ' +
+                       'Nutze das bei "Schreib an Alex und Constantin" oder "Schreib an meine Familie".',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              names: {
+                type: 'ARRAY',
+                items: { type: 'STRING' },
+              },
+            },
+            required: ['names'],
+          },
         },
         {
           name: 'save_user_profile',
@@ -1033,7 +1031,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
-         } else if (fc.name === 'send_email') {
+      } else if (fc.name === 'send_email') {
         result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile, fc.args.tone || 'persönlich');
       } else if (fc.name === 'find_contact') {
         result = await handleFindContact(userProfile.user_id, fc.args.name);
@@ -1044,6 +1042,16 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await handleForgetContact(userProfile.user_id, fc.args.name);
       } else if (fc.name === 'list_contacts') {
         result = await handleListContacts(userProfile.user_id);
+      } else if (fc.name === 'find_group') {
+        result = await handleFindGroup(userProfile.user_id, fc.args.name);
+      } else if (fc.name === 'save_group') {
+        result = await handleSaveGroup(userProfile.user_id, fc.args.name, fc.args.members, fc.args.notes);
+      } else if (fc.name === 'forget_group') {
+        result = await handleForgetGroup(userProfile.user_id, fc.args.name);
+      } else if (fc.name === 'list_groups') {
+        result = await handleListGroups(userProfile.user_id);
+      } else if (fc.name === 'resolve_recipients') {
+        result = await handleResolveRecipients(userProfile.user_id, fc.args.names);
       } else if (fc.name === 'save_user_profile') {
         result = await handleSaveUserProfile(userProfile.user_id, fc.args);
       } else if (fc.name === 'generate_script') {
@@ -1179,6 +1187,72 @@ async function handleListContacts(userId) {
   }
 }
 
+async function handleFindGroup(userId, name) {
+  try {
+    const res = await fetch(SELF_URL + '/api/groups/find', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleSaveGroup(userId, name, members, notes) {
+  try {
+    const res = await fetch(SELF_URL + '/api/groups/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name, members, notes }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleForgetGroup(userId, name) {
+  try {
+    const res = await fetch(SELF_URL + '/api/groups/forget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleListGroups(userId) {
+  try {
+    const res = await fetch(SELF_URL + '/api/groups/list/' + userId);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleResolveRecipients(userId, names) {
+  try {
+    const res = await fetch(SELF_URL + '/api/contacts/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, names }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 async function handleSaveUserProfile(userId, fields) {
   try {
     const res = await fetch(SELF_URL + '/api/user-profile/save', {
@@ -1264,21 +1338,23 @@ async function generateScriptAndSend(clientWs, userId, topic, audience, focus, s
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
-  const prompt = `Erstelle ein Instagram-Karussell-Skript als JSON.
-
-Thema: ${topic}
-Zielgruppe: ${audience || 'Allgemein'}
-Fokus: ${focus || 'Tipps, Fakten und Mehrwert'}
-Anzahl Slides: ${count}
-
-Antworte NUR mit einem JSON-Objekt:
-{
-  "slides": [
-    {"slide": 1, "title": "Kurzer Hook", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}
-  ]
-}
-
-NUR das JSON.`;
+  const prompt = [
+    'Erstelle ein Instagram-Karussell-Skript als JSON.',
+    '',
+    'Thema: ' + topic,
+    'Zielgruppe: ' + (audience || 'Allgemein'),
+    'Fokus: ' + (focus || 'Tipps, Fakten und Mehrwert'),
+    'Anzahl Slides: ' + count,
+    '',
+    'Antworte NUR mit einem JSON-Objekt:',
+    '{',
+    '  "slides": [',
+    '    {"slide": 1, "title": "Kurzer Hook-Titel (max 5 Wörter)", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}',
+    '  ]',
+    '}',
+    '',
+    'NUR das JSON.',
+  ].join('\n');
 
   let lastError = null;
   for (const modelName of GROQ_FALLBACKS) {
@@ -1336,10 +1412,9 @@ async function translateToEnglishImagePrompt(germanPrompt) {
       messages: [
         {
           role: 'system',
-          content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. ' +
-                   'NUR der Prompt, eine Zeile, keine Anführungszeichen.'
+          content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. NUR der Prompt.',
         },
-        { role: 'user', content: germanPrompt }
+        { role: 'user', content: germanPrompt },
       ],
       model: 'openai/gpt-oss-20b',
       temperature: 0.4,
