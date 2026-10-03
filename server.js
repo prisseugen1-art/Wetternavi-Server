@@ -6,9 +6,9 @@ import dotenv from 'dotenv';
 import pg from 'pg';
 import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
-import { setupGeminiWebSocket } from './server/gemini_live.js';
+import { setupGeminiWebSocket, broadcastToClients } from './server/gemini_live.js';
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
-import { handleChatMessage, getChatHistory, initChatTable } from './server/chat.js';
+import { handleChatMessage, getChatHistory, initChatTable, getDraft, clearDraft } from './server/chat.js';
 import { initEmail, getEmailStatus, sendEmail } from './server/email.js';
 
 dotenv.config();
@@ -21,9 +21,8 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 // ========== ANHANG-SPEICHER (RAM, 5 Min TTL) ==========
-// Struktur: Map { userId: [ { id, filename, mimeType, data, size, createdAt } ] }
 const attachmentStore = new Map();
-const ATTACHMENT_TTL_MS = 5 * 60 * 1000; // 5 Minuten
+const ATTACHMENT_TTL_MS = 5 * 60 * 1000;
 
 function cleanOldAttachments() {
   const now = Date.now();
@@ -418,7 +417,6 @@ app.get('/api/profile/:userId', async (req, res) => {
 
 // ========== ANHANG-API ==========
 
-// -------- Anhang hinzufügen --------
 app.post('/api/attachments/add', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -458,7 +456,6 @@ app.post('/api/attachments/add', async (req, res) => {
   }
 });
 
-// -------- Anhänge auflisten --------
 app.get('/api/attachments/list/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -478,7 +475,6 @@ app.get('/api/attachments/list/:userId', async (req, res) => {
   }
 });
 
-// -------- Einzelnen Anhang löschen --------
 app.post('/api/attachments/remove', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -500,7 +496,6 @@ app.post('/api/attachments/remove', async (req, res) => {
   }
 });
 
-// -------- Alle Anhänge löschen --------
 app.post('/api/attachments/clear', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -511,6 +506,122 @@ app.post('/api/attachments/clear', async (req, res) => {
     res.json({ success: true, removed: count });
   } catch (error) {
     console.error('❌ attachment-clear Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== DRAFT-API ==========
+
+// -------- Draft bestätigen + senden --------
+app.post('/api/draft/send', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id } = args;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+
+    const draft = getDraft(user_id);
+    if (!draft) {
+      return res.status(404).json({ error: 'Kein Entwurf gefunden (abgelaufen?)' });
+    }
+
+    const profileData = await getUserData(user_id);
+    const profile = { ...profileData, user_id };
+    const attachments = getAttachments(user_id);
+
+    console.log(`📧 Draft-Bestätigung: an ${draft.to} (Ton: ${draft.tone}, Anhänge: ${attachments.length})`);
+
+    const recipients = String(draft.to).split(',').map(e => e.trim()).filter(Boolean);
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = recipients[i];
+      try {
+        await sendEmail(recipient, draft.subject, draft.body, profile, draft.tone, attachments);
+        results.push({ to: recipient, status: 'ok' });
+      } catch (e) {
+        console.error(`❌ Fehler bei ${recipient}:`, e.message);
+        errors.push({ to: recipient, error: e.message });
+      }
+      if (i < recipients.length - 1) {
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+
+    clearDraft(user_id);
+    clearAttachments(user_id);
+
+    broadcastToClients({
+      type: 'draft_sent',
+      sent: results.length,
+      failed: errors.length,
+    });
+
+    res.json({
+      success: errors.length === 0,
+      sent: results.length,
+      failed: errors.length,
+      results,
+      errors,
+      attachmentCount: attachments.length,
+    });
+  } catch (error) {
+    console.error('❌ draft-send Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Draft abbrechen --------
+app.post('/api/draft/cancel', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id } = args;
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+
+    const had = clearDraft(user_id);
+    clearAttachments(user_id);
+
+    broadcastToClients({ type: 'draft_cancelled' });
+
+    console.log(`❌ Draft abgebrochen für ${user_id.substring(0,8)}...`);
+    res.json({ success: true, had_draft: had });
+  } catch (error) {
+    console.error('❌ draft-cancel Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Aktuellen Draft abrufen --------
+app.get('/api/draft/get/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const draft = getDraft(userId);
+    const attachments = getAttachments(userId);
+
+    if (!draft) {
+      return res.json({ has_draft: false, attachments: [] });
+    }
+
+    res.json({
+      has_draft: true,
+      draft: {
+        id: draft.id,
+        to: draft.to,
+        subject: draft.subject,
+        body: draft.body,
+        tone: draft.tone,
+        ageSeconds: Math.round((Date.now() - draft.createdAt) / 1000),
+      },
+      attachments: attachments.map(a => ({
+        id: a.id,
+        filename: a.filename,
+        size: a.size,
+      })),
+    });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
@@ -950,6 +1061,7 @@ app.post('/api/delete-user-data', async (req, res) => {
     await pool.query('DELETE FROM user_home WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM chat_history WHERE user_id = $1', [userId]);
     clearAttachments(userId);
+    clearDraft(userId);
     console.log('🗑️ Daten gelöscht für', userId);
     res.json({ success: true });
   } catch (error) {
@@ -1060,7 +1172,6 @@ app.post('/api/chat', async (req, res) => {
       ? { lat: parseFloat(lat), lon: parseFloat(lon), city: city || null }
       : (city ? { city } : null);
 
-    // ⬇️ Anhänge für diesen Nutzer holen
     const attachments = getAttachments(user_id);
 
     const result = await handleChatMessage(
@@ -1117,7 +1228,6 @@ app.post('/api/send-email', async (req, res) => {
 
     const finalTone = tone || 'persönlich';
 
-    // ⬇️ Anhänge: aus Request ODER aus Nutzer-Speicher
     let finalAttachments = [];
     if (args.attachments && Array.isArray(args.attachments) && args.attachments.length > 0) {
       finalAttachments = args.attachments;
@@ -1145,7 +1255,6 @@ app.post('/api/send-email', async (req, res) => {
       }
     }
 
-    // Nach erfolgreichem Versand: Anhänge aus Speicher löschen
     if (results.length > 0 && profile?.user_id) {
       clearAttachments(profile.user_id);
     }
