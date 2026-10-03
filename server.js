@@ -9,7 +9,7 @@ import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js
 import { setupGeminiWebSocket } from './server/gemini_live.js';
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
 import { handleChatMessage, getChatHistory, initChatTable } from './server/chat.js';
-import { initEmail, getEmailStatus } from './server/email.js';
+import { initEmail, getEmailStatus, sendEmail } from './server/email.js';
 
 dotenv.config();
 
@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // ========== DATENBANK ==========
 const pool = new Pool({
@@ -468,7 +468,6 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'user_id und message required' });
     }
 
-    // Standort aus Request bauen (GPS bevorzugt, sonst nur Stadt)
     const currentLocation = (lat && lon)
       ? { lat: parseFloat(lat), lon: parseFloat(lon), city: city || null }
       : (city ? { city } : null);
@@ -487,12 +486,41 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-
 app.get('/api/chat/history/:userId', async (req, res) => {
   try {
     const history = await getChatHistory(req.params.userId);
     res.json({ user_id: req.params.userId, history });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== EMAIL ==========
+
+app.get('/api/email/status', (req, res) => {
+  try {
+    res.json(getEmailStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ⬇️ NEU: Freie E-Mail senden
+app.post('/api/send-email', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { to, subject, body } = args;
+
+    if (!to || !subject || !body) {
+      return res.status(400).json({ error: 'to, subject, body required' });
+    }
+
+    console.log(`📧 Freie E-Mail Anfrage: an ${to}, Betreff: "${subject}"`);
+    const result = await sendEmail(to, subject, body);
+
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('❌ send-email Fehler:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -511,16 +539,6 @@ app.get('/api/telegram/webhook-info', async (req, res) => {
   try {
     const info = await getTelegramWebhookInfo();
     res.json(info);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ========== EMAIL ==========
-
-app.get('/api/email/status', (req, res) => {
-  try {
-    res.json(getEmailStatus());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

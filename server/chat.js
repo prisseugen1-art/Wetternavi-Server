@@ -144,7 +144,7 @@ function buildSystemPrompt(profile, role, mode) {
   const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
 
-  // ⬇️ NEU: Standort-Zeile bauen
+  // Standort-Zeile bauen
   const locationInfo = profile.current_city
     ? `Aktueller Standort: ${profile.current_city}` +
       (profile.current_lat != null && profile.current_lon != null
@@ -181,13 +181,37 @@ function buildSystemPrompt(profile, role, mode) {
     `ROLLE: ${roleData.name.toUpperCase()}`,
     roleData.prompt,
     '',
-    'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences',
+    'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences, send_email',
     'NIEMALS Wetter/Restaurants erfinden.',
     '',
     'STANDORT-REGEL:',
     '- Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
     '  nutze diesen Wert als location-Parameter für get_weather/find_restaurants.',
     '- Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
+    '',
+    '===========================================',
+    '📧 E-MAIL-VERSAND (freie Texte)',
+    '===========================================',
+    'Tool: send_email(to, subject, body)',
+    '',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    '',
+    'PFICHT-ABLAUF:',
+    '1. Nutzer sagt: "Schreib eine E-Mail an X mit..."',
+    '2. Du formulierst Betreff + Text',
+    '3. Zeige: "Soll ich diese E-Mail an X senden?',
+    '   Betreff: [dein Betreff]',
+    '   Text: [dein Text]"',
+    '4. WARTE auf "ja"/"ok"/"schick"',
+    '5. ERST DANN send_email(to, subject, body) aufrufen',
+    '',
+    'STANDARD-EMPFÄNGER:',
+    '- Wenn der Nutzer "an mich" / "mir" / "meine Adresse" sagt:',
+    '  → sende an eugen.priss@yahoo.com',
+    '- Wenn der Nutzer einen Namen/eine Firma nennt OHNE E-Mail-Adresse:',
+    '  → frage nach: "Wie lautet die E-Mail-Adresse von [Name]?"',
+    '- Wenn der Nutzer direkt eine E-Mail-Adresse nennt:',
+    '  → nutze diese direkt',
   ].join('\n');
 }
 
@@ -235,6 +259,23 @@ const JONY_TOOLS = [
     description: 'Lädt ALLE gespeicherten Infos über den Nutzer.',
     parameters: { type: 'OBJECT', properties: {} },
   },
+  {
+    name: 'send_email',
+    description: 'Verfasst und sendet eine freie E-Mail. ' +
+                 'Frage IMMER zuerst: "Soll ich diese E-Mail an [Adresse] senden?" ' +
+                 'und zeige Betreff + Text. Warte auf Bestätigung. ' +
+                 'Bei "an mich" → nutze eugen.priss@yahoo.com. ' +
+                 'Wenn kein Empfänger klar → frag nach der E-Mail-Adresse.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+        subject: { type: 'STRING', description: 'Betreff der E-Mail' },
+        body: { type: 'STRING', description: 'Inhalt der E-Mail' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
 ];
 
 const BUSINESS_TOOLS = [
@@ -281,7 +322,6 @@ const BUSINESS_TOOLS = [
 
 // ==================== HILFSFUNKTIONEN ====================
 
-// ⬇️ NEU: erkennt "hier", "bei mir", "mein Standort" usw.
 function isHereKeyword(loc) {
   if (!loc || typeof loc !== 'string') return false;
   const t = loc.toLowerCase().trim();
@@ -347,6 +387,28 @@ async function getPrefs(userId) {
   if (!res.ok) throw new Error('Lade-Fehler: ' + res.status);
   const data = await res.json();
   return { preferences: data.data || {} };
+}
+
+// ==================== E-MAIL SENDEN (freie Texte) ====================
+
+async function sendFreeEmail(to, subject, body) {
+  console.log(`📧 Freie E-Mail an ${to}: "${subject}"`);
+
+  const res = await fetch(SELF_URL + '/api/send-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, subject, body }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`❌ send-email Fehler ${res.status}:`, errText.substring(0, 200));
+    return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
+  }
+
+  const data = await res.json();
+  console.log(`✅ E-Mail an ${to} gesendet`);
+  return { success: true, to, subject, message: `E-Mail an ${to} gesendet.` };
 }
 
 // ==================== SCRIPT + IMAGE (Business) ====================
@@ -497,7 +559,6 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 // ==================== TOOL DISPATCH ====================
 
-// ⬇️ NEU: currentLocation wird durchgereicht und "hier" ersetzt
 async function executeChatTool(name, args, userId, currentLocation = null) {
   if (name === 'get_weather') {
     let loc = args.location;
@@ -515,6 +576,9 @@ async function executeChatTool(name, args, userId, currentLocation = null) {
   }
   if (name === 'save_user_preference') return await savePref(userId, args.key, args.value);
   if (name === 'get_user_preferences') return await getPrefs(userId);
+  if (name === 'send_email') {
+    return await sendFreeEmail(args.to, args.subject, args.body);
+  }
   if (name === 'generate_script') {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
@@ -637,7 +701,6 @@ function detectChatMode(message, currentMode = 'jony') {
 
 // ==================== HAUPTFUNKTION ====================
 
-// ⬇️ NEU: currentLocation Parameter
 export async function handleChatMessage(
   userId,
   userMessage,
@@ -661,7 +724,6 @@ export async function handleChatMessage(
   const profile = await loadUserProfile(userId);
   const history = await loadChatHistory(userId, 8);
 
-  // ⬇️ NEU: aktuellen Standort ins Profil mergen
   const enrichedProfile = {
     ...profile,
     current_lat: currentLocation?.lat,
@@ -736,7 +798,6 @@ export async function handleChatMessage(
 
         let toolResult;
         try {
-          // ⬇️ NEU: currentLocation wird durchgereicht
           toolResult = await executeChatTool(fc.name, fc.args || {}, userId, currentLocation);
         } catch (e) {
           toolResult = { error: e.message };

@@ -32,7 +32,6 @@ const groq = new OpenAI({
 
 // ==================== HILFSFUNKTIONEN ====================
 
-// ⬇️ NEU: erkennt "hier", "bei mir", "mein Standort" usw.
 function isHereKeyword(loc) {
   if (!loc || typeof loc !== 'string') return false;
   const t = loc.toLowerCase().trim();
@@ -316,7 +315,6 @@ function buildJonyPrompt(profile, role = 'freund') {
   const name = profile.name || 'Nutzer';
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
-  // ⬇️ NEU: aktueller Standort-Zusatz (nur wenn vorhanden)
   const locationLine = profile.current_city
     ? `Aktueller Standort: ${profile.current_city}` +
       (profile.current_lat != null && profile.current_lon != null
@@ -388,10 +386,34 @@ function buildJonyPrompt(profile, role = 'freund') {
     '- Eingehende Nachrichten siehst du in deinem Kontext.',
     '',
     '===========================================',
+    '📧 E-MAIL-VERSAND (freie Texte)',
+    '===========================================',
+    'Tool: send_email(to, subject, body)',
+    '',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    '',
+    'PFICHT-ABLAUF:',
+    '1. Nutzer sagt: "Schreib eine E-Mail an X mit..."',
+    '2. Du formulierst Betreff + Text',
+    '3. Zeige: "Soll ich diese E-Mail an X senden?',
+    '   Betreff: [dein Betreff]',
+    '   Text: [dein Text]"',
+    '4. WARTE auf "ja"/"ok"/"schick"',
+    '5. ERST DANN send_email(to, subject, body) aufrufen',
+    '',
+    'STANDARD-EMPFÄNGER:',
+    '- Wenn der Nutzer "an mich" / "mir" / "meine Adresse" sagt:',
+    '  → sende an eugen.priss@yahoo.com',
+    '- Wenn der Nutzer einen Namen/eine Firma nennt OHNE E-Mail-Adresse:',
+    '  → frage nach: "Wie lautet die E-Mail-Adresse von [Name]?"',
+    '- Wenn der Nutzer direkt eine E-Mail-Adresse nennt:',
+    '  → nutze diese direkt',
+    '',
+    '===========================================',
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'send_telegram_message',
+    'send_telegram_message, send_email',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
   ].join('\n');
@@ -551,7 +573,7 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     }
   }
 
-  // ⬇️ NEU: aktuellen Standort aus IMU-Kontext ins Profil mergen
+  // Aktuellen Standort aus IMU-Kontext ins Profil mergen
   if (clientWs._lastLat != null && clientWs._lastLon != null) {
     userProfile.current_lat = clientWs._lastLat;
     userProfile.current_lon = clientWs._lastLon;
@@ -836,6 +858,23 @@ function buildJonyTools() {
             required: ['chat_id', 'text'],
           },
         },
+        {
+          name: 'send_email',
+          description: 'Verfasst und sendet eine freie E-Mail. ' +
+                       'Frage IMMER zuerst: "Soll ich diese E-Mail an [Adresse] senden?" ' +
+                       'und zeige Betreff + Text. Warte auf Bestätigung. ' +
+                       'Bei "an mich" → nutze eugen.priss@yahoo.com. ' +
+                       'Wenn kein Empfänger klar → frag nach der E-Mail-Adresse.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+              subject: { type: 'STRING', description: 'Betreff der E-Mail' },
+              body: { type: 'STRING', description: 'Inhalt der E-Mail' },
+            },
+            required: ['to', 'subject', 'body'],
+          },
+        },
       ],
     },
   ];
@@ -898,7 +937,6 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
 
     try {
       if (fc.name === 'get_weather') {
-        // ⬇️ NEU: "hier" → aktuellen Standort nutzen
         let loc = fc.args.location;
         if (isHereKeyword(loc)) {
           if (userProfile.current_city) {
@@ -909,7 +947,6 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         }
         result = await fetchWeather(loc, fc.args.timeframe);
       } else if (fc.name === 'find_restaurants') {
-        // ⬇️ NEU: "hier" → aktuellen Standort nutzen
         let loc = fc.args.location;
         if (isHereKeyword(loc)) {
           if (userProfile.current_city) {
@@ -925,6 +962,8 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
+      } else if (fc.name === 'send_email') {
+        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body);
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
@@ -971,6 +1010,25 @@ async function handleSendTelegram(chatId, text) {
     return { success: true, to: res.to, message: 'Nachricht gesendet.' };
   } catch (e) {
     console.error('❌ Telegram-Send-Fehler:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleSendEmail(to, subject, body) {
+  try {
+    const res = await fetch(SELF_URL + '/api/send-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, body }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Server-Fehler: ${res.status} ${errText.substring(0, 100)}`);
+    }
+    console.log(`✅ Freie E-Mail an ${to} gesendet: "${subject}"`);
+    return { success: true, message: `E-Mail an ${to} gesendet.` };
+  } catch (e) {
+    console.error('❌ send_email Fehler:', e.message);
     return { error: e.message };
   }
 }
@@ -1366,7 +1424,6 @@ export function setupGeminiWebSocket(server) {
             await logPresence(userProfile.user_id, msg.imu_state, msg.lat, msg.lon);
           }
 
-          // ⬇️ NEU: Standort im Profil aktualisieren, damit Tools ihn nutzen
           if (msg.lat != null && msg.lon != null) {
             userProfile.current_lat = msg.lat;
             userProfile.current_lon = msg.lon;
