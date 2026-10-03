@@ -139,6 +139,66 @@ function normalizePhone(phone) {
   return cleaned;
 }
 
+// ========== KONTAKT-HILFSFUNKTIONEN ==========
+
+function normalizeContactName(name) {
+  if (!name) return '';
+  return String(name).toLowerCase().trim().replace(/\s+/g, '_');
+}
+
+// Findet einen Kontakt in user_data (auch über Aliase)
+function findContactInData(userData, searchName) {
+  const normalized = normalizeContactName(searchName);
+
+  // 1. Direkter Treffer
+  const directKey = 'contact_' + normalized;
+  if (userData[directKey + '_email'] || userData[directKey + '_telegram']) {
+    return buildContactFromData(userData, normalized);
+  }
+
+  // 2. Über Aliase suchen
+  for (const key of Object.keys(userData)) {
+    if (!key.startsWith('contact_') || !key.endsWith('_aliases')) continue;
+    const aliases = String(userData[key] || '').toLowerCase();
+    const aliasList = aliases.split(',').map(s => s.trim());
+    if (aliasList.includes(normalized) || aliasList.includes(searchName.toLowerCase())) {
+      const contactName = key.replace('contact_', '').replace('_aliases', '');
+      return buildContactFromData(userData, contactName);
+    }
+  }
+
+  // 3. Über Relation suchen ("meine Schwester")
+  const relationSearch = searchName.toLowerCase()
+    .replace(/^(meine|mein|meiner)\s+/, '')
+    .trim();
+  for (const key of Object.keys(userData)) {
+    if (!key.startsWith('contact_') || !key.endsWith('_relation')) continue;
+    const relation = String(userData[key] || '').toLowerCase();
+    if (relation === relationSearch) {
+      const contactName = key.replace('contact_', '').replace('_relation', '');
+      return buildContactFromData(userData, contactName);
+    }
+  }
+
+  return null;
+}
+
+function buildContactFromData(userData, contactName) {
+  const prefix = 'contact_' + contactName + '_';
+  return {
+    name: contactName,
+    email: userData[prefix + 'email'] || null,
+    telegram: userData[prefix + 'telegram'] || null,
+    phone: userData[prefix + 'phone'] || null,
+    aliases: userData[prefix + 'aliases'] || null,
+    relation: userData[prefix + 'relation'] || null,
+    birthday: userData[prefix + 'birthday'] || null,
+    tone: userData[prefix + 'tone'] || null,
+    notes: userData[prefix + 'notes'] || null,
+    learned: userData[prefix + 'learned'] || null,
+  };
+}
+
 // ========== ENDPUNKTE ==========
 
 app.get('/', (req, res) => res.send('Server läuft erfolgreich!'));
@@ -279,6 +339,216 @@ app.get('/api/profile/:userId', async (req, res) => {
     const data = await getUserData(req.params.userId);
     res.json({ user_id: req.params.userId, data });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== KONTAKT-API ==========
+
+// -------- Kontakt suchen --------
+app.post('/api/contacts/find', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+
+    const userData = await getUserData(user_id);
+    const contact = findContactInData(userData, name);
+
+    if (contact) {
+      console.log(`🔍 Kontakt gefunden: "${name}" → ${contact.name}`);
+      return res.json({ found: true, contact });
+    }
+
+    console.log(`🔍 Kontakt NICHT gefunden: "${name}"`);
+    return res.json({ found: false, name });
+  } catch (error) {
+    console.error('❌ find-contact Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Kontakt speichern --------
+app.post('/api/contacts/save', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name, email, telegram, phone, aliases, relation, birthday, tone, notes } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+
+    const normalized = normalizeContactName(name);
+    const prefix = 'contact_' + normalized + '_';
+
+    const updates = {};
+    if (email) updates[prefix + 'email'] = String(email).trim();
+    if (telegram) updates[prefix + 'telegram'] = String(telegram).trim();
+    if (phone) updates[prefix + 'phone'] = String(phone).trim();
+    if (aliases) updates[prefix + 'aliases'] = String(aliases).trim();
+    if (relation) updates[prefix + 'relation'] = String(relation).trim();
+    if (birthday) updates[prefix + 'birthday'] = String(birthday).trim();
+    if (tone) updates[prefix + 'tone'] = String(tone).trim();
+    if (notes) updates[prefix + 'notes'] = String(notes).trim();
+    updates[prefix + 'learned'] = new Date().toISOString();
+
+    if (Object.keys(updates).length <= 1) {
+      return res.status(400).json({ error: 'Keine Felder zum Speichern' });
+    }
+
+    // Alle Felder in einem Rutsch in JSONB mergen
+    await pool.query(`
+      INSERT INTO user_data (user_id, data)
+      VALUES ($1, $2::jsonb)
+      ON CONFLICT (user_id) DO UPDATE
+      SET data = user_data.data || $2::jsonb,
+          updated_at = NOW()
+    `, [user_id, JSON.stringify(updates)]);
+
+    console.log(`💾 Kontakt gespeichert: "${name}" →`, Object.keys(updates).filter(k => !k.endsWith('_learned')));
+    res.json({ success: true, name: normalized, saved_fields: Object.keys(updates) });
+  } catch (error) {
+    console.error('❌ save-contact Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Kontakt löschen --------
+app.post('/api/contacts/forget', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+
+    const normalized = normalizeContactName(name);
+    const prefix = 'contact_' + normalized + '_';
+
+    // Alle Keys mit diesem Prefix löschen
+    await pool.query(`
+      UPDATE user_data
+      SET data = data - ARRAY(
+        SELECT jsonb_object_keys(data)
+        WHERE jsonb_object_keys(data) LIKE $2
+      ),
+      updated_at = NOW()
+      WHERE user_id = $1
+    `, [user_id, prefix + '%']);
+
+    console.log(`🗑️ Kontakt gelöscht: "${name}"`);
+    res.json({ success: true, forgotten: normalized });
+  } catch (error) {
+    console.error('❌ forget-contact Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Kontakte auflisten --------
+app.get('/api/contacts/list/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const userData = await getUserData(userId);
+
+    // Alle eindeutigen Kontakt-Namen finden
+    const names = new Set();
+    for (const key of Object.keys(userData)) {
+      if (!key.startsWith('contact_')) continue;
+      const match = key.match(/^contact_(.+?)_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/);
+      if (match) names.add(match[1]);
+    }
+
+    const contacts = [];
+    for (const name of names) {
+      const contact = buildContactFromData(userData, name);
+      if (contact.email || contact.telegram || contact.phone) {
+        contacts.push(contact);
+      }
+    }
+
+    contacts.sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ count: contacts.length, contacts });
+  } catch (error) {
+    console.error('❌ list-contacts Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Mehrere Empfänger auflösen --------
+app.post('/api/contacts/resolve', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, names } = args;
+
+    if (!user_id || !names || !Array.isArray(names)) {
+      return res.status(400).json({ error: 'user_id and names[] required' });
+    }
+
+    const userData = await getUserData(user_id);
+    const resolved = [];
+    const missing = [];
+
+    for (const name of names) {
+      const contact = findContactInData(userData, name);
+      if (contact) {
+        resolved.push(contact);
+      } else {
+        missing.push(name);
+      }
+    }
+
+    console.log(`🔍 Resolve: ${resolved.length} gefunden, ${missing.length} fehlen`);
+
+    res.json({
+      resolved,
+      missing,
+      complete: missing.length === 0,
+    });
+  } catch (error) {
+    console.error('❌ resolve Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Nutzer-Profil speichern (aus Kontext) --------
+app.post('/api/user-profile/save', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name, address, birthdate, phone, default_email, default_tone } = args;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+
+    const updates = {};
+    if (name) updates['user_name'] = String(name).trim();
+    if (address) updates['user_address'] = String(address).trim();
+    if (birthdate) updates['user_birthdate'] = String(birthdate).trim();
+    if (phone) updates['user_phone'] = String(phone).trim();
+    if (default_email) updates['user_email_default'] = String(default_email).trim();
+    if (default_tone) updates['user_tone_default'] = String(default_tone).trim();
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Keine Felder' });
+    }
+
+    await pool.query(`
+      INSERT INTO user_data (user_id, data)
+      VALUES ($1, $2::jsonb)
+      ON CONFLICT (user_id) DO UPDATE
+      SET data = user_data.data || $2::jsonb,
+          updated_at = NOW()
+    `, [user_id, JSON.stringify(updates)]);
+
+    console.log(`💾 Nutzer-Profil gespeichert:`, Object.keys(updates));
+    res.json({ success: true, saved: updates });
+  } catch (error) {
+    console.error('❌ user-profile Fehler:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -505,7 +775,6 @@ app.get('/api/email/status', (req, res) => {
   }
 });
 
-// ⬇️ NEU: Freie E-Mail senden
 app.post('/api/send-email', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};

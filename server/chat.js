@@ -64,6 +64,91 @@ ANTI-WIEDERHOLUNG:
 - Kurz und knapp (1-3 Sätze im Chat).
 `;
 
+// ==================== TON-SYSTEM ====================
+
+const TONE_RULES = `
+===========================================
+🎭 TON-SYSTEM (SEHR WICHTIG)
+===========================================
+
+Beim Verfassen von E-Mails wählst du IMMER einen Ton:
+
+VERFÜGBARE TÖNE:
+- "formell"     → Behörden, Firmen, unbekannte Erwachsene
+- "persönlich"  → Freunde, Familie, bekannte Erwachsene
+- "locker"      → enge Freunde, Kinder, Familie (informell)
+
+═══════════════════════════════════════════
+A) NEUER KONTAKT (nicht gespeichert)
+═══════════════════════════════════════════
+
+Wenn du an jemanden schreibst, den du NICHT kennst:
+→ FRAGE zuerst: "Formell, persönlich oder locker?"
+
+Beispiele:
+- "Finanzamt" → Behörde → aber trotzdem fragen (Ausnahme unten)
+- "Alex" (neu) → fragen
+- "Max Mustermann" (neu) → fragen
+
+═══════════════════════════════════════════
+B) BEKANNTER KONTAKT (gespeichert)
+═══════════════════════════════════════════
+
+Wenn der Kontakt einen Ton gespeichert hat:
+→ KEIN Nachfragen
+→ Nutze den gespeicherten Ton
+→ Zeige nur den Entwurf
+
+═══════════════════════════════════════════
+C) BEHÖRDEN / ÄMTER (Keyword)
+═══════════════════════════════════════════
+
+Wenn der Empfänger eine Behörde ist:
+→ IMMER automatisch "formell"
+→ KEIN Nachfragen
+
+KEYWORDS für Behörden:
+"finanzamt", "amt", "behörde", "rathaus", "polizei", "gericht",
+"krankenkasse", "versicherung", "standesamt", "bürgeramt",
+"ordnungsamt", "gesundheitsamt", "arbeitsagentur", "jobcenter",
+"sozialamt", "jugendamt", "bauamt", "gewerbeamt"
+
+═══════════════════════════════════════════
+D) TON-EIGENSCHAFTEN
+═══════════════════════════════════════════
+
+FORMELL:
+- Anrede: "Sehr geehrte Damen und Herren," oder "Sehr geehrte Frau X,"
+- Gruß: "Mit freundlichen Grüßen"
+- Siezen
+- Höflich, sachlich, präzise
+- Keine Emojis
+- Kompletter Absender im Text
+
+PERSÖNLICH:
+- Anrede: "Hallo Alex," oder "Hallo Alex!"
+- Gruß: "Viele Grüße" oder "Liebe Grüße"
+- Siezen oder Duzen (je nach Beziehung)
+- Freundlich, warm
+- Emojis sparsam
+
+LOCKER:
+- Anrede: "Hey Alex," oder nur "Hi"
+- Gruß: "LG" oder "Bis dann"
+- Duzen
+- Kurz, direkt
+- Emojis ok
+
+═══════════════════════════════════════════
+E) TON-WECHSEL
+═══════════════════════════════════════════
+
+Wenn Nutzer sagt: "Schreib formeller" / "lockerer" → passe an
+Wenn Nutzer sagt: "Nein, anders" → frage: "Wie genau?"
+
+NICHT automatisch ändern.
+`;
+
 // ==================== ROLLEN ====================
 
 const ROLES = {
@@ -144,13 +229,24 @@ function buildSystemPrompt(profile, role, mode) {
   const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
 
-  // Standort-Zeile bauen
   const locationInfo = profile.current_city
     ? `Aktueller Standort: ${profile.current_city}` +
       (profile.current_lat != null && profile.current_lon != null
         ? ` (GPS: ${profile.current_lat.toFixed(3)}, ${profile.current_lon.toFixed(3)})`
         : '')
     : `Standort: ${profile.hometown || 'unbekannt'}`;
+
+  // Nutzer-Profil-Block
+  const userProfileBlock = [];
+  if (profile.user_name) userProfileBlock.push(`Name: ${profile.user_name}`);
+  if (profile.user_address) userProfileBlock.push(`Adresse: ${profile.user_address}`);
+  if (profile.user_birthdate) userProfileBlock.push(`Geburtsdatum: ${profile.user_birthdate}`);
+  if (profile.user_phone) userProfileBlock.push(`Telefon: ${profile.user_phone}`);
+  if (profile.user_email_default) userProfileBlock.push(`Standard-E-Mail: ${profile.user_email_default}`);
+
+  const userProfileText = userProfileBlock.length > 0
+    ? `NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails automatisch):\n${userProfileBlock.join('\n')}`
+    : '';
 
   if (mode === 'business') {
     return [
@@ -173,45 +269,84 @@ function buildSystemPrompt(profile, role, mode) {
     '',
     ANTI_REPETITION,
     '',
+    TONE_RULES,
+    '',
     BASE_PROMPT,
     '',
     `Heute ist ${today} (${timeCtx}). Nutzer: ${name} (${profile.nickname || '-'}).`,
     locationInfo,
+    ...(userProfileText ? ['', userProfileText] : []),
     '',
     `ROLLE: ${roleData.name.toUpperCase()}`,
     roleData.prompt,
     '',
-    'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences, send_email',
+    'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences,',
+    '       send_email, find_contact, save_contact, forget_contact, list_contacts',
     'NIEMALS Wetter/Restaurants erfinden.',
     '',
     'STANDORT-REGEL:',
-    '- Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
-    '  nutze diesen Wert als location-Parameter für get_weather/find_restaurants.',
-    '- Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
+    '- Wenn Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
+    '  nutze das als location für get_weather/find_restaurants.',
     '',
     '===========================================',
-    '📧 E-MAIL-VERSAND (freie Texte)',
+    '📇 KONTAKT-GEDÄCHTNIS',
+    '===========================================',
+    '',
+    'DU HAST EIN KONTAKT-GEDÄCHTNIS. Nutze es IMMER vor E-Mail-Versand.',
+    '',
+    'ABLAUF bei "Schreib an [Name] ...":',
+    '',
+    '1. Rufe find_contact(name: "[name]") auf',
+    '',
+    '   FALL A — KONTAKT GEFUNDEN:',
+    '   → Nutze gespeicherte Adresse, Ton, Notizen',
+    '   → Zeige Entwurf',
+    '   → Warte auf Bestätigung',
+    '   → Sende mit send_email',
+    '',
+    '   FALL B — KONTAKT NICHT GEFUNDEN:',
+    '   → Frage Ton: "Formell, persönlich oder locker?"',
+    '     (AUSNAHME: Behörden → automatisch formell, kein Fragen)',
+    '   → Frage Adresse: "Wie lautet [Name] E-Mail-Adresse?"',
+    '   → Zeige Entwurf',
+    '   → Warte auf Bestätigung',
+    '   → Sende mit send_email',
+    '   → DANACH: "Soll ich mir [Name] für zukünftige Mails merken?"',
+    '     * Ja → save_contact(name, email, tone, ...)',
+    '     * Nein → nichts speichern (nur Session)',
+    '',
+    'KONTAKT-FELDER die du speichern kannst:',
+    '- email, telegram, phone',
+    '- aliases (Alternativnamen, komma-getrennt)',
+    '- relation (Verwandtschaft/Beziehung: Schwester, Bruder, Chef, ...)',
+    '- birthday (TT.MM. oder TT.MM.JJJJ)',
+    '- tone (formell | persönlich | locker)',
+    '- notes (freie Notizen: "mag keinen Kaffee, wohnt in Berlin")',
+    '',
+    'LERNE AUS KONTEXT (ohne explizit zu fragen):',
+    'Wenn Nutzer sagt "meine Schwester Angelina", "sie wohnt in Berlin",',
+    '"sie hat am 7. Juli Geburtstag" → ALLES mit save_contact speichern',
+    'sobald du einmal den Kontakt bestätigt hast.',
+    '',
+    'KONTAKT-VERWALTUNG:',
+    '- "Vergiss Alex" → forget_contact(name: "alex")',
+    '- "Welche Kontakte kenne ich?" → list_contacts()',
+    '- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")',
+    '',
+    'NUTZER-PROFIL (lerne aus Kontext, speichere mit save_user_profile):',
+    '- "Ich bin Eugen Priss" → user_name',
+    '- "Ich wohne in Georg-Simler-Str. 32, 74206 Bad Wimpfen" → user_address',
+    '- "Mein Geburtstag ist 12.05.1985" → user_birthdate',
+    '',
+    '===========================================',
+    '📧 E-MAIL-VERSAND',
     '===========================================',
     'Tool: send_email(to, subject, body)',
-    '',
     '⛔ NIEMALS ohne Bestätigung senden.',
     '',
-    'PFICHT-ABLAUF:',
-    '1. Nutzer sagt: "Schreib eine E-Mail an X mit..."',
-    '2. Du formulierst Betreff + Text',
-    '3. Zeige: "Soll ich diese E-Mail an X senden?',
-    '   Betreff: [dein Betreff]',
-    '   Text: [dein Text]"',
-    '4. WARTE auf "ja"/"ok"/"schick"',
-    '5. ERST DANN send_email(to, subject, body) aufrufen',
+    'STANDARD-EMPFÄNGER "an mich":',
+    '→ eugen.priss@yahoo.com (oder user_email_default aus Profil)',
     '',
-    'STANDARD-EMPFÄNGER:',
-    '- Wenn der Nutzer "an mich" / "mir" / "meine Adresse" sagt:',
-    '  → sende an eugen.priss@yahoo.com',
-    '- Wenn der Nutzer einen Namen/eine Firma nennt OHNE E-Mail-Adresse:',
-    '  → frage nach: "Wie lautet die E-Mail-Adresse von [Name]?"',
-    '- Wenn der Nutzer direkt eine E-Mail-Adresse nennt:',
-    '  → nutze diese direkt',
   ].join('\n');
 }
 
@@ -260,18 +395,79 @@ const JONY_TOOLS = [
     parameters: { type: 'OBJECT', properties: {} },
   },
   {
-    name: 'send_email',
-    description: 'Verfasst und sendet eine freie E-Mail. ' +
-                 'Frage IMMER zuerst: "Soll ich diese E-Mail an [Adresse] senden?" ' +
-                 'und zeige Betreff + Text. Warte auf Bestätigung. ' +
-                 'Bei "an mich" → nutze eugen.priss@yahoo.com. ' +
-                 'Wenn kein Empfänger klar → frag nach der E-Mail-Adresse.',
+    name: 'find_contact',
+    description: 'Sucht einen Kontakt im Gedächtnis (Name oder Alias). ' +
+                 'Rufe das IMMER auf, bevor du eine E-Mail an einen Namen schickst.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
-        subject: { type: 'STRING', description: 'Betreff der E-Mail' },
-        body: { type: 'STRING', description: 'Inhalt der E-Mail' },
+        name: { type: 'STRING', description: 'Name oder Alias (z.B. "alex", "chef")' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'save_contact',
+    description: 'Speichert/aktualisiert einen Kontakt. ' +
+                 'Felder: email, telegram, phone, aliases, relation, birthday, tone, notes.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+        email: { type: 'STRING' },
+        telegram: { type: 'STRING' },
+        phone: { type: 'STRING' },
+        aliases: { type: 'STRING', description: 'Komma-getrennt' },
+        relation: { type: 'STRING' },
+        birthday: { type: 'STRING' },
+        tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+        notes: { type: 'STRING' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'forget_contact',
+    description: 'Löscht einen Kontakt komplett.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_contacts',
+    description: 'Listet alle gespeicherten Kontakte auf.',
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'save_user_profile',
+    description: 'Speichert Nutzer-Profil-Daten (Name, Adresse, Geburtsdatum). ' +
+                 'Nutze es, wenn der Nutzer solche Infos über sich erzählt.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+        address: { type: 'STRING' },
+        birthdate: { type: 'STRING' },
+        phone: { type: 'STRING' },
+        default_email: { type: 'STRING' },
+        default_tone: { type: 'STRING' },
+      },
+    },
+  },
+  {
+    name: 'send_email',
+    description: 'Sendet eine E-Mail. Frage IMMER zuerst nach Bestätigung. ' +
+                 'Bei "an mich" → eugen.priss@yahoo.com.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        to: { type: 'STRING' },
+        subject: { type: 'STRING' },
+        body: { type: 'STRING' },
       },
       required: ['to', 'subject', 'body'],
     },
@@ -281,8 +477,7 @@ const JONY_TOOLS = [
 const BUSINESS_TOOLS = [
   {
     name: 'generate_script',
-    description: 'Erstellt das Instagram-Karussell-Skript (wird an App gesendet). ' +
-                 'Sage danach NUR "Skript ist da, schau in die App."',
+    description: 'Erstellt das Instagram-Karussell-Skript (wird an App gesendet).',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -308,12 +503,11 @@ const BUSINESS_TOOLS = [
   },
   {
     name: 'send_carousel_email',
-    description: 'Sendet das zuletzt erstellte Karussell mit allen Bildern per E-Mail. ' +
-                 'Frage IMMER zuerst nach der E-Mail-Adresse.',
+    description: 'Sendet das Karussell per E-Mail. Frage IMMER zuerst nach Adresse und Bestätigung.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+        to: { type: 'STRING' },
       },
       required: ['to'],
     },
@@ -389,23 +583,63 @@ async function getPrefs(userId) {
   return { preferences: data.data || {} };
 }
 
-// ==================== E-MAIL SENDEN (freie Texte) ====================
+async function findContact(userId, name) {
+  const res = await fetch(SELF_URL + '/api/contacts/find', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name }),
+  });
+  if (!res.ok) throw new Error('Kontakt-Suche fehlgeschlagen');
+  return await res.json();
+}
 
-async function sendFreeEmail(to, subject, body) {
+async function saveContact(userId, fields) {
+  const res = await fetch(SELF_URL + '/api/contacts/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, ...fields }),
+  });
+  if (!res.ok) throw new Error('Kontakt-Speichern fehlgeschlagen');
+  return await res.json();
+}
+
+async function forgetContact(userId, name) {
+  const res = await fetch(SELF_URL + '/api/contacts/forget', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name }),
+  });
+  if (!res.ok) throw new Error('Kontakt-Löschen fehlgeschlagen');
+  return await res.json();
+}
+
+async function listContacts(userId) {
+  const res = await fetch(SELF_URL + '/api/contacts/list/' + userId);
+  if (!res.ok) throw new Error('Kontakt-Liste fehlgeschlagen');
+  return await res.json();
+}
+
+async function saveUserProfile(userId, fields) {
+  const res = await fetch(SELF_URL + '/api/user-profile/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, ...fields }),
+  });
+  if (!res.ok) throw new Error('Profil-Speichern fehlgeschlagen');
+  return await res.json();
+}
+
+async function sendFreeEmail(to, subject, body, profile = {}) {
   console.log(`📧 Freie E-Mail an ${to}: "${subject}"`);
-
   const res = await fetch(SELF_URL + '/api/send-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, body }),
+    body: JSON.stringify({ to, subject, body, profile }),
   });
-
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`❌ send-email Fehler ${res.status}:`, errText.substring(0, 200));
     return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
   }
-
   const data = await res.json();
   console.log(`✅ E-Mail an ${to} gesendet`);
   return { success: true, to, subject, message: `E-Mail an ${to} gesendet.` };
@@ -430,7 +664,7 @@ Anzahl Slides: ${count}
 Antworte NUR mit einem JSON-Objekt:
 {
   "slides": [
-    {"slide": 1, "title": "Kurzer Hook (max 5 Wörter, deutsch)", "body": "Text max 20 Wörter, deutsch", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}
+    {"slide": 1, "title": "Kurzer Hook (max 5 Wörter)", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}
   ]
 }
 
@@ -463,15 +697,9 @@ NUR das JSON.`;
 
       console.log(`✅ Chat-Skript mit ${slides.length} Slides (${modelName})`);
 
-      if (userId) {
-        setScript(userId, topic, slides);
-      }
+      if (userId) setScript(userId, topic, slides);
 
-      broadcastToClients({
-        type: 'script',
-        topic: topic,
-        slides: slides,
-      });
+      broadcastToClients({ type: 'script', topic, slides });
 
       return {
         success: true,
@@ -497,7 +725,7 @@ async function translateToEnglishImagePrompt(germanPrompt) {
           role: 'system',
           content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. ' +
                    'Subjekt, Aktion, Umgebung, Beleuchtung, Kamera, Stil, Qualität, Stimmung. ' +
-                   'KEINE generischen Phrasen. NUR der Prompt, eine Zeile, keine Anführungszeichen.',
+                   'NUR der Prompt, eine Zeile, keine Anführungszeichen.',
         },
         { role: 'user', content: germanPrompt },
       ],
@@ -538,9 +766,7 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
     const result = await generateImageWithCloudflare(englishPrompt);
 
-    if (userId) {
-      addImage(userId, slideNumber, result.imageBase64, result.mimeType);
-    }
+    if (userId) addImage(userId, slideNumber, result.imageBase64, result.mimeType);
 
     broadcastToClients({
       type: 'image',
@@ -559,26 +785,28 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 // ==================== TOOL DISPATCH ====================
 
-async function executeChatTool(name, args, userId, currentLocation = null) {
+async function executeChatTool(name, args, userId, profile, currentLocation = null) {
   if (name === 'get_weather') {
     let loc = args.location;
-    if (isHereKeyword(loc) && currentLocation?.city) {
-      loc = currentLocation.city;
-    }
+    if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city;
     return await fetchWeather(loc, args.timeframe);
   }
   if (name === 'find_restaurants') {
     let loc = args.location;
-    if (isHereKeyword(loc) && currentLocation?.city) {
-      loc = currentLocation.city;
-    }
+    if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city;
     return await fetchRestaurants(loc, args.cuisine);
   }
   if (name === 'save_user_preference') return await savePref(userId, args.key, args.value);
   if (name === 'get_user_preferences') return await getPrefs(userId);
-  if (name === 'send_email') {
-    return await sendFreeEmail(args.to, args.subject, args.body);
+  if (name === 'find_contact') return await findContact(userId, args.name);
+  if (name === 'save_contact') {
+    const { name: cname, ...fields } = args;
+    return await saveContact(userId, { name: cname, ...fields });
   }
+  if (name === 'forget_contact') return await forgetContact(userId, args.name);
+  if (name === 'list_contacts') return await listContacts(userId);
+  if (name === 'save_user_profile') return await saveUserProfile(userId, args);
+  if (name === 'send_email') return await sendFreeEmail(args.to, args.subject, args.body, profile);
   if (name === 'generate_script') {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
@@ -588,7 +816,7 @@ async function executeChatTool(name, args, userId, currentLocation = null) {
   if (name === 'send_carousel_email') {
     const carousel = getCarousel(userId);
     if (!carousel) return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
-    const res = await sendCarouselByEmail(args.to, carousel);
+    const res = await sendCarouselByEmail(args.to, carousel, profile);
     return { success: true, message: `Karussell "${res.topic}" an ${args.to} gesendet.` };
   }
   return { error: 'Unbekanntes Tool: ' + name };
@@ -798,7 +1026,7 @@ export async function handleChatMessage(
 
         let toolResult;
         try {
-          toolResult = await executeChatTool(fc.name, fc.args || {}, userId, currentLocation);
+          toolResult = await executeChatTool(fc.name, fc.args || {}, userId, enrichedProfile, currentLocation);
         } catch (e) {
           toolResult = { error: e.message };
         }

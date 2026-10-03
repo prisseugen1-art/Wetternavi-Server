@@ -38,6 +38,74 @@ function isHereKeyword(loc) {
   return /^(hier|hier\s+bei\s+mir|bei\s+mir|mein\s+standort|meine\s+position|aktueller\s+standort|vor\s+ort|hier\s+vor\s+ort|здесь|тут|у\s+меня|моё\s+местоположение)$/.test(t);
 }
 
+// ==================== TON-SYSTEM ====================
+
+const TONE_RULES = `
+===========================================
+🎭 TON-SYSTEM (SEHR WICHTIG)
+===========================================
+
+Beim Verfassen von E-Mails wählst du IMMER einen Ton:
+
+VERFÜGBARE TÖNE:
+- "formell"     → Behörden, Firmen, unbekannte Erwachsene
+- "persönlich"  → Freunde, Familie, bekannte Erwachsene
+- "locker"      → enge Freunde, Kinder, Familie (informell)
+
+═══════════════════════════════════════════
+A) NEUER KONTAKT (nicht gespeichert)
+═══════════════════════════════════════════
+
+Wenn du an jemanden schreibst, den du NICHT kennst:
+→ FRAGE zuerst: "Formell, persönlich oder locker?"
+
+═══════════════════════════════════════════
+B) BEKANNTER KONTAKT (gespeichert)
+═══════════════════════════════════════════
+
+Wenn der Kontakt einen Ton gespeichert hat:
+→ KEIN Nachfragen
+→ Nutze den gespeicherten Ton
+
+═══════════════════════════════════════════
+C) BEHÖRDEN / ÄMTER (Keyword)
+═══════════════════════════════════════════
+
+Wenn der Empfänger eine Behörde ist:
+→ IMMER automatisch "formell"
+→ KEIN Nachfragen
+
+KEYWORDS: "finanzamt", "amt", "behörde", "rathaus", "polizei", "gericht",
+"krankenkasse", "versicherung", "standesamt", "bürgeramt", "ordnungsamt",
+"gesundheitsamt", "arbeitsagentur", "jobcenter", "sozialamt", "jugendamt",
+"bauamt", "gewerbeamt"
+
+═══════════════════════════════════════════
+D) TON-EIGENSCHAFTEN
+═══════════════════════════════════════════
+
+FORMELL:
+- Anrede: "Sehr geehrte Damen und Herren," oder "Sehr geehrte Frau X,"
+- Gruß: "Mit freundlichen Grüßen"
+- Siezen, höflich, sachlich, keine Emojis
+
+PERSÖNLICH:
+- Anrede: "Hallo Alex," oder "Hallo Alex!"
+- Gruß: "Viele Grüße" oder "Liebe Grüße"
+- Freundlich, warm, Emojis sparsam
+
+LOCKER:
+- Anrede: "Hey Alex," oder "Hi"
+- Gruß: "LG" oder "Bis dann"
+- Duzen, kurz, direkt, Emojis ok
+
+═══════════════════════════════════════════
+E) TON-WECHSEL
+═══════════════════════════════════════════
+
+Nur auf explizite Aufforderung ("Schreib formeller" / "lockerer").
+`;
+
 // ==================== NAME-PATTERN ====================
 
 const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
@@ -322,16 +390,31 @@ function buildJonyPrompt(profile, role = 'freund') {
         : '')
     : null;
 
+  // Nutzer-Profil-Block
+  const userProfileBlock = [];
+  if (profile.user_name) userProfileBlock.push(`Name: ${profile.user_name}`);
+  if (profile.user_address) userProfileBlock.push(`Adresse: ${profile.user_address}`);
+  if (profile.user_birthdate) userProfileBlock.push(`Geburtsdatum: ${profile.user_birthdate}`);
+  if (profile.user_phone) userProfileBlock.push(`Telefon: ${profile.user_phone}`);
+  if (profile.user_email_default) userProfileBlock.push(`Standard-E-Mail: ${profile.user_email_default}`);
+
+  const userProfileText = userProfileBlock.length > 0
+    ? `NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails automatisch):\n${userProfileBlock.join('\n')}`
+    : '';
+
   return [
     LANGUAGE_RULE,
     '',
     ANTI_REPETITION,
+    '',
+    TONE_RULES,
     '',
     base,
     '',
     'Der Nutzer heißt ' + name + nickname + '.',
     'Aber nutze seinen Namen NICHT in jeder Antwort. Nur manchmal.',
     ...(locationLine ? ['', locationLine] : []),
+    ...(userProfileText ? ['', userProfileText] : []),
     '',
     '===========================================',
     'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
@@ -375,6 +458,65 @@ function buildJonyPrompt(profile, role = 'freund') {
     'Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
     '',
     '===========================================',
+    '📇 KONTAKT-GEDÄCHTNIS',
+    '===========================================',
+    '',
+    'DU HAST EIN KONTAKT-GEDÄCHTNIS. Nutze es IMMER vor E-Mail-Versand.',
+    '',
+    'ABLAUF bei "Schreib an [Name] ...":',
+    '',
+    '1. Rufe find_contact(name: "[name]") auf',
+    '',
+    '   FALL A — KONTAKT GEFUNDEN:',
+    '   → Nutze gespeicherte Adresse + Ton + Notizen',
+    '   → Zeige Entwurf',
+    '   → Warte auf Bestätigung',
+    '   → Sende mit send_email',
+    '',
+    '   FALL B — KONTAKT NICHT GEFUNDEN:',
+    '   → Frage Ton: "Formell, persönlich oder locker?"',
+    '     (AUSNAHME: Behörden → automatisch formell, kein Fragen)',
+    '   → Frage Adresse: "Wie lautet [Name] E-Mail-Adresse?"',
+    '   → Zeige Entwurf',
+    '   → Warte auf Bestätigung',
+    '   → Sende mit send_email',
+    '   → DANACH: "Soll ich mir [Name] für zukünftige Mails merken?"',
+    '     * Ja → save_contact(name, email, tone, ...)',
+    '     * Nein → nichts speichern (nur Session)',
+    '',
+    'KONTAKT-FELDER die du speichern kannst:',
+    '- email, telegram, phone',
+    '- aliases (Alternativnamen, komma-getrennt)',
+    '- relation (Verwandtschaft/Beziehung: Schwester, Bruder, Chef, ...)',
+    '- birthday (TT.MM. oder TT.MM.JJJJ)',
+    '- tone (formell | persönlich | locker)',
+    '- notes (freie Notizen: "mag keinen Kaffee, wohnt in Berlin")',
+    '',
+    'LERNE AUS KONTEXT (ohne explizit zu fragen):',
+    'Wenn Nutzer sagt "meine Schwester Angelina", "sie wohnt in Berlin",',
+    '"sie hat am 7. Juli Geburtstag" → ALLES mit save_contact speichern',
+    'sobald du einmal den Kontakt bestätigt hast.',
+    '',
+    'KONTAKT-VERWALTUNG:',
+    '- "Vergiss Alex" → forget_contact(name: "alex")',
+    '- "Welche Kontakte kenne ich?" → list_contacts()',
+    '- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")',
+    '',
+    'NUTZER-PROFIL (lerne aus Kontext, speichere mit save_user_profile):',
+    '- "Ich bin Eugen Priss" → user_name',
+    '- "Ich wohne in Georg-Simler-Str. 32, 74206 Bad Wimpfen" → user_address',
+    '- "Mein Geburtstag ist 12.05.1985" → user_birthdate',
+    '',
+    '===========================================',
+    '📧 E-MAIL-VERSAND',
+    '===========================================',
+    'Tool: send_email(to, subject, body)',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    '',
+    'STANDARD-EMPFÄNGER "an mich":',
+    '→ eugen.priss@yahoo.com (oder user_email_default aus Profil)',
+    '',
+    '===========================================',
     'TELEGRAM',
     '===========================================',
     'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
@@ -386,34 +528,11 @@ function buildJonyPrompt(profile, role = 'freund') {
     '- Eingehende Nachrichten siehst du in deinem Kontext.',
     '',
     '===========================================',
-    '📧 E-MAIL-VERSAND (freie Texte)',
-    '===========================================',
-    'Tool: send_email(to, subject, body)',
-    '',
-    '⛔ NIEMALS ohne Bestätigung senden.',
-    '',
-    'PFICHT-ABLAUF:',
-    '1. Nutzer sagt: "Schreib eine E-Mail an X mit..."',
-    '2. Du formulierst Betreff + Text',
-    '3. Zeige: "Soll ich diese E-Mail an X senden?',
-    '   Betreff: [dein Betreff]',
-    '   Text: [dein Text]"',
-    '4. WARTE auf "ja"/"ok"/"schick"',
-    '5. ERST DANN send_email(to, subject, body) aufrufen',
-    '',
-    'STANDARD-EMPFÄNGER:',
-    '- Wenn der Nutzer "an mich" / "mir" / "meine Adresse" sagt:',
-    '  → sende an eugen.priss@yahoo.com',
-    '- Wenn der Nutzer einen Namen/eine Firma nennt OHNE E-Mail-Adresse:',
-    '  → frage nach: "Wie lautet die E-Mail-Adresse von [Name]?"',
-    '- Wenn der Nutzer direkt eine E-Mail-Adresse nennt:',
-    '  → nutze diese direkt',
-    '',
-    '===========================================',
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'send_telegram_message, send_email',
+    'send_email, find_contact, save_contact, forget_contact, list_contacts,',
+    'send_telegram_message, save_user_profile',
     '',
     'NIEMALS Wetter/Restaurants erfinden.',
   ].join('\n');
@@ -566,6 +685,11 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
         if (dbProfile.name) userProfile.name = dbProfile.name;
         if (dbProfile.nickname) userProfile.nickname = dbProfile.nickname;
         if (dbProfile.hometown) userProfile.hometown = dbProfile.hometown;
+        if (dbProfile.user_name) userProfile.user_name = dbProfile.user_name;
+        if (dbProfile.user_address) userProfile.user_address = dbProfile.user_address;
+        if (dbProfile.user_birthdate) userProfile.user_birthdate = dbProfile.user_birthdate;
+        if (dbProfile.user_phone) userProfile.user_phone = dbProfile.user_phone;
+        if (dbProfile.user_email_default) userProfile.user_email_default = dbProfile.user_email_default;
         console.log(`✅ Profil angereichert: name="${userProfile.name}"`);
       }
     } catch (e) {
@@ -573,7 +697,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     }
   }
 
-  // Aktuellen Standort aus IMU-Kontext ins Profil mergen
   if (clientWs._lastLat != null && clientWs._lastLon != null) {
     userProfile.current_lat = clientWs._lastLat;
     userProfile.current_lon = clientWs._lastLon;
@@ -875,6 +998,70 @@ function buildJonyTools() {
             required: ['to', 'subject', 'body'],
           },
         },
+        {
+          name: 'find_contact',
+          description: 'Sucht einen Kontakt im Gedächtnis (Name oder Alias). ' +
+                       'Rufe das IMMER auf, bevor du eine E-Mail an einen Namen schickst.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING', description: 'Name oder Alias (z.B. "alex", "chef")' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'save_contact',
+          description: 'Speichert/aktualisiert einen Kontakt. ' +
+                       'Felder: email, telegram, phone, aliases, relation, birthday, tone, notes.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              email: { type: 'STRING' },
+              telegram: { type: 'STRING' },
+              phone: { type: 'STRING' },
+              aliases: { type: 'STRING', description: 'Komma-getrennt' },
+              relation: { type: 'STRING' },
+              birthday: { type: 'STRING' },
+              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+              notes: { type: 'STRING' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'forget_contact',
+          description: 'Löscht einen Kontakt komplett.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'list_contacts',
+          description: 'Listet alle gespeicherten Kontakte auf.',
+          parameters: { type: 'OBJECT', properties: {} },
+        },
+        {
+          name: 'save_user_profile',
+          description: 'Speichert Nutzer-Profil-Daten (Name, Adresse, Geburtsdatum). ' +
+                       'Nutze es, wenn der Nutzer solche Infos über sich erzählt.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              address: { type: 'STRING' },
+              birthdate: { type: 'STRING' },
+              phone: { type: 'STRING' },
+              default_email: { type: 'STRING' },
+              default_tone: { type: 'STRING' },
+            },
+          },
+        },
       ],
     },
   ];
@@ -963,7 +1150,18 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
       } else if (fc.name === 'send_email') {
-        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body);
+        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile);
+      } else if (fc.name === 'find_contact') {
+        result = await handleFindContact(userProfile.user_id, fc.args.name);
+      } else if (fc.name === 'save_contact') {
+        const { name: cname, ...fields } = fc.args;
+        result = await handleSaveContact(userProfile.user_id, cname, fields);
+      } else if (fc.name === 'forget_contact') {
+        result = await handleForgetContact(userProfile.user_id, fc.args.name);
+      } else if (fc.name === 'list_contacts') {
+        result = await handleListContacts(userProfile.user_id);
+      } else if (fc.name === 'save_user_profile') {
+        result = await handleSaveUserProfile(userProfile.user_id, fc.args);
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
@@ -981,7 +1179,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
           fc.args.slide_number
         );
       } else if (fc.name === 'send_carousel_email') {
-        result = await handleSendCarouselEmail(userProfile.user_id, fc.args.to);
+        result = await handleSendCarouselEmail(userProfile.user_id, fc.args.to, userProfile);
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
@@ -1014,12 +1212,12 @@ async function handleSendTelegram(chatId, text) {
   }
 }
 
-async function handleSendEmail(to, subject, body) {
+async function handleSendEmail(to, subject, body, profile = {}) {
   try {
     const res = await fetch(SELF_URL + '/api/send-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, body }),
+      body: JSON.stringify({ to, subject, body, profile }),
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -1033,19 +1231,92 @@ async function handleSendEmail(to, subject, body) {
   }
 }
 
-async function handleSendCarouselEmail(userId, to) {
+async function handleSendCarouselEmail(userId, to, profile = {}) {
   try {
     const carousel = getCarousel(userId);
     if (!carousel) {
       return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
     }
-    const res = await sendCarouselByEmail(to, carousel);
+    const res = await sendCarouselByEmail(to, carousel, profile);
     return {
       success: true,
       message: `Karussell "${res.topic}" mit ${res.imageCount} Bildern an ${to} gesendet.`,
     };
   } catch (e) {
     console.error('❌ E-Mail-Fehler:', e.message);
+    return { error: e.message };
+  }
+}
+
+// ==================== KONTAKT HANDLER ====================
+
+async function handleFindContact(userId, name) {
+  try {
+    const res = await fetch(SELF_URL + '/api/contacts/find', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error('❌ find_contact:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleSaveContact(userId, name, fields) {
+  try {
+    const res = await fetch(SELF_URL + '/api/contacts/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name, ...fields }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error('❌ save_contact:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleForgetContact(userId, name) {
+  try {
+    const res = await fetch(SELF_URL + '/api/contacts/forget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error('❌ forget_contact:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleListContacts(userId) {
+  try {
+    const res = await fetch(SELF_URL + '/api/contacts/list/' + userId);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error('❌ list_contacts:', e.message);
+    return { error: e.message };
+  }
+}
+
+async function handleSaveUserProfile(userId, fields) {
+  try {
+    const res = await fetch(SELF_URL + '/api/user-profile/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, ...fields }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (e) {
+    console.error('❌ save_user_profile:', e.message);
     return { error: e.message };
   }
 }
