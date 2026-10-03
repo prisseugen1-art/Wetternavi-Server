@@ -462,13 +462,19 @@ function buildJonyPrompt(profile, role = 'freund') {
     '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
     '- "Ich wohne in ..." → save_user_profile(address: "...")',
     '',
-    '===========================================',
-    '📧 E-MAIL-VERSAND',
-    '===========================================',
-    'Tool: send_email(to, subject, body)',
-    '⛔ NIEMALS ohne Bestätigung senden.',
-    'STANDARD "an mich" → eugen.priss@yahoo.com',
-    '',
+'===========================================',
+'📧 E-MAIL-VERSAND',
+'===========================================',
+'Tool: send_email(to, subject, body, tone)',
+'⛔ NIEMALS ohne Bestätigung senden.',
+'STANDARD "an mich" → eugen.priss@yahoo.com',
+'',
+'🚨 SIGNATUR-REGEL:',
+'Du schreibst E-Mails OHNE Signatur am Ende.',
+'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
+'Der Server fügt die Signatur automatisch hinzu.',
+'Du schreibst NUR Anrede + Text.',
+'⛔ NIEMALS selbst unterschreiben.',
     '===========================================',
     'TELEGRAM',
     '===========================================',
@@ -870,18 +876,21 @@ function buildJonyTools() {
           },
         },
         {
+                 
           name: 'send_email',
           description: 'Sendet eine freie E-Mail. ⛔ NIEMALS ohne Bestätigung senden. ' +
                        'Bei "an mich" → eugen.priss@yahoo.com. ' +
-                       'Frage vorher nach Ton UND Adresse (falls unbekannt).',
+                       'Frage vorher nach Ton UND Adresse (falls unbekannt). ' +
+                       'Schreibe KEINE Signatur — der Server macht das.',
           parameters: {
             type: 'OBJECT',
             properties: {
               to: { type: 'STRING' },
               subject: { type: 'STRING' },
-              body: { type: 'STRING' },
+              body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur' },
+              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
             },
-            required: ['to', 'subject', 'body'],
+            required: ['to', 'subject', 'body', 'tone'],
           },
         },
         {
@@ -1024,8 +1033,8 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
-      } else if (fc.name === 'send_email') {
-        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile);
+         } else if (fc.name === 'send_email') {
+        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile, fc.args.tone || 'persönlich');
       } else if (fc.name === 'find_contact') {
         result = await handleFindContact(userProfile.user_id, fc.args.name);
       } else if (fc.name === 'save_contact') {
@@ -1085,12 +1094,12 @@ async function handleSendTelegram(chatId, text) {
   }
 }
 
-async function handleSendEmail(to, subject, body, profile = {}) {
+async function handleSendEmail(to, subject, body, profile = {}, tone = 'persönlich') {
   try {
     const res = await fetch(SELF_URL + '/api/send-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, body, profile }),
+      body: JSON.stringify({ to, subject, body, profile, tone }),
     });
     if (!res.ok) {
       const errText = await res.text();

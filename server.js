@@ -778,14 +778,15 @@ app.get('/api/email/status', (req, res) => {
 app.post('/api/send-email', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
-    const { to, subject, body } = args;
+    const { to, subject, body, tone, profile } = args;
 
     if (!to || !subject || !body) {
       return res.status(400).json({ error: 'to, subject, body required' });
     }
 
-    console.log(`📧 Freie E-Mail Anfrage: an ${to}, Betreff: "${subject}"`);
-    const result = await sendEmail(to, subject, body);
+    const finalTone = tone || 'persönlich';
+    console.log(`📧 Freie E-Mail Anfrage: an ${to}, Betreff: "${subject}", Ton: ${finalTone}`);
+    const result = await sendEmail(to, subject, body, profile || {}, finalTone);
 
     res.json({ success: true, ...result });
   } catch (error) {
@@ -793,6 +794,7 @@ app.post('/api/send-email', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // ========== TELEGRAM ==========
 

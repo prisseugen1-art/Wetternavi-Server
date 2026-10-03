@@ -325,13 +325,34 @@ function buildSystemPrompt(profile, role, mode) {
     '',
     CONTACT_RULES,
     '',
-    '===========================================',
-    '📧 E-MAIL-VERSAND',
-    '===========================================',
-    'Tool: send_email(to, subject, body)',
-    '⛔ NIEMALS ohne Bestätigung senden.',
-    'STANDARD "an mich" → eugen.priss@yahoo.com',
-    '',
+    
+'===========================================',
+'📧 E-MAIL-VERSAND',
+'===========================================',
+'Tool: send_email(to, subject, body, tone)',
+'⛔ NIEMALS ohne Bestätigung senden.',
+'STANDARD "an mich" → eugen.priss@yahoo.com',
+'',
+'🚨 SIGNATUR-REGEL (SEHR WICHTIG):',
+'Du schreibst E-Mails OHNE Signatur am Ende.',
+'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
+'Der Server fügt die Signatur automatisch hinzu.',
+'Du schreibst NUR den Inhalt: Anrede + Text.',
+'',
+'Beispiel — was DU schreibst:',
+'  "Hey Alex,',
+'   ',
+'   lass uns Samstag treffen."',
+'',
+'Beispiel — was der SERVER anhängt:',
+'  "',
+'   LG Eugen',
+'   ',
+'   ---',
+'   Gesendet: ..."',
+'',
+'⛔ NIEMALS selbst unterschreiben.',
+'⛔ NIEMALS "Jony" als Absender.',
     '===========================================',
     'TOOLS',
     '===========================================',
@@ -452,16 +473,20 @@ const JONY_TOOLS = [
     },
   },
   {
+      
     name: 'send_email',
-    description: 'Sendet eine E-Mail. Frage IMMER zuerst nach Bestätigung.',
+    description: 'Sendet eine E-Mail. Frage IMMER zuerst nach Bestätigung. ' +
+                 'Der Ton bestimmt die Signatur am Ende. ' +
+                 'Schreibe KEINE Signatur selbst — der Server macht das.',
     parameters: {
       type: 'OBJECT',
       properties: {
         to: { type: 'STRING' },
         subject: { type: 'STRING' },
-        body: { type: 'STRING' },
+        body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur/Gruß/Namen' },
+        tone: { type: 'STRING', description: 'formell | persönlich | locker' },
       },
-      required: ['to', 'subject', 'body'],
+      required: ['to', 'subject', 'body', 'tone'],
     },
   },
 ];
@@ -621,12 +646,12 @@ async function saveUserProfile(userId, fields) {
   return await res.json();
 }
 
-async function sendFreeEmail(to, subject, body, profile = {}) {
-  console.log(`📧 Freie E-Mail an ${to}: "${subject}"`);
+async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlich') {
+  console.log(`📧 Freie E-Mail an ${to}: "${subject}" (Ton: ${tone})`);
   const res = await fetch(SELF_URL + '/api/send-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, body, profile }),
+    body: JSON.stringify({ to, subject, body, profile, tone }),
   });
   if (!res.ok) {
     return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
@@ -791,7 +816,7 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
   if (name === 'forget_contact') return await forgetContact(userId, args.name);
   if (name === 'list_contacts') return await listContacts(userId);
   if (name === 'save_user_profile') return await saveUserProfile(userId, args);
-  if (name === 'send_email') return await sendFreeEmail(args.to, args.subject, args.body, profile);
+  if (name === 'send_email') return await sendFreeEmail(args.to, args.subject, args.body, profile, args.tone || 'persönlich');
   if (name === 'generate_script') {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
