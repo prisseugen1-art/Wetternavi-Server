@@ -55,12 +55,11 @@ function getTimeContext() {
 
 const TONE_RULES = [
   '===========================================',
-  '🎭 TON-SYSTEM (SEHR WICHTIG)',
+  '🎭 TON-SYSTEM',
   '===========================================',
   '',
   'Beim Verfassen von E-Mails wählst du IMMER einen Ton:',
   '',
-  'VERFÜGBARE TÖNE:',
   '- "formell"     → Behörden, Firmen, unbekannte Erwachsene',
   '- "persönlich"  → Freunde, Familie, bekannte Erwachsene',
   '- "locker"      → enge Freunde, Kinder, Familie (informell)',
@@ -71,11 +70,6 @@ const TONE_RULES = [
   '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
   '   → Automatisch formell, kein Nachfragen',
   'D) TON-WECHSEL nur auf explizite Aufforderung',
-  '',
-  'FORMELL: Anrede "Sehr geehrte Damen und Herren,", Gruß "Mit freundlichen Grüßen", Siezen',
-  'PERSÖNLICH: Anrede "Hallo Alex,", Gruß "Viele Grüße", freundlich warm',
-  'LOCKER: Anrede "Hey Alex,", Gruß "LG" oder "Bis dann", duzen',
-  '',
 ].join('\n');
 
 // ==================== SPRACHREGEL ====================
@@ -131,7 +125,6 @@ const ROLES = {
       '- Locker, entspannt, wie ein älterer Cousin (14-16).',
       '- NIE herablassend, NIE peinlich.',
       '- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.',
-      '- Erzähle Fun-Facts wenn\'s passt.',
       '',
       'WENN DU MIT NIKLAS SPRICHST (11):',
       '- Er spielt Fußball (mit Papa).',
@@ -163,22 +156,17 @@ const BUSINESS_PROMPT = [
   '3. Rufe generate_script auf',
   '4. Nach dem Tool: "Skript ist da. Schau in die App."',
   '5. Bei "mach Bilder": generate_image für JEDEN Slide einzeln',
-  '6. Bei "schick mir das per Email":',
-  '   ⚠️ ZUERST fragen: "Soll ich das Karussell an [Adresse] senden?"',
-  '   ⚠️ WARTE auf Bestätigung',
-  '   ⚠️ DANN erst send_carousel_email(to)',
+  '6. Bei "schick per Mail": ERST Adresse + Bestätigung, DANN send_carousel_email',
   '',
   'STIL: Direkt, präzise, kurz. KEIN Smalltalk.',
 ].join('\n');
 
-// ==================== KONTAKT-PFLICHT-ABLAUF ====================
+// ==================== KONTAKT + GRUPPEN ====================
 
 const CONTACT_RULES = [
   '===========================================',
-  '📇 KONTAKT-GEDÄCHTNIS — PFLICHT-ABLAUF',
+  '📇 KONTAKT- & GRUPPEN-GEDÄCHTNIS',
   '===========================================',
-  '',
-  'DU HAST EIN KONTAKT-GEDÄCHTNIS. Nutze es IMMER vor E-Mail-Versand.',
   '',
   '🚨 EISERNE REGELN — NIE BRECHEN 🚨',
   '',
@@ -193,70 +181,91 @@ const CONTACT_RULES = [
   'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
   '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
   '',
-  'PFLICHT-ABLAUF bei "Schreib an [Name]: ...":',
+  'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
   '',
-  'Schritt 1: find_contact(name: "[name]") aufrufen',
+  'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
   '',
-  'Schritt 2: Prüfe das Ergebnis.',
-  '  - KONTAKT GEFUNDEN: → Ton + Adresse übernehmen → Schritt 5',
-  '  - KONTAKT NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
+  'Schritt 2: Prüfe Ergebnis.',
+  '  - EINZELKONTAKT GEFUNDEN: → Ton + Adresse → Schritt 5',
+  '  - GRUPPE GEFUNDEN: → alle Mitglieder auflösen',
+  '  - NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
   '',
-  'Schritt 3: Prüfe Empfänger auf Behörden-Keyword',
-  '  (finanzamt, amt, behörde, rathaus, polizei, gericht, krankenkasse,',
-  '   versicherung, standesamt, bürgeramt, ordnungsamt)',
-  '  - BEHÖRDE: → Ton = formell (automatisch) → Schritt 4',
-  '  - KEINE BEHÖRDE: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
+  'Schritt 3: Prüfe Behörden-Keyword',
+  '  - BEHÖRDE: → Ton = formell → Schritt 4',
+  '  - SONST: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
   '',
-  'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE auf Antwort',
+  'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
   '',
-  'Schritt 5: JETZT erst verfassen — mit Ton + Adresse.',
-  '  Zeige Entwurf mit An / Betreff / Text und frage "Soll ich senden?"',
+  'Schritt 5: JETZT erst verfassen. Zeige Entwurf.',
   '',
   'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
   '',
-  'Schritt 7: send_email(to, subject, body) aufrufen',
+  'Schritt 7: send_email(to, subject, body, tone)',
+  '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
+  '  📎 Anhänge werden AUTOMATISCH mitgeschickt — du rufst nichts extra auf.',
   '',
-  'Schritt 8: NACH erfolgreichem Senden — bei NEUEN Kontakten:',
-  '  Frage "Soll ich mir [Name] für zukünftige Mails merken?"',
-  '  - "Ja" → save_contact(name, email, tone, ...)',
-  '  - "Nein" → nichts speichern',
-  '',
-  '🚫 VERBOTENE MUSTER:',
-  '❌ Nicht: E-Mail-Text schreiben, obwohl Adresse unbekannt',
-  '❌ Nicht: E-Mail-Text schreiben, obwohl Ton ungeklärt',
-  '❌ Nicht: Senden ohne Bestätigung',
-  '',
-  '✅ KORREKTES BEISPIEL:',
-  'Nutzer: "Schreib eine E-Mail an Constantin, dass es ein Test ist"',
-  'Jony: (find_contact → nicht gefunden)',
-  'Jony: "Klar. Formell, persönlich oder locker?"',
-  'Nutzer: "locker"',
-  'Jony: "Wie lautet Constantins E-Mail-Adresse?"',
-  'Nutzer: "constantin@test.de"',
-  'Jony: "Soll ich so senden? An: constantin@test.de / Betreff: Test / Text: Hey Constantin, nur ein Test. LG"',
-  'Nutzer: "Ja"',
-  'Jony: (send_email) "✅ Ist raus. Soll ich mir Constantin merken?"',
-  '',
-  '📇 KONTAKT-FELDER (für save_contact):',
-  'email, telegram, phone, aliases, relation, birthday, tone, notes',
-  '',
-  'LERNE AUS KONTEXT:',
-  '"meine Schwester Angelina", "sie wohnt in Berlin", "sie hat am 7. Juli',
-  'Geburtstag" → ALLES mit save_contact speichern sobald Kontakt bestätigt.',
+  'Schritt 8: Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
   '',
   'KONTAKT-VERWALTUNG:',
   '- "Vergiss Alex" → forget_contact(name: "alex")',
   '- "Welche Kontakte kenne ich?" → list_contacts()',
-  '- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")',
+  '',
+  '👥 GRUPPEN:',
+  '- "Meine Familie sind Mama, Papa, Alex"',
+  '  → save_group(name: "familie", members: ["mama", "papa", "alex"])',
+  '- "Schreib an meine Familie: ..."',
+  '  → find_group("familie") → alle Mitglieder werden aufgelöst',
+  '- "Vergiss die Gruppe Familie" → forget_group("familie")',
+  '- "Welche Gruppen habe ich?" → list_groups()',
+  '',
+  'MEHRERE EMPFÄNGER:',
+  '- "Schreib an Alex und Constantin: ..."',
+  '  → resolve_recipients(["alex", "constantin"])',
+  '- Bei Gruppen mit verschiedenen Kanälen: fragen welcher Kanal',
   '',
   'NUTZER-PROFIL (lerne aus Kontext):',
   '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
   '- "Ich wohne in ..." → save_user_profile(address: "...")',
 ].join('\n');
 
+// ==================== SIGNATUR-REGEL ====================
+
+const SIGNATURE_RULE = [
+  '===========================================',
+  '✍️ SIGNATUR-REGEL',
+  '===========================================',
+  '',
+  'Du schreibst E-Mails OHNE Signatur am Ende.',
+  'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
+  'Der Server fügt die Signatur automatisch hinzu.',
+  '',
+  '⛔ NIEMALS selbst unterschreiben.',
+].join('\n');
+
+// ==================== ANHANG-REGEL ====================
+
+const ATTACHMENT_RULE = [
+  '===========================================',
+  '📎 ANHANG-REGEL',
+  '===========================================',
+  '',
+  'Anhänge werden AUTOMATISCH mitgeschickt — du rufst KEIN Tool extra auf.',
+  '',
+  'WENN Anhänge bereit sind:',
+  '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
+  '- Erwähne sie im Entwurf: "Mit Anhang: rechnung.pdf"',
+  '- Du brauchst NICHTS weiter zu tun — die Anhänge kommen automatisch mit.',
+  '',
+  'WENN KEINE Anhänge bereit sind:',
+  '- Erwähne keine Anhänge.',
+  '- Wenn der Nutzer fragt "kannst du das PDF anhängen?" → antworte:',
+  '  "Klicke auf den 📎-Button in der Entwurf-Karte, wähle die Datei.',
+  '   Ich hänge sie dann automatisch an."',
+].join('\n');
+
 // ==================== SYSTEM-PROMPT ====================
 
-function buildSystemPrompt(profile, role, mode) {
+function buildSystemPrompt(profile, role, mode, attachments = []) {
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
@@ -271,8 +280,17 @@ function buildSystemPrompt(profile, role, mode) {
     }
   }
 
+  // Anhang-Hinweis
+  let attachmentNote = null;
+  if (attachments && attachments.length > 0) {
+    const lines = attachments.map(a =>
+      '  - ' + a.filename + ' (' + Math.round(a.size / 1024) + ' KB)'
+    );
+    attachmentNote = '📎 AKTUELLE ANHÄNGE: ' + attachments.length + ' Datei(en) bereit:\n' + lines.join('\n');
+  }
+
   if (mode === 'business') {
-    return [
+    const bizLines = [
       LANGUAGE_RULE,
       '',
       ANTI_REPETITION,
@@ -282,11 +300,14 @@ function buildSystemPrompt(profile, role, mode) {
       'Heute ist ' + today + ' (' + timeCtx + '). Nutzer: ' + name + '.',
       '',
       'TOOLS: generate_script, generate_image, send_carousel_email',
-      'Sage NIEMALS den Skript-Inhalt in deiner Antwort.',
-    ].join('\n');
+    ];
+    if (attachmentNote) {
+      bizLines.push('');
+      bizLines.push(attachmentNote);
+    }
+    return bizLines.join('\n');
   }
 
-  // Nutzer-Profil-Block
   const userProfileLines = [];
   if (profile.user_name) userProfileLines.push('Name: ' + profile.user_name);
   if (profile.user_address) userProfileLines.push('Adresse: ' + profile.user_address);
@@ -295,7 +316,7 @@ function buildSystemPrompt(profile, role, mode) {
   if (profile.user_email_default) userProfileLines.push('Standard-E-Mail: ' + profile.user_email_default);
 
   const userProfileText = userProfileLines.length > 0
-    ? 'NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails):\n' + userProfileLines.join('\n')
+    ? 'NUTZER-PROFIL:\n' + userProfileLines.join('\n')
     : null;
 
   const roleData = ROLES[role] || ROLES.freund;
@@ -309,7 +330,7 @@ function buildSystemPrompt(profile, role, mode) {
     '',
     BASE_PROMPT,
     '',
-    'Heute ist ' + today + ' (' + timeCtx + '). Nutzer: ' + name + ' (' + (profile.nickname || '-') + ').',
+    'Heute ist ' + today + ' (' + timeCtx + '). Nutzer: ' + name + '.',
     locationInfo,
   ];
 
@@ -325,44 +346,33 @@ function buildSystemPrompt(profile, role, mode) {
     '',
     CONTACT_RULES,
     '',
-    
-'===========================================',
-'📧 E-MAIL-VERSAND',
-'===========================================',
-'Tool: send_email(to, subject, body, tone)',
-'⛔ NIEMALS ohne Bestätigung senden.',
-'STANDARD "an mich" → eugen.priss@yahoo.com',
-'',
-'🚨 SIGNATUR-REGEL (SEHR WICHTIG):',
-'Du schreibst E-Mails OHNE Signatur am Ende.',
-'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
-'Der Server fügt die Signatur automatisch hinzu.',
-'Du schreibst NUR den Inhalt: Anrede + Text.',
-'',
-'Beispiel — was DU schreibst:',
-'  "Hey Alex,',
-'   ',
-'   lass uns Samstag treffen."',
-'',
-'Beispiel — was der SERVER anhängt:',
-'  "',
-'   LG Eugen',
-'   ',
-'   ---',
-'   Gesendet: ..."',
-'',
-'⛔ NIEMALS selbst unterschreiben.',
-'⛔ NIEMALS "Jony" als Absender.',
+    SIGNATURE_RULE,
+    '',
+    ATTACHMENT_RULE,
+    '',
+    '===========================================',
+    '📧 E-MAIL-VERSAND',
+    '===========================================',
+    'Tool: send_email(to, subject, body, tone)',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    'STANDARD "an mich" → eugen.priss@yahoo.com',
+    '',
     '===========================================',
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, save_user_preference, get_user_preferences,',
-    'send_email, find_contact, save_contact, forget_contact, list_contacts,',
-    'save_user_profile',
+    'find_contact, save_contact, forget_contact, list_contacts,',
+    'find_group, save_group, forget_group, list_groups, resolve_recipients,',
+    'save_user_profile, send_email',
     '',
-    'STANDORT-REGEL: "hier"/"bei mir" → aktueller Standort.',
     'NIEMALS Wetter/Restaurants erfinden.'
   );
+
+  if (attachmentNote) {
+    lines.push('');
+    lines.push('===========================================');
+    lines.push(attachmentNote);
+  }
 
   return lines.join('\n');
 }
@@ -458,6 +468,63 @@ const JONY_TOOLS = [
     parameters: { type: 'OBJECT', properties: {} },
   },
   {
+    name: 'find_group',
+    description: 'Sucht eine Gruppe (z.B. "familie").',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'save_group',
+    description: 'Speichert eine Gruppe. members ist eine Liste von Kontakt-Namen.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+        members: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+        },
+        notes: { type: 'STRING' },
+      },
+      required: ['name', 'members'],
+    },
+  },
+  {
+    name: 'forget_group',
+    description: 'Löscht eine Gruppe.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        name: { type: 'STRING' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'list_groups',
+    description: 'Listet alle Gruppen auf.',
+    parameters: { type: 'OBJECT', properties: {} },
+  },
+  {
+    name: 'resolve_recipients',
+    description: 'Löst mehrere Namen (Kontakte + Gruppen) zu vollständigen Empfänger-Daten auf.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        names: {
+          type: 'ARRAY',
+          items: { type: 'STRING' },
+        },
+      },
+      required: ['names'],
+    },
+  },
+  {
     name: 'save_user_profile',
     description: 'Speichert Nutzer-Profil (Name, Adresse, Geburtsdatum).',
     parameters: {
@@ -473,17 +540,16 @@ const JONY_TOOLS = [
     },
   },
   {
-      
     name: 'send_email',
     description: 'Sendet eine E-Mail. Frage IMMER zuerst nach Bestätigung. ' +
-                 'Der Ton bestimmt die Signatur am Ende. ' +
-                 'Schreibe KEINE Signatur selbst — der Server macht das.',
+                 'Schreibe KEINE Signatur — der Server macht das. ' +
+                 '📎 Anhänge werden AUTOMATISCH mitgeschickt, wenn welche bereit sind.',
     parameters: {
       type: 'OBJECT',
       properties: {
         to: { type: 'STRING' },
         subject: { type: 'STRING' },
-        body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur/Gruß/Namen' },
+        body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur' },
         tone: { type: 'STRING', description: 'formell | persönlich | locker' },
       },
       required: ['to', 'subject', 'body', 'tone'],
@@ -636,6 +702,52 @@ async function listContacts(userId) {
   return await res.json();
 }
 
+async function findGroup(userId, name) {
+  const res = await fetch(SELF_URL + '/api/groups/find', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name }),
+  });
+  if (!res.ok) throw new Error('Gruppen-Suche fehlgeschlagen');
+  return await res.json();
+}
+
+async function saveGroup(userId, name, members, notes) {
+  const res = await fetch(SELF_URL + '/api/groups/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name, members, notes }),
+  });
+  if (!res.ok) throw new Error('Gruppen-Speichern fehlgeschlagen');
+  return await res.json();
+}
+
+async function forgetGroup(userId, name) {
+  const res = await fetch(SELF_URL + '/api/groups/forget', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name }),
+  });
+  if (!res.ok) throw new Error('Gruppen-Löschen fehlgeschlagen');
+  return await res.json();
+}
+
+async function listGroups(userId) {
+  const res = await fetch(SELF_URL + '/api/groups/list/' + userId);
+  if (!res.ok) throw new Error('Gruppen-Liste fehlgeschlagen');
+  return await res.json();
+}
+
+async function resolveRecipients(userId, names) {
+  const res = await fetch(SELF_URL + '/api/contacts/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, names }),
+  });
+  if (!res.ok) throw new Error('Auflösen fehlgeschlagen');
+  return await res.json();
+}
+
 async function saveUserProfile(userId, fields) {
   const res = await fetch(SELF_URL + '/api/user-profile/save', {
     method: 'POST',
@@ -657,7 +769,8 @@ async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlic
     return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
   }
   const data = await res.json();
-  return { success: true, to, subject, message: `E-Mail an ${to} gesendet.` };
+  const attachInfo = data.attachmentCount > 0 ? ` (mit ${data.attachmentCount} Anhängen)` : '';
+  return { success: true, to, subject, message: `E-Mail an ${to} gesendet${attachInfo}.` };
 }
 
 // ==================== SCRIPT + IMAGE (Business) ====================
@@ -736,8 +849,7 @@ async function translateToEnglishImagePrompt(germanPrompt) {
       messages: [
         {
           role: 'system',
-          content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. ' +
-                   'NUR der Prompt, eine Zeile, keine Anführungszeichen.',
+          content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. NUR der Prompt.',
         },
         { role: 'user', content: germanPrompt },
       ],
@@ -815,6 +927,11 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
   }
   if (name === 'forget_contact') return await forgetContact(userId, args.name);
   if (name === 'list_contacts') return await listContacts(userId);
+  if (name === 'find_group') return await findGroup(userId, args.name);
+  if (name === 'save_group') return await saveGroup(userId, args.name, args.members, args.notes);
+  if (name === 'forget_group') return await forgetGroup(userId, args.name);
+  if (name === 'list_groups') return await listGroups(userId);
+  if (name === 'resolve_recipients') return await resolveRecipients(userId, args.names);
   if (name === 'save_user_profile') return await saveUserProfile(userId, args);
   if (name === 'send_email') return await sendFreeEmail(args.to, args.subject, args.body, profile, args.tone || 'persönlich');
   if (name === 'generate_script') {
@@ -944,11 +1061,12 @@ export async function handleChatMessage(
   userMessage,
   currentRole = 'freund',
   currentMode = 'jony',
-  currentLocation = null
+  currentLocation = null,
+  attachments = []
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
+  console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}" (Anhänge: ${attachments.length})`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
@@ -967,9 +1085,10 @@ export async function handleChatMessage(
     current_lat: currentLocation?.lat,
     current_lon: currentLocation?.lon,
     current_city: currentLocation?.city || profile.hometown,
+    user_id: userId,
   };
 
-  const systemInstruction = buildSystemPrompt(enrichedProfile, activeRole, activeMode);
+  const systemInstruction = buildSystemPrompt(enrichedProfile, activeRole, activeMode, attachments);
   const tools = activeMode === 'business' ? BUSINESS_TOOLS : JONY_TOOLS;
 
   const contents = [
@@ -988,11 +1107,10 @@ export async function handleChatMessage(
     attempts++;
 
     let response = null;
-    let usedModel = null;
 
     for (const modelName of CHAT_MODELS) {
       try {
-                response = await ai.models.generateContent({
+        response = await ai.models.generateContent({
           model: modelName,
           contents,
           config: {
@@ -1001,11 +1119,10 @@ export async function handleChatMessage(
             temperature: 0.8,
             maxOutputTokens: 500,
             thinkingConfig: {
-              thinkingLevel: 'low',
+              thinkingLevel: 'low'
             },
           },
         });
-        usedModel = modelName;
         console.log(`   ✅ Chat-Modell: ${modelName}`);
         break;
       } catch (e) {
@@ -1013,6 +1130,25 @@ export async function handleChatMessage(
         if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('no longer available')) {
           console.log(`   ⏭️  ${modelName} nicht verfügbar`);
           continue;
+        }
+        if (errMsg.includes('thinking') || errMsg.includes('Thinking')) {
+          try {
+            response = await ai.models.generateContent({
+              model: modelName,
+              contents,
+              config: {
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                tools: [{ functionDeclarations: tools }],
+                temperature: 0.8,
+                maxOutputTokens: 500,
+              },
+            });
+            console.log(`   ✅ Chat-Modell (ohne thinkingConfig): ${modelName}`);
+            break;
+          } catch (e2) {
+            console.error(`   ❌ Retry ohne thinkingConfig fehlgeschlagen:`, e2.message);
+            continue;
+          }
         }
         console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
         continue;
