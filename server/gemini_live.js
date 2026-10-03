@@ -57,85 +57,7 @@ const TONE_RULES = [
   '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
   '   → Automatisch formell, kein Nachfragen',
   'D) TON-WECHSEL nur auf explizite Aufforderung',
-  '',
-  'FORMELL: Anrede "Sehr geehrte Damen und Herren,", Gruß "Mit freundlichen Grüßen", Siezen',
-  'PERSÖNLICH: Anrede "Hallo Alex,", Gruß "Viele Grüße", freundlich warm',
-  'LOCKER: Anrede "Hey Alex,", Gruß "LG" oder "Bis dann", duzen',
 ].join('\n');
-
-// ==================== NAME-PATTERN ====================
-
-const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
-
-const PATTERNS = {
-  business: new RegExp(
-    `\\b(${NAME_PATTERN}.?business|business.?modus|business\\s+mode|бизнес.?мод|бизнес)\\b`,
-    'i'
-  ),
-  backToJony: new RegExp(
-    `\\b(${NAME_PATTERN}.?(zur[üu]ck|freund|normal|back|обратно|вернись)|` +
-    `zur[üu]ck.*(freund|jony|johnny)|` +
-    `freund.?modus|normal.?modus|freundesmodus|` +
-    `вернись.*друг|обратно.*друг|режим.?друга)\\b`,
-    'i'
-  ),
-  party: new RegExp(
-    `\\b(${NAME_PATTERN}.?party|party.?modus|partymodus|party\\s+mode|` +
-    `${NAME_PATTERN}.?пати|пати.?мод|вечеринк)\\b`,
-    'i'
-  ),
-  berater: new RegExp(
-    `\\b(${NAME_PATTERN}.?(berater|sachlich|intellektuell)|` +
-    `berater.?modus|beratermodus|` +
-    `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
-    'i'
-  ),
-  kids: new RegExp(
-    `\\b(${NAME_PATTERN}.?(kids|niklas|kinder|kind|junge|junior|kumpel)|` +
-    `kids.?modus|kinder.?modus|niklas.?modus|junge.?modus|` +
-    `${NAME_PATTERN}.?(детск|пацан|малой|ребенок|ребёнок)|` +
-    `детск.?мод|детск.?режим)\\b`,
-    'i'
-  ),
-  dolmetscher: new RegExp(
-    `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
-    `dolmetscher.?modus|übersetzer|uebersetzer|` +
-    `${NAME_PATTERN}.?(перевод|переводчик)|переводчик|режим.?перевода)\\b`,
-    'i'
-  ),
-};
-
-// ==================== PROAKTIV-INTERVALLE ====================
-
-const PROACTIVE_INTERVALS = {
-  kids: 25000,
-  party: 15000,
-  freund: 45000,
-  berater: 0,
-};
-
-function buildProactivePrompt(role) {
-  if (role === 'kids') {
-    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
-           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem – Gaming, Fußball, ' +
-           'Schule, Hobbys, Lieblingsfilm, YouTube. ' +
-           'EIN Satz, wie ein älterer Kumpel. Nicht nerven. ' +
-           'WICHTIG: Nutze NICHT dieselbe Frage wie vorher.';
-  }
-  if (role === 'party') {
-    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
-           'Sei PROAKTIV: Lockerer Spruch, Vorschlag oder Kommentar zur Umgebung. ' +
-           'KURZ und lässig, 1 Satz. Nicht aufdringlich. ' +
-           'WICHTIG: Nutze NICHT dieselbe Formulierung wie vorher.';
-  }
-  if (role === 'freund') {
-    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
-           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. ' +
-           'Ruhig, 1 kurzer Satz. ' +
-           'WICHTIG: Nutze NICHT dieselbe Frage wie vorher.';
-  }
-  return null;
-}
 
 // ==================== SPRACHREGEL ====================
 
@@ -274,6 +196,9 @@ const CONTACT_RULES = [
   '  a) Der Nutzer den kompletten Entwurf gesehen hat',
   '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
   '',
+  'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
+  '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
+  '',
   'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
   '',
   'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
@@ -289,12 +214,16 @@ const CONTACT_RULES = [
   '',
   'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
   '',
-  'Schritt 5: JETZT erst verfassen. Zeige Entwurf.',
+  'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
+  '  ⛔ Lies den Entwurf NICHT laut vor!',
+  '  Die App zeigt die Entwurf-Karte.',
+  '  Sage dem Nutzer nur KURZ: "Entwurf ist da. Schau auf den Bildschirm."',
   '',
   'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
   '',
   'Schritt 7: send_email(to, subject, body, tone)',
   '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
+  '  📎 Anhänge werden AUTOMATISCH mitgeschickt — du rufst nichts extra auf.',
   '',
   'Schritt 8: Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
   '',
@@ -313,7 +242,6 @@ const CONTACT_RULES = [
   'MEHRERE EMPFÄNGER:',
   '- "Schreib an Alex und Constantin: ..."',
   '  → resolve_recipients(["alex", "constantin"])',
-  '- Bei Gruppen mit verschiedenen Kanälen: fragen welcher Kanal',
   '',
   'NUTZER-PROFIL (lerne aus Kontext):',
   '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
@@ -334,9 +262,52 @@ const SIGNATURE_RULE = [
   '⛔ NIEMALS selbst unterschreiben.',
 ].join('\n');
 
-// ==================== BUILD PROMPT ====================
+// ==================== ANHANG-REGEL ====================
 
-function buildJonyPrompt(profile, role = 'freund') {
+const ATTACHMENT_RULE = [
+  '===========================================',
+  '📎 ANHANG-REGEL',
+  '===========================================',
+  '',
+  'Anhänge werden AUTOMATISCH mitgeschickt — du rufst KEIN Tool extra auf.',
+  '',
+  'WENN Anhänge bereit sind:',
+  '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
+  '- Erwähne sie im Entwurf NICHT explizit im body.',
+  '- Die App zeigt sie in der Entwurf-Karte automatisch an.',
+  '',
+  'Der Nutzer kann JEDERZEIT einen Anhang hinzufügen:',
+  '- Er klickt auf den 📎-Button in der Entwurf-Karte.',
+  '- Oder sagt "Ich füge jetzt einen Anhang hinzu".',
+  '- Du wirst darüber informiert mit einer System-Nachricht.',
+].join('\n');
+
+// ==================== ENTWURF-REGEL ====================
+
+const DRAFT_RULE = [
+  '===========================================',
+  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
+  '===========================================',
+  '',
+  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
+  '',
+  '⛔ LIES DEN ENTWURF NIEMALS LAUT VOR!',
+  '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Sprache.',
+  '',
+  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
+  'Du sagst dem Nutzer nur EINEN kurzen Satz wie:',
+  '- "Entwurf ist da. Schau auf den Bildschirm."',
+  '- "Hab einen Entwurf erstellt."',
+  '',
+  'NACH dem show_draft-Aufruf:',
+  '- WARTE auf "ja" / "ok" / "senden"',
+  '- ODER der Nutzer klickt ✅ in der Karte (dann kommt automatisch send_email)',
+  '- ODER der Nutzer sagt "nein" / "ändern"',
+].join('\n');
+
+// ==================== BUILD JONY PROMPT ====================
+
+function buildJonyPrompt(profile, role = 'freund', attachments = []) {
   const roleData = ROLES[role] || ROLES.freund;
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
@@ -346,7 +317,6 @@ function buildJonyPrompt(profile, role = 'freund') {
   const name = profile.name || 'Nutzer';
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
-  // Standort-Zeile
   let locationLine = null;
   if (profile.current_city) {
     locationLine = 'Aktueller Standort: ' + profile.current_city;
@@ -355,7 +325,6 @@ function buildJonyPrompt(profile, role = 'freund') {
     }
   }
 
-  // Nutzer-Profil-Block
   const userProfileLines = [];
   if (profile.user_name) userProfileLines.push('Name: ' + profile.user_name);
   if (profile.user_address) userProfileLines.push('Adresse: ' + profile.user_address);
@@ -366,6 +335,14 @@ function buildJonyPrompt(profile, role = 'freund') {
   const userProfileText = userProfileLines.length > 0
     ? 'NUTZER-PROFIL:\n' + userProfileLines.join('\n')
     : null;
+
+  let attachmentNote = null;
+  if (attachments && attachments.length > 0) {
+    const lines = attachments.map(a =>
+      '  - ' + a.filename + ' (' + Math.round(a.size / 1024) + ' KB)'
+    );
+    attachmentNote = '📎 AKTUELLE ANHÄNGE: ' + attachments.length + ' Datei(en) bereit:\n' + lines.join('\n');
+  }
 
   const lines = [
     LANGUAGE_RULE,
@@ -404,14 +381,18 @@ function buildJonyPrompt(profile, role = 'freund') {
     'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
     'nutze das als location für get_weather / find_restaurants.',
     '',
+    DRAFT_RULE,
+    '',
     CONTACT_RULES,
     '',
     SIGNATURE_RULE,
     '',
+    ATTACHMENT_RULE,
+    '',
     '===========================================',
     '📧 E-MAIL-VERSAND',
     '===========================================',
-    'Tool: send_email(to, subject, body, tone)',
+    'Ablauf: show_draft(to, subject, body, tone) → Bestätigung → send_email(to, subject, body, tone)',
     '⛔ NIEMALS ohne Bestätigung senden.',
     'STANDARD "an mich" → eugen.priss@yahoo.com',
     '',
@@ -425,12 +406,17 @@ function buildJonyPrompt(profile, role = 'freund') {
     'TOOLS',
     '===========================================',
     'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'send_email, find_contact, save_contact, forget_contact, list_contacts,',
+    'find_contact, save_contact, forget_contact, list_contacts,',
     'find_group, save_group, forget_group, list_groups, resolve_recipients,',
-    'send_telegram_message, save_user_profile',
+    'save_user_profile, show_draft, send_email, send_telegram_message',
     '',
     'NIEMALS Wetter/Restaurants erfinden.'
   );
+
+  if (attachmentNote) {
+    lines.push('');
+    lines.push(attachmentNote);
+  }
 
   return lines.join('\n');
 }
@@ -503,7 +489,7 @@ function dolmetscherInstruction(active) {
 const AGENTS = {
   jony: {
     voice: 'Fenrir',
-    buildPrompt: (profile, role) => buildJonyPrompt(profile, role),
+    buildPrompt: (profile, role, attachments) => buildJonyPrompt(profile, role, attachments),
     tools: () => buildJonyTools(),
   },
   business: {
@@ -525,6 +511,20 @@ export function broadcastToClients(msg) {
     try {
       c.send(JSON.stringify(msg));
     } catch (e) {}
+  }
+}
+
+// ==================== HELPER: Attachments holen ====================
+
+async function fetchUserAttachments(userId) {
+  if (!userId) return [];
+  try {
+    const res = await fetch(SELF_URL + '/api/attachments/list/' + userId);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.attachments || [];
+  } catch (e) {
+    return [];
   }
 }
 
@@ -561,11 +561,16 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     userProfile.current_city = userProfile.hometown;
   }
 
-  console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice})...`);
+  // Aktuelle Anhänge holen
+  const currentAttachments = await fetchUserAttachments(userProfile.user_id);
+  clientWs._currentAttachments = currentAttachments;
+
+  console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice}, Anhänge: ${currentAttachments.length})...`);
 
   const systemInstruction = agentConfig.buildPrompt(
     userProfile,
-    clientWs._currentRole || 'freund'
+    clientWs._currentRole || 'freund',
+    currentAttachments
   );
 
   let session = null;
@@ -757,6 +762,73 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
   }
 }
 
+// ==================== NAME-PATTERN ====================
+
+const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
+
+const PATTERNS = {
+  business: new RegExp(
+    `\\b(${NAME_PATTERN}.?business|business.?modus|business\\s+mode|бизнес.?мод|бизнес)\\b`,
+    'i'
+  ),
+  backToJony: new RegExp(
+    `\\b(${NAME_PATTERN}.?(zur[üu]ck|freund|normal|back|обратно|вернись)|` +
+    `zur[üu]ck.*(freund|jony|johnny)|` +
+    `freund.?modus|normal.?modus|freundesmodus|` +
+    `вернись.*друг|обратно.*друг|режим.?друга)\\b`,
+    'i'
+  ),
+  party: new RegExp(
+    `\\b(${NAME_PATTERN}.?party|party.?modus|partymodus|party\\s+mode|` +
+    `${NAME_PATTERN}.?пати|пати.?мод|вечеринк)\\b`,
+    'i'
+  ),
+  berater: new RegExp(
+    `\\b(${NAME_PATTERN}.?(berater|sachlich|intellektuell)|` +
+    `berater.?modus|beratermodus|` +
+    `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
+    'i'
+  ),
+  kids: new RegExp(
+    `\\b(${NAME_PATTERN}.?(kids|niklas|kinder|kind|junge|junior|kumpel)|` +
+    `kids.?modus|kinder.?modus|niklas.?modus|junge.?modus|` +
+    `${NAME_PATTERN}.?(детск|пацан|малой|ребенок|ребёнок)|` +
+    `детск.?мод|детск.?режим)\\b`,
+    'i'
+  ),
+  dolmetscher: new RegExp(
+    `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
+    `dolmetscher.?modus|übersetzer|uebersetzer|` +
+    `${NAME_PATTERN}.?(перевод|переводчик)|переводчик|режим.?перевода)\\b`,
+    'i'
+  ),
+};
+
+// ==================== PROAKTIV-INTERVALLE ====================
+
+const PROACTIVE_INTERVALS = {
+  kids: 25000,
+  party: 15000,
+  freund: 45000,
+  berater: 0,
+};
+
+function buildProactivePrompt(role) {
+  if (role === 'kids') {
+    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
+           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem.';
+  }
+  if (role === 'party') {
+    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
+           'Sei PROAKTIV: Lockerer Spruch, 1 Satz.';
+  }
+  if (role === 'freund') {
+    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
+           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. 1 kurzer Satz.';
+  }
+  return null;
+}
+
 // ==================== TOOLS ====================
 
 function buildJonyTools() {
@@ -817,26 +889,8 @@ function buildJonyTools() {
           },
         },
         {
-          name: 'send_email',
-          description: 'Sendet eine freie E-Mail. ⛔ NIEMALS ohne Bestätigung senden. ' +
-                       'Bei "an mich" → eugen.priss@yahoo.com. ' +
-                       'Frage vorher nach Ton UND Adresse (falls unbekannt). ' +
-                       'Schreibe KEINE Signatur — der Server macht das.',
-          parameters: {
-            type: 'OBJECT',
-            properties: {
-              to: { type: 'STRING' },
-              subject: { type: 'STRING' },
-              body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur' },
-              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
-            },
-            required: ['to', 'subject', 'body', 'tone'],
-          },
-        },
-        {
           name: 'find_contact',
-          description: 'Sucht einen Kontakt im Gedächtnis. ' +
-                       'Rufe das IMMER auf, bevor du eine E-Mail an einen Namen schickst.',
+          description: 'Sucht einen Kontakt im Gedächtnis.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -925,8 +979,7 @@ function buildJonyTools() {
         },
         {
           name: 'resolve_recipients',
-          description: 'Löst mehrere Namen (Kontakte + Gruppen) zu Empfängern auf. ' +
-                       'Nutze das bei "Schreib an Alex und Constantin" oder "Schreib an meine Familie".',
+          description: 'Löst mehrere Namen (Kontakte + Gruppen) zu Empfängern auf.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -951,6 +1004,35 @@ function buildJonyTools() {
               default_email: { type: 'STRING' },
               default_tone: { type: 'STRING' },
             },
+          },
+        },
+        {
+          name: 'show_draft',
+          description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
+                       '⛔ Lies ihn NICHT laut vor. Sage nur kurz: "Entwurf ist da."',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING' },
+              subject: { type: 'STRING' },
+              body: { type: 'STRING', description: 'Nur Text der E-Mail (ohne Signatur)' },
+              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+            },
+            required: ['to', 'subject', 'body', 'tone'],
+          },
+        },
+        {
+          name: 'send_email',
+          description: 'Sendet die E-Mail NACH Bestätigung.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING' },
+              subject: { type: 'STRING' },
+              body: { type: 'STRING' },
+              tone: { type: 'STRING' },
+            },
+            required: ['to', 'subject', 'body', 'tone'],
           },
         },
       ],
@@ -990,7 +1072,7 @@ function buildBusinessTools() {
         },
         {
           name: 'send_carousel_email',
-          description: 'Sendet das Karussell per E-Mail. Frage IMMER nach Adresse UND Bestätigung.',
+          description: 'Sendet das Karussell per E-Mail.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1031,8 +1113,6 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await getUserPreferences(userProfile.user_id);
       } else if (fc.name === 'send_telegram_message') {
         result = await handleSendTelegram(fc.args.chat_id, fc.args.text);
-      } else if (fc.name === 'send_email') {
-        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile, fc.args.tone || 'persönlich');
       } else if (fc.name === 'find_contact') {
         result = await handleFindContact(userProfile.user_id, fc.args.name);
       } else if (fc.name === 'save_contact') {
@@ -1054,6 +1134,10 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         result = await handleResolveRecipients(userProfile.user_id, fc.args.names);
       } else if (fc.name === 'save_user_profile') {
         result = await handleSaveUserProfile(userProfile.user_id, fc.args);
+      } else if (fc.name === 'show_draft') {
+        result = await handleShowDraft(userProfile.user_id, fc.args.to, fc.args.subject, fc.args.body, fc.args.tone);
+      } else if (fc.name === 'send_email') {
+        result = await handleSendEmail(fc.args.to, fc.args.subject, fc.args.body, userProfile, fc.args.tone || 'persönlich');
       } else if (fc.name === 'generate_script') {
         result = await generateScriptAndSend(
           clientWs,
@@ -1097,6 +1181,46 @@ async function handleSendTelegram(chatId, text) {
   try {
     const res = await sendTelegramMessage(chatId, text);
     return { success: true, to: res.to, message: 'Nachricht gesendet.' };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleShowDraft(userId, to, subject, body, tone) {
+  try {
+    const attachments = await fetchUserAttachments(userId);
+
+    // Draft über API speichern
+    const res = await fetch(SELF_URL + '/api/draft/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        to, subject, body, tone,
+      }),
+    }).catch(() => null);
+
+    // Falls kein /api/draft/save Endpunkt existiert, zeigen wir es trotzdem per broadcast
+    // (Fallback für Voice — nutzt den /api/draft/get Endpunkt aus server.js)
+
+    broadcastToClients({
+      type: 'draft_shown',
+      draft: {
+        to, subject, body, tone,
+        attachments: attachments.map(a => ({
+          id: a.id,
+          filename: a.filename,
+          size: a.size,
+        })),
+      },
+    });
+
+    console.log(`📝 Voice-Draft angezeigt: an ${to} (${tone})`);
+
+    return {
+      success: true,
+      message: 'Entwurf wird in der App angezeigt. Warte auf Bestätigung des Nutzers.',
+    };
   } catch (e) {
     return { error: e.message };
   }
@@ -1349,7 +1473,7 @@ async function generateScriptAndSend(clientWs, userId, topic, audience, focus, s
     'Antworte NUR mit einem JSON-Objekt:',
     '{',
     '  "slides": [',
-    '    {"slide": 1, "title": "Kurzer Hook-Titel (max 5 Wörter)", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}',
+    '    {"slide": 1, "title": "Kurzer Hook", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}',
     '  ]',
     '}',
     '',
@@ -1511,6 +1635,7 @@ export function setupGeminiWebSocket(server) {
     clientWs._lastImageTime = 0;
     clientWs._dolmetscherActive = false;
     clientWs._uiMode = 'voice';
+    clientWs._currentAttachments = [];
 
     clientWs.on('message', async (data) => {
       try {
@@ -1564,6 +1689,80 @@ export function setupGeminiWebSocket(server) {
             if (!userProfile.current_city) {
               userProfile.current_city = userProfile.hometown;
             }
+          }
+          return;
+        }
+
+        // ⬇️ NEU: App meldet neuen Anhang
+        if (msg.type === 'attachment_added') {
+          console.log(`📎 Anhang-Event von App: ${msg.filename || 'unbekannt'}`);
+
+          // Anhänge frisch holen
+          const freshAttachments = await fetchUserAttachments(userProfile.user_id);
+          clientWs._currentAttachments = freshAttachments;
+
+          if (clientWs._session && freshAttachments.length > 0) {
+            const names = freshAttachments.map(a => a.filename).join(', ');
+            try {
+              clientWs._session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: '[SYSTEM] Anhänge bereit: ' + names + '. Du kannst sie bei show_draft/send_email nutzen.' }],
+                }],
+                turnComplete: true,
+              });
+            } catch (e) {
+              console.error('❌ Anhang-Info an Gemini Fehler:', e.message);
+            }
+          }
+
+          clientWs.send(JSON.stringify({
+            type: 'attachment_ack',
+            count: freshAttachments.length,
+            filenames: freshAttachments.map(a => a.filename),
+          }));
+          return;
+        }
+
+        // ⬇️ NEU: App meldet Anhang entfernt
+        if (msg.type === 'attachment_removed') {
+          const freshAttachments = await fetchUserAttachments(userProfile.user_id);
+          clientWs._currentAttachments = freshAttachments;
+          console.log(`📎 Anhang entfernt. Jetzt: ${freshAttachments.length}`);
+          return;
+        }
+
+        // ⬇️ NEU: App bestätigt Draft (klick auf ✅)
+        if (msg.type === 'draft_confirm') {
+          console.log(`✅ Draft bestätigt von App`);
+          // Sende internen Trigger an Gemini → send_email aufrufen
+          if (clientWs._session) {
+            try {
+              clientWs._session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: '[SYSTEM] Der Nutzer hat den Entwurf in der Karte bestätigt. Rufe jetzt send_email auf mit den gleichen Werten wie show_draft.' }],
+                }],
+                turnComplete: true,
+              });
+            } catch (e) {}
+          }
+          return;
+        }
+
+        // ⬇️ NEU: App bricht Draft ab (klick auf ❌)
+        if (msg.type === 'draft_cancel') {
+          console.log(`❌ Draft abgebrochen von App`);
+          if (clientWs._session) {
+            try {
+              clientWs._session.sendClientContent({
+                turns: [{
+                  role: 'user',
+                  parts: [{ text: '[SYSTEM] Der Nutzer hat den Entwurf verworfen. Frage was stattdessen.' }],
+                }],
+                turnComplete: true,
+              });
+            } catch (e) {}
           }
           return;
         }

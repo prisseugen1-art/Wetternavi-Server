@@ -573,6 +573,41 @@ app.post('/api/draft/send', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// -------- Draft speichern (für Voice-Modus) --------
+app.post('/api/draft/save', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, to, subject, body, tone } = args;
+
+    if (!user_id || !to || !subject || !body) {
+      return res.status(400).json({ error: 'user_id, to, subject, body required' });
+    }
+
+    const { setDraft } = await import('./server/chat.js');
+    const draft = setDraft(user_id, { to, subject, body, tone: tone || 'persönlich' });
+
+    broadcastToClients({
+      type: 'draft_shown',
+      draft: {
+        id: draft.id,
+        to: draft.to,
+        subject: draft.subject,
+        body: draft.body,
+        tone: draft.tone,
+        attachments: getAttachments(user_id).map(a => ({
+          id: a.id,
+          filename: a.filename,
+          size: a.size,
+        })),
+      },
+    });
+
+    res.json({ success: true, draft_id: draft.id });
+  } catch (error) {
+    console.error('❌ draft-save Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // -------- Draft abbrechen --------
 app.post('/api/draft/cancel', async (req, res) => {
