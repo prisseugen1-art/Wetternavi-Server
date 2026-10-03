@@ -45,11 +45,45 @@ async function callAppsScript(payload) {
   return data;
 }
 
+// ==================== HILFE: Betreff-Variation ====================
+
+function buildVariedSubject(topic) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+  });
+  // Leichte Variation je nach Uhrzeit — wirkt "menschlicher"
+  const hour = now.getHours();
+  const suffix = hour < 12 ? 'Morgens' : hour < 18 ? 'Tagsüber' : 'Abends';
+  return `Karussell: ${topic} (${dateStr}, ${suffix})`;
+}
+
+// ==================== HILFE: Signatur mit Variation ====================
+
+function buildSignature() {
+  const now = new Date();
+  const fullTime = now.toLocaleString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const requestId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+  return `\n\n---\nGesendet: ${fullTime}\nAnfrage-ID: ${requestId}`;
+}
+
 // ==================== SIMPLE EMAIL ====================
 
 export async function sendEmail(to, subject, body) {
   console.log(`📧 Sende E-Mail an ${to}: "${subject}"`);
-  const result = await callAppsScript({ to, subject, body });
+  const uniqueBody = body + buildSignature();
+  const result = await callAppsScript({
+    to,
+    subject,
+    body: uniqueBody,
+  });
   console.log(`✅ E-Mail gesendet an ${to}`);
   return { success: true, to, result };
 }
@@ -91,11 +125,13 @@ export async function sendCarouselByEmail(to, carousel) {
       lines.push(`slide_${img.n}.jpg (~${Math.round(img.data.length / 1024)} KB)`);
     }
   }
+
   lines.push('');
   lines.push('Viel Erfolg! 🚀');
   lines.push('— Jony');
 
-  const body = lines.join('\n');
+  // Signatur mit Zeitstempel + Anfrage-ID
+  const body = lines.join('\n') + buildSignature();
 
   // ---- Anhänge ----
   const attachments = images.map((img) => ({
@@ -104,12 +140,16 @@ export async function sendCarouselByEmail(to, carousel) {
     content: img.data, // Base64
   }));
 
+  // ---- Betreff mit Variation ----
+  const subject = buildVariedSubject(topic);
+
   console.log(`📧 Sende Karussell "${topic}" an ${to}`);
+  console.log(`   Betreff: ${subject}`);
   console.log(`   ${attachments.length} Bilder`);
 
   const result = await callAppsScript({
     to,
-    subject: `Karussell: ${topic}`,
+    subject,
     body,
     attachments,
   });
