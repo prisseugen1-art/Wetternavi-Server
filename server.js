@@ -146,7 +146,6 @@ function normalizeContactName(name) {
   return String(name).toLowerCase().trim().replace(/\s+/g, '_');
 }
 
-// Findet einen Kontakt in user_data (auch über Aliase)
 function findContactInData(userData, searchName) {
   const normalized = normalizeContactName(searchName);
 
@@ -156,7 +155,7 @@ function findContactInData(userData, searchName) {
     return buildContactFromData(userData, normalized);
   }
 
-  // 2. Über Aliase suchen
+  // 2. Über Aliase
   for (const key of Object.keys(userData)) {
     if (!key.startsWith('contact_') || !key.endsWith('_aliases')) continue;
     const aliases = String(userData[key] || '').toLowerCase();
@@ -167,7 +166,7 @@ function findContactInData(userData, searchName) {
     }
   }
 
-  // 3. Über Relation suchen ("meine Schwester")
+  // 3. Über Relation
   const relationSearch = searchName.toLowerCase()
     .replace(/^(meine|mein|meiner)\s+/, '')
     .trim();
@@ -194,6 +193,30 @@ function buildContactFromData(userData, contactName) {
     relation: userData[prefix + 'relation'] || null,
     birthday: userData[prefix + 'birthday'] || null,
     tone: userData[prefix + 'tone'] || null,
+    notes: userData[prefix + 'notes'] || null,
+    learned: userData[prefix + 'learned'] || null,
+  };
+}
+
+// ⬇️ NEU: Gruppen-Hilfsfunktionen
+function findGroupInData(userData, searchName) {
+  const normalized = normalizeContactName(searchName);
+  const directKey = 'group_' + normalized + '_members';
+
+  if (userData[directKey]) {
+    return buildGroupFromData(userData, normalized);
+  }
+  return null;
+}
+
+function buildGroupFromData(userData, groupName) {
+  const prefix = 'group_' + groupName + '_';
+  const membersRaw = userData[prefix + 'members'] || '';
+  const members = membersRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+  return {
+    name: groupName,
+    members: members,
     notes: userData[prefix + 'notes'] || null,
     learned: userData[prefix + 'learned'] || null,
   };
@@ -345,7 +368,6 @@ app.get('/api/profile/:userId', async (req, res) => {
 
 // ========== KONTAKT-API ==========
 
-// -------- Kontakt suchen --------
 app.post('/api/contacts/find', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -371,7 +393,6 @@ app.post('/api/contacts/find', async (req, res) => {
   }
 });
 
-// -------- Kontakt speichern --------
 app.post('/api/contacts/save', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -399,7 +420,6 @@ app.post('/api/contacts/save', async (req, res) => {
       return res.status(400).json({ error: 'Keine Felder zum Speichern' });
     }
 
-    // Alle Felder in einem Rutsch in JSONB mergen
     await pool.query(`
       INSERT INTO user_data (user_id, data)
       VALUES ($1, $2::jsonb)
@@ -408,7 +428,7 @@ app.post('/api/contacts/save', async (req, res) => {
           updated_at = NOW()
     `, [user_id, JSON.stringify(updates)]);
 
-    console.log(`💾 Kontakt gespeichert: "${name}" →`, Object.keys(updates).filter(k => !k.endsWith('_learned')));
+    console.log(`💾 Kontakt gespeichert: "${name}"`);
     res.json({ success: true, name: normalized, saved_fields: Object.keys(updates) });
   } catch (error) {
     console.error('❌ save-contact Fehler:', error);
@@ -416,7 +436,6 @@ app.post('/api/contacts/save', async (req, res) => {
   }
 });
 
-// -------- Kontakt löschen --------
 app.post('/api/contacts/forget', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -429,7 +448,6 @@ app.post('/api/contacts/forget', async (req, res) => {
     const normalized = normalizeContactName(name);
     const prefix = 'contact_' + normalized + '_';
 
-    // Alle Keys mit diesem Prefix löschen
     await pool.query(`
       UPDATE user_data
       SET data = data - ARRAY(
@@ -448,13 +466,11 @@ app.post('/api/contacts/forget', async (req, res) => {
   }
 });
 
-// -------- Kontakte auflisten --------
 app.get('/api/contacts/list/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const userData = await getUserData(userId);
 
-    // Alle eindeutigen Kontakt-Namen finden
     const names = new Set();
     for (const key of Object.keys(userData)) {
       if (!key.startsWith('contact_')) continue;
@@ -479,7 +495,7 @@ app.get('/api/contacts/list/:userId', async (req, res) => {
   }
 });
 
-// -------- Mehrere Empfänger auflösen --------
+// ⬇️ ERWEITERT: resolve berücksichtigt jetzt auch Gruppen
 app.post('/api/contacts/resolve', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -492,13 +508,34 @@ app.post('/api/contacts/resolve', async (req, res) => {
     const userData = await getUserData(user_id);
     const resolved = [];
     const missing = [];
+    const seenContacts = new Set();
 
-    for (const name of names) {
-      const contact = findContactInData(userData, name);
+    for (const item of names) {
+      // Prüfe erst, ob es eine Gruppe ist
+      const group = findGroupInData(userData, item);
+      if (group && group.members.length > 0) {
+        console.log(`👥 Gruppe "${item}" → ${group.members.length} Mitglieder`);
+        for (const memberName of group.members) {
+          const member = findContactInData(userData, memberName);
+          if (member && !seenContacts.has(member.name)) {
+            seenContacts.add(member.name);
+            resolved.push({ ...member, via_group: group.name });
+          } else if (!member) {
+            missing.push(memberName + ' (in Gruppe ' + group.name + ')');
+          }
+        }
+        continue;
+      }
+
+      // Einzelner Kontakt
+      const contact = findContactInData(userData, item);
       if (contact) {
-        resolved.push(contact);
+        if (!seenContacts.has(contact.name)) {
+          seenContacts.add(contact.name);
+          resolved.push(contact);
+        }
       } else {
-        missing.push(name);
+        missing.push(item);
       }
     }
 
@@ -515,7 +552,145 @@ app.post('/api/contacts/resolve', async (req, res) => {
   }
 });
 
-// -------- Nutzer-Profil speichern (aus Kontext) --------
+// ========== GRUPPEN-API (NEU) ==========
+
+// -------- Gruppe speichern --------
+app.post('/api/groups/save', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name, members, notes } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+    if (!members) {
+      return res.status(400).json({ error: 'members required (komma-getrennt oder Array)' });
+    }
+
+    // members kann String (komma-getrennt) oder Array sein
+    let membersList;
+    if (Array.isArray(members)) {
+      membersList = members.map(m => String(m).trim()).filter(Boolean);
+    } else {
+      membersList = String(members).split(',').map(m => m.trim()).filter(Boolean);
+    }
+
+    if (membersList.length === 0) {
+      return res.status(400).json({ error: 'members list ist leer' });
+    }
+
+    const normalized = normalizeContactName(name);
+    const prefix = 'group_' + normalized + '_';
+
+    const updates = {};
+    updates[prefix + 'members'] = membersList.join(',');
+    if (notes) updates[prefix + 'notes'] = String(notes).trim();
+    updates[prefix + 'learned'] = new Date().toISOString();
+
+    await pool.query(`
+      INSERT INTO user_data (user_id, data)
+      VALUES ($1, $2::jsonb)
+      ON CONFLICT (user_id) DO UPDATE
+      SET data = user_data.data || $2::jsonb,
+          updated_at = NOW()
+    `, [user_id, JSON.stringify(updates)]);
+
+    console.log(`👥 Gruppe gespeichert: "${name}" → [${membersList.join(', ')}]`);
+    res.json({ success: true, name: normalized, members: membersList });
+  } catch (error) {
+    console.error('❌ save-group Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Gruppe suchen --------
+app.post('/api/groups/find', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+
+    const userData = await getUserData(user_id);
+    const group = findGroupInData(userData, name);
+
+    if (group) {
+      console.log(`👥 Gruppe gefunden: "${name}"`);
+      return res.json({ found: true, group });
+    }
+
+    console.log(`👥 Gruppe NICHT gefunden: "${name}"`);
+    return res.json({ found: false, name });
+  } catch (error) {
+    console.error('❌ find-group Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Gruppe löschen --------
+app.post('/api/groups/forget', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, name } = args;
+
+    if (!user_id || !name) {
+      return res.status(400).json({ error: 'user_id and name required' });
+    }
+
+    const normalized = normalizeContactName(name);
+    const prefix = 'group_' + normalized + '_';
+
+    await pool.query(`
+      UPDATE user_data
+      SET data = data - ARRAY(
+        SELECT jsonb_object_keys(data)
+        WHERE jsonb_object_keys(data) LIKE $2
+      ),
+      updated_at = NOW()
+      WHERE user_id = $1
+    `, [user_id, prefix + '%']);
+
+    console.log(`🗑️ Gruppe gelöscht: "${name}"`);
+    res.json({ success: true, forgotten: normalized });
+  } catch (error) {
+    console.error('❌ forget-group Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Alle Gruppen auflisten --------
+app.get('/api/groups/list/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const userData = await getUserData(userId);
+
+    const names = new Set();
+    for (const key of Object.keys(userData)) {
+      if (!key.startsWith('group_')) continue;
+      const match = key.match(/^group_(.+?)_(members|notes|learned)$/);
+      if (match) names.add(match[1]);
+    }
+
+    const groups = [];
+    for (const name of names) {
+      const group = buildGroupFromData(userData, name);
+      if (group.members.length > 0) {
+        groups.push(group);
+      }
+    }
+
+    groups.sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ count: groups.length, groups });
+  } catch (error) {
+    console.error('❌ list-groups Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Nutzer-Profil speichern --------
 app.post('/api/user-profile/save', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -784,17 +959,50 @@ app.post('/api/send-email', async (req, res) => {
       return res.status(400).json({ error: 'to, subject, body required' });
     }
 
-    const finalTone = tone || 'persönlich';
-    console.log(`📧 Freie E-Mail Anfrage: an ${to}, Betreff: "${subject}", Ton: ${finalTone}`);
-    const result = await sendEmail(to, subject, body, profile || {}, finalTone);
+    // ⬇️ NEU: Komma-getrennte Empfänger splitten
+    const recipients = String(to)
+      .split(',')
+      .map(e => e.trim())
+      .filter(Boolean);
 
-    res.json({ success: true, ...result });
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: 'keine gültigen Empfänger' });
+    }
+
+    const finalTone = tone || 'persönlich';
+    console.log(`📧 Sende an ${recipients.length} Empfänger: ${recipients.join(', ')} (Ton: ${finalTone})`);
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = recipients[i];
+      try {
+        await sendEmail(recipient, subject, body, profile || {}, finalTone);
+        results.push({ to: recipient, status: 'ok' });
+      } catch (e) {
+        console.error(`❌ Fehler bei ${recipient}:`, e.message);
+        errors.push({ to: recipient, error: e.message });
+      }
+
+      // ⬇️ 800ms Pause zwischen Empfängern (Apps Script Rate-Limit)
+      if (i < recipients.length - 1) {
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+
+    res.json({
+      success: errors.length === 0,
+      sent: results.length,
+      failed: errors.length,
+      results,
+      errors,
+    });
   } catch (error) {
     console.error('❌ send-email Fehler:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ========== TELEGRAM ==========
 

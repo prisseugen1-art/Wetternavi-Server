@@ -62,24 +62,56 @@ export function initEmail() {
 async function callAppsScript(payload) {
   if (!initialized) throw new Error('E-Mail-Service nicht initialisiert');
 
-  const response = await fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      secret: APPS_SCRIPT_SECRET,
-      ...payload,
-    }),
-    redirect: 'follow',
-  });
+  const maxAttempts = 3;
+  let lastError = null;
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error('Apps Script HTTP ' + response.status + ': ' + text.substring(0, 200));
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: APPS_SCRIPT_SECRET,
+          ...payload,
+        }),
+        redirect: 'follow',
+      });
+
+      // 404 / 5xx → Retry
+      if (response.status === 404 || response.status >= 500) {
+        const text = await response.text();
+        lastError = new Error('Apps Script HTTP ' + response.status + ': ' + text.substring(0, 100));
+
+        if (attempt < maxAttempts) {
+          const wait = 1500 * attempt; // 1.5s, 3s
+          console.log(`   ⏳ Apps Script ${response.status}, Retry in ${wait}ms...`);
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        throw lastError;
+      }
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error('Apps Script HTTP ' + response.status + ': ' + text.substring(0, 200));
+      }
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxAttempts && (e.message?.includes('fetch') || e.message?.includes('network'))) {
+        const wait = 1500 * attempt;
+        console.log(`   ⏳ Netzwerkfehler, Retry in ${wait}ms...`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      if (attempt === maxAttempts) throw e;
+    }
   }
 
-  const data = await response.json();
-  if (data.error) throw new Error(data.error);
-  return data;
+  throw lastError || new Error('Apps Script Aufruf fehlgeschlagen');
 }
 
 // ==================== SIMPLE EMAIL ====================
