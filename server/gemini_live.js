@@ -40,71 +40,30 @@ function isHereKeyword(loc) {
 
 // ==================== TON-SYSTEM ====================
 
-const TONE_RULES = `
-===========================================
-🎭 TON-SYSTEM (SEHR WICHTIG)
-===========================================
-
-Beim Verfassen von E-Mails wählst du IMMER einen Ton:
-
-VERFÜGBARE TÖNE:
-- "formell"     → Behörden, Firmen, unbekannte Erwachsene
-- "persönlich"  → Freunde, Familie, bekannte Erwachsene
-- "locker"      → enge Freunde, Kinder, Familie (informell)
-
-═══════════════════════════════════════════
-A) NEUER KONTAKT (nicht gespeichert)
-═══════════════════════════════════════════
-
-Wenn du an jemanden schreibst, den du NICHT kennst:
-→ FRAGE zuerst: "Formell, persönlich oder locker?"
-
-═══════════════════════════════════════════
-B) BEKANNTER KONTAKT (gespeichert)
-═══════════════════════════════════════════
-
-Wenn der Kontakt einen Ton gespeichert hat:
-→ KEIN Nachfragen
-→ Nutze den gespeicherten Ton
-
-═══════════════════════════════════════════
-C) BEHÖRDEN / ÄMTER (Keyword)
-═══════════════════════════════════════════
-
-Wenn der Empfänger eine Behörde ist:
-→ IMMER automatisch "formell"
-→ KEIN Nachfragen
-
-KEYWORDS: "finanzamt", "amt", "behörde", "rathaus", "polizei", "gericht",
-"krankenkasse", "versicherung", "standesamt", "bürgeramt", "ordnungsamt",
-"gesundheitsamt", "arbeitsagentur", "jobcenter", "sozialamt", "jugendamt",
-"bauamt", "gewerbeamt"
-
-═══════════════════════════════════════════
-D) TON-EIGENSCHAFTEN
-═══════════════════════════════════════════
-
-FORMELL:
-- Anrede: "Sehr geehrte Damen und Herren," oder "Sehr geehrte Frau X,"
-- Gruß: "Mit freundlichen Grüßen"
-- Siezen, höflich, sachlich, keine Emojis
-
-PERSÖNLICH:
-- Anrede: "Hallo Alex," oder "Hallo Alex!"
-- Gruß: "Viele Grüße" oder "Liebe Grüße"
-- Freundlich, warm, Emojis sparsam
-
-LOCKER:
-- Anrede: "Hey Alex," oder "Hi"
-- Gruß: "LG" oder "Bis dann"
-- Duzen, kurz, direkt, Emojis ok
-
-═══════════════════════════════════════════
-E) TON-WECHSEL
-═══════════════════════════════════════════
-
-Nur auf explizite Aufforderung ("Schreib formeller" / "lockerer").
-`;
+const TONE_RULES = [
+  '===========================================',
+  '🎭 TON-SYSTEM (SEHR WICHTIG)',
+  '===========================================',
+  '',
+  'Beim Verfassen von E-Mails wählst du IMMER einen Ton:',
+  '',
+  'VERFÜGBARE TÖNE:',
+  '- "formell"     → Behörden, Firmen, unbekannte Erwachsene',
+  '- "persönlich"  → Freunde, Familie, bekannte Erwachsene',
+  '- "locker"      → enge Freunde, Kinder, Familie (informell)',
+  '',
+  'A) NEUER KONTAKT: → Frage "Formell, persönlich oder locker?"',
+  'B) BEKANNTER KONTAKT: → Kein Nachfragen, nutze gespeicherten Ton',
+  'C) BEHÖRDEN (finanzamt, amt, behörde, rathaus, polizei, gericht,',
+  '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
+  '   → Automatisch formell, kein Nachfragen',
+  'D) TON-WECHSEL nur auf explizite Aufforderung',
+  '',
+  'FORMELL: Anrede "Sehr geehrte Damen und Herren,", Gruß "Mit freundlichen Grüßen", Siezen',
+  'PERSÖNLICH: Anrede "Hallo Alex,", Gruß "Viele Grüße", freundlich warm',
+  'LOCKER: Anrede "Hey Alex,", Gruß "LG" oder "Bis dann", duzen',
+  '',
+].join('\n');
 
 // ==================== NAME-PATTERN ====================
 
@@ -182,70 +141,67 @@ function buildProactivePrompt(role) {
 
 // ==================== SPRACHREGEL ====================
 
-const LANGUAGE_RULE = `
-===========================================
-SPRACHREGEL
-===========================================
-
-Du sprichst AUSSCHLIESSLICH zwei Sprachen:
-- DEUTSCH
-- RUSSISCH
-
-Wenn der Nutzer Deutsch spricht → Deutsch.
-Wenn der Nutzer Russisch spricht → Russisch.
-
-Wenn der Nutzer eine ANDERE Sprache spricht oder nur Wortfetzen:
-→ REAGIERE NICHT mit "Bitte Deutsch oder Russisch".
-→ Gehe einfach auf DEUTSCH normal weiter.
-→ KEINE Sprach-Belehrung.
-
-VERBOTEN (außer im Dolmetscher-Modus):
-- Spanisch, Englisch, jede andere Sprache
-
-AUSNAHME: Dolmetscher-Modus (nur auf expliziten Befehl)
-`;
+const LANGUAGE_RULE = [
+  '===========================================',
+  'SPRACHREGEL',
+  '===========================================',
+  '',
+  'Du sprichst AUSSCHLIESSLICH zwei Sprachen:',
+  '- DEUTSCH',
+  '- RUSSISCH',
+  '',
+  'Wenn der Nutzer Deutsch spricht → Deutsch.',
+  'Wenn der Nutzer Russisch spricht → Russisch.',
+  '',
+  'Wenn der Nutzer eine ANDERE Sprache spricht oder nur Wortfetzen:',
+  '→ REAGIERE NICHT mit "Bitte Deutsch oder Russisch".',
+  '→ Gehe einfach auf DEUTSCH normal weiter.',
+  '→ KEINE Sprach-Belehrung.',
+  '',
+  'VERBOTEN (außer im Dolmetscher-Modus):',
+  '- Spanisch, Englisch, jede andere Sprache',
+  '',
+  'AUSNAHME: Dolmetscher-Modus (nur auf expliziten Befehl)',
+  '',
+].join('\n');
 
 // ==================== ANTI-WIEDERHOLUNGS-REGEL ====================
 
-const ANTI_REPETITION = `
-===========================================
-🚨 ANTI-WIEDERHOLUNGS-REGEL (SEHR WICHTIG)
-===========================================
-
-Du bist KEIN Roboter. Du bist KEIN Assistent mit Standardsätzen.
-Ein echter Freund wiederholt sich NICHT. Niemals.
-
-VERBOTEN:
-- Immer dieselbe Begrüßung ("Hallo Jackson, wie geht's dir?")
-- Immer dieselbe Location-Frage ("Wie läuft's in Bad Griesbach?")
-- Immer dieselbe Verabschiedung
-- Immer dasselbe "Schön von dir zu hören"
-- Immer dasselbe "Wie kann ich dir helfen?"
-- Immer dieselbe Rückfrage ("Erzähl mir mehr!")
-
-REGELN:
-1. Wenn du begrüßt: Wähle eine ANDERE Begrüßung als beim letzten Mal.
-2. Nutze NICHT automatisch den Namen "Jackson" / "Eugen" – nur ab und zu.
-3. Erwähne NICHT automatisch den Standort – nur wenn's passt.
-4. Variiere Satzlängen: Mal 3 Wörter, mal 15. Nicht immer gleich.
-5. Variiere Themen: Mal Familie, mal Hobby, mal Wetter, mal Alltag.
-6. Wenn du nichts Cooles zu sagen hast: Sag einfach kurz was Nettes.
-
-BEGRÜSSUNGS-BIBLIOTHEK (wähle zufällig, variiere):
-- "Hey." / "Na?" / "Servus!" / "Ah, da bist du ja."
-- "Moin." / "Endlich!" / "Biste wieder da?" / "Na, alles fit?"
-- "Grüß dich." / "Was geht?" / "Da isser ja." / "Hi."
-- "Na, wie schaut's aus?" / "Biste gut drauf heute?"
-- "Was gibt's Neues?" / "Erzähl mal." / "Na, was steht an?"
-- ODER ERFINDE SELBST WAS NEUES.
-
-Variiere auch:
-- Reaktionen: "Echt?" / "Aha." / "Interessant." / "Sag an!" / "Hmm." / "Ok."
-- Nachfragen: "Und dann?" / "Wie war das?" / "Was hat er gesagt?" / "Warum das?"
-- Kommentare: "Ok, verstehe." / "Alles klar." / "Krass." / "Nicht schlecht."
-
-WENN du dich wiederholst, ist das ein FEHLER.
-`;
+const ANTI_REPETITION = [
+  '===========================================',
+  '🚨 ANTI-WIEDERHOLUNGS-REGEL (SEHR WICHTIG)',
+  '===========================================',
+  '',
+  'Du bist KEIN Roboter. Du bist KEIN Assistent mit Standardsätzen.',
+  'Ein echter Freund wiederholt sich NICHT. Niemals.',
+  '',
+  'VERBOTEN:',
+  '- Immer dieselbe Begrüßung ("Hallo Jackson, wie geht\'s dir?")',
+  '- Immer dieselbe Location-Frage ("Wie läuft\'s in Bad Griesbach?")',
+  '- Immer dieselbe Verabschiedung',
+  '- Immer dasselbe "Schön von dir zu hören"',
+  '- Immer dasselbe "Wie kann ich dir helfen?"',
+  '- Immer dieselbe Rückfrage ("Erzähl mir mehr!")',
+  '',
+  'REGELN:',
+  '1. Wenn du begrüßt: Wähle eine ANDERE Begrüßung als beim letzten Mal.',
+  '2. Nutze NICHT automatisch den Namen "Jackson" / "Eugen" – nur ab und zu.',
+  '3. Erwähne NICHT automatisch den Standort – nur wenn\'s passt.',
+  '4. Variiere Satzlängen: Mal 3 Wörter, mal 15. Nicht immer gleich.',
+  '5. Variiere Themen: Mal Familie, mal Hobby, mal Wetter, mal Alltag.',
+  '6. Wenn du nichts Cooles zu sagen hast: Sag einfach kurz was Nettes.',
+  '',
+  'BEGRÜSSUNGS-BIBLIOTHEK (wähle zufällig, variiere):',
+  '- "Hey." / "Na?" / "Servus!" / "Ah, da bist du ja."',
+  '- "Moin." / "Endlich!" / "Biste wieder da?" / "Na, alles fit?"',
+  '- "Grüß dich." / "Was geht?" / "Da isser ja." / "Hi."',
+  '- "Na, wie schaut\'s aus?" / "Biste gut drauf heute?"',
+  '- "Was gibt\'s Neues?" / "Erzähl mal." / "Na, was steht an?"',
+  '- ODER ERFINDE SELBST WAS NEUES.',
+  '',
+  'WENN du dich wiederholst, ist das ein FEHLER.',
+  '',
+].join('\n');
 
 // ==================== KONTEXT-BEWUSSTSEIN ====================
 
@@ -268,106 +224,84 @@ function getTimeContext() {
 const ROLES = {
   freund: {
     name: 'Freund',
-    prompt: `Du bist im FREUND-MODUS – Standard.
-
-WARME PERSÖNLICHKEIT:
-- Sei wie ein guter, alter Freund.
-- Sprich aus dem Bauch, nicht aus dem Skript.
-- Sei manchmal still, manchmal neugierig, manchmal nachdenklich.
-- Antworte in 1-3 Sätzen – variiere.
-
-WAS DU TUST:
-- Stell manchmal eine Frage, manchmal nur einen Kommentar.
-- Greif auf Erinnerungen zurück ("Letztes Mal hast du von X erzählt...").
-- Bring mal einen Witz, mal eine Beobachtung, mal eine ehrliche Meinung.
-- Wenn nichts zu sagen: sag einfach nur "Mhm." oder "Ok."
-
-WAS DU NICHT TUST:
-- Nicht immer dieselbe Frage.
-- Nicht immer "Wie geht's dir?".
-- Nicht jedes Mal den Namen sagen.`,
+    prompt: [
+      'Du bist im FREUND-MODUS – Standard.',
+      '',
+      'WARME PERSÖNLICHKEIT:',
+      '- Sei wie ein guter, alter Freund.',
+      '- Sprich aus dem Bauch, nicht aus dem Skript.',
+      '- Sei manchmal still, manchmal neugierig, manchmal nachdenklich.',
+      '- Antworte in 1-3 Sätzen – variiere.',
+      '',
+      'WAS DU TUST:',
+      '- Stell manchmal eine Frage, manchmal nur einen Kommentar.',
+      '- Greif auf Erinnerungen zurück.',
+      '- Bring mal einen Witz, mal eine Beobachtung, mal eine ehrliche Meinung.',
+      '',
+      'WAS DU NICHT TUST:',
+      '- Nicht immer dieselbe Frage.',
+      '- Nicht immer "Wie geht\'s dir?".',
+      '- Nicht jedes Mal den Namen sagen.',
+    ].join('\n'),
   },
   party: {
     name: 'Party',
-    prompt: `Du bist im PARTY-MODUS.
-- Sprich locker, jugendlich, mit Humor und Slang.
-- Du kennst die Hobbys der Kinder (Konstantin, Niklas).
-- Sei der coole Kumpel.
-- Keine persönlichen Daten von Eugen ohne OK.
-- Aktiv, aber nicht aufdringlich.
-- Wenn die Gruppe redet: SEI STILL.
-- Nutze NICHT immer dieselben Sprüche.
-- Wenn du mal keinen coolen Spruch hast: lass es einfach.`,
+    prompt: [
+      'Du bist im PARTY-MODUS.',
+      '- Sprich locker, jugendlich, mit Humor und Slang.',
+      '- Du kennst die Hobbys der Kinder (Konstantin, Niklas).',
+      '- Sei der coole Kumpel.',
+      '- Keine persönlichen Daten von Eugen ohne OK.',
+      '- Aktiv, aber nicht aufdringlich.',
+    ].join('\n'),
   },
   berater: {
     name: 'Berater',
-    prompt: `Du bist im BERATER-MODUS.
-- Sprich sachlich, präzise, ruhig.
-- Strukturiere Antworten (aber variiere die Struktur).
-- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.
-- Antworte in 2-4 Sätzen.
-- NICHT immer "Erstens... zweitens...". Variiere.
-- Nicht immer "Als Berater würde ich sagen..." – sag es einfach.`,
+    prompt: [
+      'Du bist im BERATER-MODUS.',
+      '- Sprich sachlich, präzise, ruhig.',
+      '- Strukturiere Antworten (aber variiere die Struktur).',
+      '- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.',
+      '- Antworte in 2-4 Sätzen.',
+    ].join('\n'),
   },
   kids: {
     name: 'Kids',
-    prompt: `Du bist im KIDS-MODUS – für Kinder (ca. 8-14 Jahre).
-
-WICHTIGSTE REGEL: Behandle Kinder wie COOLE KUMPELS, nicht wie Babys.
-
-DEIN TON:
-- Locker, entspannt, freundlich.
-- Wie ein älterer Cousin (14-16), nicht wie ein Erwachsener.
-- NIE herablassend.
-- NIE übertrieben.
-- NIE peinlich.
-- KEIN Smalltalk über Schule als Erstes.
-
-WAS DU MACHST:
-- Sprich über COOLE Themen: Gaming, Fußball, YouTube, Filme,
-  coole Fakten (Weltraum, Dinosaurier, Technik), Sport, Musik, Tiere.
-- Erzähle coole FUN-FACTS, wenn's passt.
-- Frag nach Interessen.
-- Hör ZU wenn er erzählt.
-- Wenn er was Cooles erzählt: zeig Begeisterung.
-
-WAS DU NICHT MACHST:
-- Keine Belehrungen, keine Vorträge.
-- Keine peinlichen Erwachsenen-Floskeln.
-- Nicht über Eugen lästern.
-- NICHT immer dieselbe Frage.
-
-ÜBER NIKLAS:
-- Er ist 11 (wird im Dezember 12).
-- Er spielt Fußball (mit Papa).
-- Er ist stark in Mathe.
-- Sein Bruder Konstantin ist über 18.
-
-EINSTIEG (nur EINMAL, dann nie wieder):
-"Heeey, du musst Niklas sein! Ich hab schon viel von dir gehört."
-
-Antworte in 1-2 Sätzen. Kurz, cool, echt.
-
-GEDÄCHTNIS (SEHR WICHTIG):
-Wenn Niklas etwas über sich erzählt, SPEICHERE es SOFORT mit save_user_preference:
-- Lieblingsspiel → key: "niklas_game"
-- Lieblingsverein → key: "niklas_team"
-- Hobby → key: "niklas_hobby"
-- Schule → key: "niklas_school_likes"
-- Freunde → key: "niklas_friends"
-- Sonstiges → key: "niklas_<thema>"
-
-REGEL: SOBALD Niklas was erzählt → EINMAL save_user_preference aufrufen.
-Du kündigst das NICHT an.`,
+    prompt: [
+      'Du bist im KIDS-MODUS – für Kinder (ca. 8-14 Jahre).',
+      '',
+      'WICHTIGSTE REGEL: Behandle Kinder wie COOLE KUMPELS, nicht wie Babys.',
+      '',
+      'DEIN TON:',
+      '- Locker, entspannt, freundlich.',
+      '- Wie ein älterer Cousin (14-16), nicht wie ein Erwachsener.',
+      '- NIE herablassend.',
+      '- KEIN Smalltalk über Schule als Erstes.',
+      '',
+      'WAS DU MACHST:',
+      '- Sprich über COOLE Themen: Gaming, Fußball, YouTube, coole Fakten.',
+      '- Erzähle coole FUN-FACTS, wenn\'s passt.',
+      '- Hör ZU wenn er erzählt.',
+      '',
+      'ÜBER NIKLAS:',
+      '- Er ist 11 (wird im Dezember 12).',
+      '- Er spielt Fußball (mit Papa).',
+      '- Er ist stark in Mathe.',
+      '- Sein Bruder Konstantin ist über 18.',
+      '',
+      'EINSTIEG (nur EINMAL):',
+      '"Heeey, du musst Niklas sein! Ich hab schon viel von dir gehört."',
+      '',
+      'GEDÄCHTNIS: Wenn Niklas was über sich erzählt → save_user_preference (key: "niklas_<thema>").',
+    ].join('\n'),
   },
 };
 
 // ==================== JONY PROMPT ====================
 
-const JONY_BASE = `Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).
-Du bist ehrlich, warmherzig, direkt, humorvoll.
-Du bist kein Assistent, sondern ein Freund.
-Heute ist {today} ({timeContext}). Eugen ist in {hometown}.`;
+const JONY_BASE = 'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).\n' +
+  'Du bist ehrlich, warmherzig, direkt, humorvoll.\n' +
+  'Du bist kein Assistent, sondern ein Freund.';
 
 function buildJonyPrompt(profile, role = 'freund') {
   const roleData = ROLES[role] || ROLES.freund;
@@ -375,46 +309,56 @@ function buildJonyPrompt(profile, role = 'freund') {
     weekday: 'long', day: 'numeric', month: 'long',
   });
   const timeContext = getTimeContext();
-  const base = JONY_BASE
-    .replace('{today}', today)
-    .replace('{timeContext}', timeContext)
-    .replace('{hometown}', profile.hometown || 'unbekannt');
 
   const name = profile.name || 'Nutzer';
   const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
-  const locationLine = profile.current_city
-    ? `Aktueller Standort: ${profile.current_city}` +
-      (profile.current_lat != null && profile.current_lon != null
-        ? ` (GPS: ${profile.current_lat.toFixed(3)}, ${profile.current_lon.toFixed(3)})`
-        : '')
-    : null;
+  // Standort-Zeile
+  let locationLine = null;
+  if (profile.current_city) {
+    locationLine = 'Aktueller Standort: ' + profile.current_city;
+    if (profile.current_lat != null && profile.current_lon != null) {
+      locationLine += ' (GPS: ' + profile.current_lat.toFixed(3) + ', ' + profile.current_lon.toFixed(3) + ')';
+    }
+  }
 
   // Nutzer-Profil-Block
-  const userProfileBlock = [];
-  if (profile.user_name) userProfileBlock.push(`Name: ${profile.user_name}`);
-  if (profile.user_address) userProfileBlock.push(`Adresse: ${profile.user_address}`);
-  if (profile.user_birthdate) userProfileBlock.push(`Geburtsdatum: ${profile.user_birthdate}`);
-  if (profile.user_phone) userProfileBlock.push(`Telefon: ${profile.user_phone}`);
-  if (profile.user_email_default) userProfileBlock.push(`Standard-E-Mail: ${profile.user_email_default}`);
+  const userProfileLines = [];
+  if (profile.user_name) userProfileLines.push('Name: ' + profile.user_name);
+  if (profile.user_address) userProfileLines.push('Adresse: ' + profile.user_address);
+  if (profile.user_birthdate) userProfileLines.push('Geburtsdatum: ' + profile.user_birthdate);
+  if (profile.user_phone) userProfileLines.push('Telefon: ' + profile.user_phone);
+  if (profile.user_email_default) userProfileLines.push('Standard-E-Mail: ' + profile.user_email_default);
 
-  const userProfileText = userProfileBlock.length > 0
-    ? `NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails automatisch):\n${userProfileBlock.join('\n')}`
-    : '';
+  const userProfileText = userProfileLines.length > 0
+    ? 'NUTZER-PROFIL (kenne ich, nutze es bei formellen Mails):\n' + userProfileLines.join('\n')
+    : null;
 
-  return [
+  const lines = [
     LANGUAGE_RULE,
     '',
     ANTI_REPETITION,
     '',
     TONE_RULES,
     '',
-    base,
+    JONY_BASE,
     '',
+    'Heute ist ' + today + ' (' + timeContext + ').',
     'Der Nutzer heißt ' + name + nickname + '.',
     'Aber nutze seinen Namen NICHT in jeder Antwort. Nur manchmal.',
-    ...(locationLine ? ['', locationLine] : []),
-    ...(userProfileText ? ['', userProfileText] : []),
+  ];
+
+  if (locationLine) {
+    lines.push('');
+    lines.push(locationLine);
+  }
+
+  if (userProfileText) {
+    lines.push('');
+    lines.push(userProfileText);
+  }
+
+  lines.push(
     '',
     '===========================================',
     'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
@@ -428,219 +372,123 @@ function buildJonyPrompt(profile, role = 'freund') {
     'Der Server steuert Rollenwechsel.',
     '',
     '===========================================',
-    'AGENT-WECHSEL',
-    '===========================================',
-    'Der Server kann in den BUSINESS-MODUS wechseln.',
-    'Das ist NICHT deine Aufgabe.',
-    '',
-    '===========================================',
     'MODUS (NORMAL/SILENT)',
     '===========================================',
     'NORMAL: aktiv, freundlich.',
     'SILENT: aufmerksam, aber reagierst NICHT – Ausnahme "Hey Jony".',
     '',
     '===========================================',
-    'SEHEN UND HÖREN',
-    '===========================================',
-    '"Was siehst du?" → beschreibe letzten Video-Frame.',
-    '',
-    '===========================================',
-    'GEDÄCHTNIS',
-    '===========================================',
-    'get_user_preferences aufrufen bei Fragen über Nutzer.',
-    'save_user_preference (STILL) bei neuen Fakten.',
-    '',
-    '===========================================',
     'STANDORT-REGEL',
     '===========================================',
     'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
     'nutze das als location für get_weather / find_restaurants.',
-    'Der Server ersetzt "hier" automatisch durch den aktuellen Standort.',
     '',
-   ===========================================
-📇 KONTAKT-GEDÄCHTNIS — PFLICHT-ABLAUF
-===========================================
+    '===========================================',
+    '📇 KONTAKT-GEDÄCHTNIS — PFLICHT-ABLAUF',
+    '===========================================',
+    '',
+    'DU HAST EIN KONTAKT-GEDÄCHTNIS. Nutze es IMMER vor E-Mail-Versand.',
+    '',
+    '🚨 EISERNE REGELN — NIE BRECHEN 🚨',
+    '',
+    'REGEL 1: NIEMALS eine E-Mail verfassen, bevor du:',
+    '  a) Weißt welcher TON (formell/persönlich/locker)',
+    '  b) Die E-Mail-ADRESSE des Empfängers kennst',
+    '',
+    'REGEL 2: NIEMALS eine E-Mail versenden, ohne dass:',
+    '  a) Der Nutzer den kompletten Entwurf gesehen hat',
+    '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
+    '',
+    'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
+    '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
+    '',
+    'PFLICHT-ABLAUF bei "Schreib an [Name]: ...":',
+    '',
+    'Schritt 1: find_contact(name: "[name]") aufrufen',
+    '',
+    'Schritt 2: Prüfe das Ergebnis.',
+    '  - KONTAKT GEFUNDEN: → Ton + Adresse übernehmen → weiter zu Schritt 5',
+    '  - KONTAKT NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
+    '',
+    'Schritt 3: Prüfe Empfänger auf Behörden-Keyword',
+    '  (finanzamt, amt, behörde, rathaus, polizei, gericht, krankenkasse,',
+    '   versicherung, standesamt, bürgeramt, ordnungsamt)',
+    '  - BEHÖRDE ERKANNT: → Ton = formell (automatisch) → Schritt 4',
+    '  - KEINE BEHÖRDE: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
+    '',
+    'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE auf Antwort',
+    '',
+    'Schritt 5: JETZT erst verfassen — mit Ton + Adresse.',
+    '  Zeige Entwurf mit An / Betreff / Text und frage "Soll ich senden?"',
+    '',
+    'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
+    '',
+    'Schritt 7: send_email(to, subject, body) aufrufen',
+    '',
+    'Schritt 8: NACH erfolgreichem Senden — bei NEUEN Kontakten:',
+    '  Frage "Soll ich mir [Name] für zukünftige Mails merken?"',
+    '  - "Ja" → save_contact(name, email, tone, ...)',
+    '  - "Nein" → nichts speichern',
+    '',
+    '🚫 VERBOTENE MUSTER:',
+    '❌ Nicht: E-Mail-Text schreiben, obwohl Adresse unbekannt',
+    '❌ Nicht: E-Mail-Text schreiben, obwohl Ton ungeklärt',
+    '❌ Nicht: Senden ohne Bestätigung',
+    '',
+    '✅ KORREKTES BEISPIEL:',
+    'Nutzer: "Schreib eine E-Mail an Constantin, dass es ein Test ist"',
+    'Jony: (find_contact → nicht gefunden)',
+    'Jony: "Klar. Formell, persönlich oder locker?"',
+    'Nutzer: "locker"',
+    'Jony: "Wie lautet Constantins E-Mail-Adresse?"',
+    'Nutzer: "constantin@test.de"',
+    'Jony: "Soll ich so senden? An: constantin@test.de / Betreff: Test / Text: Hey Constantin, nur ein Test. LG"',
+    'Nutzer: "Ja"',
+    'Jony: (send_email) "✅ Ist raus. Soll ich mir Constantin merken?"',
+    '',
+    '📇 KONTAKT-FELDER (für save_contact):',
+    'email, telegram, phone, aliases, relation, birthday, tone, notes',
+    '',
+    'LERNE AUS KONTEXT:',
+    '"meine Schwester Angelina", "sie wohnt in Berlin", "sie hat am 7. Juli',
+    'Geburtstag" → ALLES mit save_contact speichern sobald Kontakt bestätigt.',
+    '',
+    'KONTAKT-VERWALTUNG:',
+    '- "Vergiss Alex" → forget_contact(name: "alex")',
+    '- "Welche Kontakte kenne ich?" → list_contacts()',
+    '- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")',
+    '',
+    'NUTZER-PROFIL (lerne aus Kontext):',
+    '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
+    '- "Ich wohne in ..." → save_user_profile(address: "...")',
+    '',
+    '===========================================',
+    '📧 E-MAIL-VERSAND',
+    '===========================================',
+    'Tool: send_email(to, subject, body)',
+    '⛔ NIEMALS ohne Bestätigung senden.',
+    'STANDARD "an mich" → eugen.priss@yahoo.com',
+    '',
+    '===========================================',
+    'TELEGRAM',
+    '===========================================',
+    'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
+    'Frage IMMER zuerst: "Soll ich das wirklich schicken?"',
+    '',
+    '===========================================',
+    'TOOLS',
+    '===========================================',
+    'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
+    'send_email, find_contact, save_contact, forget_contact, list_contacts,',
+    'send_telegram_message, save_user_profile',
+    '',
+    'NIEMALS Wetter/Restaurants erfinden.',
+  );
 
-Du HAST ein Kontakt-Gedächtnis. Nutze es IMMER vor E-Mail-Versand.
-
-🚨 EISERNE REGELN — NIE BRECHEN 🚨
-
-REGEL 1: NIEMALS eine E-Mail verfassen, bevor du:
-  a) Weißt welcher TON (formell/persönlich/locker)
-  b) Die E-Mail-ADRESSE des Empfängers kennst
-
-REGEL 2: NIEMALS eine E-Mail versenden, ohne dass:
-  a) Der Nutzer den kompletten Entwurf gesehen hat
-  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat
-
-REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der
-  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.
-
-═══════════════════════════════════════════
-📋 PFLICHT-ABLAUF bei "Schreib an [Name]: ..."
-═══════════════════════════════════════════
-
-Schritt 1: find_contact(name: "[name]") aufrufen
-
-Schritt 2: Prüfe das Ergebnis.
-
-  ┌─ KONTAKT GEFUNDEN ──────────────────┐
-  │ → Ton aus Kontakt übernehmen        │
-  │ → Adresse aus Kontakt übernehmen    │
-  │ → Direkt zu Schritt 5               │
-  └─────────────────────────────────────┘
-
-  ┌─ KONTAKT NICHT GEFUNDEN ────────────┐
-  │ → STOPP! Schreibe NOCH NICHTS.      │
-  │ → Gehe zu Schritt 3                 │
-  └─────────────────────────────────────┘
-
-Schritt 3: Prüfe Empfänger auf Behörden-Keyword
-  (finanzamt, amt, behörde, rathaus, polizei, gericht, krankenkasse,
-   versicherung, standesamt, bürgeramt, ordnungsamt, gesundheitsamt,
-   arbeitsagentur, jobcenter, sozialamt, jugendamt, bauamt, gewerbeamt)
-
-  ┌─ BEHÖRDE ERKANNT ────────────────────┐
-  │ Ton = "formell" (automatisch)        │
-  │ → Überspringe die Ton-Frage          │
-  │ → Weiter zu Schritt 4                │
-  └──────────────────────────────────────┘
-
-  ┌─ KEINE BEHÖRDE ──────────────────────┐
-  │ → Frage: "Formell, persönlich oder locker?" │
-  │ → WARTE auf Antwort                  │
-  │ → Weiter zu Schritt 4                │
-  └──────────────────────────────────────┘
-
-Schritt 4: Frage: "Wie lautet [Name]s E-Mail-Adresse?"
-  → WARTE auf Antwort (E-Mail-Adresse)
-  → Speichere die Adresse für diese Session
-
-Schritt 5: JETZT erst verfassen — mit Ton + Adresse
-  → Zeige Entwurf:
-     "An: [adresse]
-      Betreff: [betreff]
-      Text: [text]
-
-      Soll ich senden?"
-
-Schritt 6: WARTE auf "ja" / "ok" / "senden"
-  → NIEMALS vorher senden
-
-Schritt 7: send_email(to, subject, body) aufrufen
-
-Schritt 8: NACH erfolgreichem Senden — bei NEUEN Kontakten:
-  → Frage: "Soll ich mir [Name] für zukünftige Mails merken?"
-  → "Ja" → save_contact(name, email, tone, ...)
-  → "Nein" → nichts speichern
-
-═══════════════════════════════════════════
-🚫 VERBOTENE MUSTER — was du NIEMALS tust
-═══════════════════════════════════════════
-
-❌ Nicht: E-Mail-Text schreiben, obwohl Adresse noch nicht bekannt
-❌ Nicht: E-Mail-Text schreiben, obwohl Ton noch nicht geklärt
-❌ Nicht: Mehrere Fragen in einer Nachricht (erst Ton, DANN Adresse)
-❌ Nicht: Senden ohne Bestätigung
-❌ Nicht: Zwei Tools gleichzeitig aufrufen (find_contact UND send_email)
-
-═══════════════════════════════════════════
-✅ KORREKTES BEISPIEL
-═══════════════════════════════════════════
-
-Nutzer: "Schreib eine E-Mail an Constantin, dass es ein Test ist"
-
-Jony: (ruft find_contact("constantin") auf → nicht gefunden)
-      (STOPPT — verfasst NICHTS)
-      "Klar. Formell, persönlich oder locker?"
-
-Nutzer: "locker"
-
-Jony: "Wie lautet Constantins E-Mail-Adresse?"
-
-Nutzer: "constantin@test.de"
-
-Jony: "Soll ich das so senden?
-
-      An: constantin@test.de
-      Betreff: Test
-      Text: Hey Constantin, nur ein kurzer Test. LG"
-
-Nutzer: "Ja"
-
-Jony: (ruft send_email auf)
-      "✅ Ist raus. Soll ich mir Constantin für zukünftige Mails merken?"
-
-═══════════════════════════════════════════
-📇 KONTAKT-FELDER
-═══════════════════════════════════════════
-
-Speicherbar über save_contact:
-- email, telegram, phone
-- aliases (Alternativnamen, komma-getrennt)
-- relation (Schwester, Bruder, Chef, ...)
-- birthday (TT.MM. oder TT.MM.JJJJ)
-- tone (formell | persönlich | locker)
-- notes (freie Notizen)
-
-LERNE AUS KONTEXT (ohne explizit zu fragen):
-"meine Schwester Angelina", "sie wohnt in Berlin", "sie hat am 7. Juli
-Geburtstag" → ALLES mit save_contact speichern sobald du den Kontakt
-einmal bestätigt hast.
-
-KONTAKT-VERWALTUNG:
-- "Vergiss Alex" → forget_contact(name: "alex")
-- "Welche Kontakte kenne ich?" → list_contacts()
-- "Alex hat neue Adresse: X" → save_contact(name: "alex", email: "X")
-
-NUTZER-PROFIL (lerne aus Kontext, speichere mit save_user_profile):
-- "Ich bin Eugen Priss" → user_name
-- "Ich wohne in ..." → user_address
-- "Mein Geburtstag ist ..." → user_birthdate
+  return lines.join('\n');
+}
 
 // ==================== BUSINESS PROMPT ====================
-
-const BUSINESS_BASE = `Du bist Jony im BUSINESS-MODUS.
-Du bist Content-Stratege für Instagram-Karussells.
-Heute ist {today}.
-
-WICHTIGSTE REGEL: Du SPRICHST Skripte NIEMALS laut vor.
-Skripte werden als TEXT in der App angezeigt – nicht gesprochen.
-
-DEINE AUFGABE:
-Karussells erstellen (1-10 Slides) – aber NUR über das Tool generate_script.
-
-WORKFLOW:
-
-1. THEMENFINDUNG
-   - Frage: "Was für ein Thema?"
-   - Bei vagen Antworten: Zielgruppe, Kernaussage, Fokus klären.
-
-2. SKRIPT GENERIEREN
-   - Sage NUR: "Alles klar, ich erstelle das Skript."
-   - Rufe generate_script auf mit:
-     * topic, audience, focus, slide_count (1-10)
-   - Nach dem Tool: Sage NUR: "Skript ist da. Schau in die App."
-
-3. BILDER GENERIEREN
-   - Nutzer bestätigt → generate_image für JEDEN Slide, EINZELN.
-
-4. KARUSSELL PER E-MAIL SENDEN
-
-   ⛔ NIEMALS direkt senden. IMMER erst fragen.
-
-   Ablauf:
-   a) Nutzer will senden → Frage: "Soll ich das Karussell an [adresse] senden?"
-   b) WARTE auf "ja" / "ok" / "schick" / "los"
-   c) ERST DANN send_carousel_email(to)
-
-   Ohne Bestätigung → NICHT senden.
-
-STIL: Direkt, präzise, kurz. KEIN Smalltalk.
-Variiere auch hier: nicht immer dieselben Bestätigungen.
-
-TOOL-FEHLER:
-- Bei Fehler: NICHT wiederholen. Nutzer informieren. Warten.`;
 
 function buildBusinessPrompt(profile) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -651,23 +499,27 @@ function buildBusinessPrompt(profile) {
   return [
     LANGUAGE_RULE,
     '',
-    BUSINESS_BASE.replace('{today}', today),
+    '===========================================',
+    'BUSINESS-MODUS',
+    '===========================================',
+    'Du bist Jony im BUSINESS-MODUS. Content-Stratege für Instagram-Karussells.',
+    'Heute ist ' + today + '.',
+    '',
+    'WICHTIG: Du SPRICHST Skripte NIEMALS laut vor.',
+    '',
+    'WORKFLOW:',
+    '1. Thema klären (Zielgruppe, Fokus)',
+    '2. Sage "Alles klar, ich erstelle das Skript."',
+    '3. Rufe generate_script auf',
+    '4. Nach Tool: "Skript ist da. Schau in die App."',
+    '5. Bei "mach Bilder": generate_image für JEDEN Slide',
+    '6. Bei "schick per Mail": ERST Adresse + Bestätigung, DANN send_carousel_email',
     '',
     'Der Nutzer heißt ' + name + '.',
     '',
-    '===========================================',
-    'TOOLS',
-    '===========================================',
-    'generate_script(topic, audience, focus, slide_count)',
-    'generate_image(prompt, slide_number)',
-    'send_carousel_email(to)',
+    'TOOLS: generate_script, generate_image, send_carousel_email',
     '',
-    '===========================================',
-    'VERBOTEN',
-    '===========================================',
-    '- Skript vorlesen',
-    '- Smalltalk',
-    '- Tools nach Fehler wiederholen',
+    'VERBOTEN: Skript vorlesen, Smalltalk, Tools nach Fehler wiederholen.',
   ].join('\n');
 }
 
@@ -675,8 +527,7 @@ function buildBusinessPrompt(profile) {
 
 function modeInstruction(mode) {
   if (mode === 'silent') {
-    return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. ' +
-           'Ausnahme: "Hey Jony" → "Ja?".';
+    return '[SYSTEM-INSTRUKTION] SILENT-MODUS. Aufmerksam, aber reagiere NICHT. Ausnahme: "Hey Jony" → "Ja?".';
   }
   return '[SYSTEM-INSTRUKTION] NORMAL-MODUS. Freundlich, kurz. Variiere.';
 }
@@ -693,11 +544,11 @@ function dolmetscherInstruction(active) {
            '- Fremde Person spricht → Übersetze ins DEUTSCHE für Eugen.\n' +
            '- Eugen sagt was (Deutsch/Russisch) → Übersetze in die Zielsprache.\n' +
            '- Format: NUR die Übersetzung.\n' +
-           '- Bestätige beim Start: "Dolmetscher-Modus aktiv."\n' +
+           '- Besteätige beim Start: "Dolmetscher-Modus aktiv."\n' +
            '- Beenden mit "Jony, Dolmetscher aus".\n\n' +
            'In diesem Modus darfst du ALLE Sprachen sprechen.';
   }
-  return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet. Zurück zur Standard-Sprachregel.';
+  return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet.';
 }
 
 // ==================== AGENT-DEFINITIONEN ====================
@@ -719,7 +570,7 @@ const AGENTS = {
 
 const activeClients = new Set();
 
-// ==================== BROADCAST (für chat.js) ====================
+// ==================== BROADCAST ====================
 
 export function broadcastToClients(msg) {
   console.log(`📢 Broadcast an ${activeClients.size} Clients: ${msg.type}`);
@@ -761,7 +612,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     userProfile.current_lat = clientWs._lastLat;
     userProfile.current_lon = clientWs._lastLon;
     userProfile.current_city = userProfile.hometown;
-    console.log(`📍 Standort ins Profil: ${userProfile.current_city} (${userProfile.current_lat}, ${userProfile.current_lon})`);
   }
 
   console.log(`🔌 Verbinde zu Gemini Live (Agent: ${agentType}, Voice: ${agentConfig.voice})...`);
@@ -860,11 +710,9 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
       if (currentlyOn && isOff) {
         clientWs._dolmetscherActive = false;
         toggledDolmetscher = false;
-        console.log('🌐 Dolmetscher-Modus: AUS');
       } else if (!currentlyOn && !isOff) {
         clientWs._dolmetscherActive = true;
         toggledDolmetscher = true;
-        console.log('🌐 Dolmetscher-Modus: AN');
       }
 
       if (toggledDolmetscher !== null) {
@@ -874,27 +722,16 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
             turns: [{ role: 'user', parts: [{ text: dolmetscherInstruction(toggledDolmetscher) }] }],
             turnComplete: true,
           });
-        } catch (e) {
-          console.error('❌ Dolmetscher-Send-Fehler:', e.message);
-        }
+        } catch (e) {}
         return;
       }
     }
 
     if (agentType === 'business') {
-      if (PATTERNS.party.test(userText)) {
-        targetAgent = 'jony';
-        targetRole = 'party';
-      } else if (PATTERNS.berater.test(userText)) {
-        targetAgent = 'jony';
-        targetRole = 'berater';
-      } else if (PATTERNS.kids.test(userText)) {
-        targetAgent = 'jony';
-        targetRole = 'kids';
-      } else if (PATTERNS.backToJony.test(userText)) {
-        targetAgent = 'jony';
-        targetRole = 'freund';
-      }
+      if (PATTERNS.party.test(userText)) { targetAgent = 'jony'; targetRole = 'party'; }
+      else if (PATTERNS.berater.test(userText)) { targetAgent = 'jony'; targetRole = 'berater'; }
+      else if (PATTERNS.kids.test(userText)) { targetAgent = 'jony'; targetRole = 'kids'; }
+      else if (PATTERNS.backToJony.test(userText)) { targetAgent = 'jony'; targetRole = 'freund'; }
     } else {
       if (PATTERNS.business.test(userText)) {
         targetAgent = 'business';
@@ -907,7 +744,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     }
 
     if (targetAgent !== agentType) {
-      console.log(`🔄 Agent-Wechsel: ${agentType} → ${targetAgent} (Rolle: ${targetRole})`);
+      console.log(`🔄 Agent-Wechsel: ${agentType} → ${targetAgent}`);
       try { await clientWs._session?.close(); } catch (e) {}
       await new Promise(r => setTimeout(r, 300));
       clientWs._currentRole = targetRole;
@@ -927,9 +764,7 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
           turns: [{ role: 'user', parts: [{ text: roleSwitchInstruction(targetRole) }] }],
           turnComplete: true,
         });
-      } catch (e) {
-        console.error('❌ Rollen-Send-Fehler:', e.message);
-      }
+      } catch (e) {}
     }
 
     if (agentType === 'jony' && userProfile.user_id) {
@@ -945,7 +780,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
 
       if (mode !== current) {
         clientWs._lastMode = mode;
-        console.log(`🎭 Modus-Wechsel (Voice): ${current} → ${mode}`);
         clientWs.send(JSON.stringify({ type: 'mode', mode }));
         try {
           session.sendClientContent({
@@ -989,7 +823,7 @@ function buildJonyTools() {
             type: 'OBJECT',
             properties: {
               location: { type: 'STRING' },
-              timeframe: { type: 'STRING', description: 'aktuell, heute, morgen, 8tage' },
+              timeframe: { type: 'STRING' },
             },
             required: ['location'],
           },
@@ -1008,7 +842,7 @@ function buildJonyTools() {
         },
         {
           name: 'save_user_preference',
-          description: 'Speichert eine NEUE persönliche Info über den Nutzer.',
+          description: 'Speichert eine persönliche Info über den Nutzer.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1020,18 +854,12 @@ function buildJonyTools() {
         },
         {
           name: 'get_user_preferences',
-          description: 'Lädt ALLE gespeicherten Infos über den Nutzer.',
-          parameters: {
-            type: 'OBJECT',
-            properties: {
-              query: { type: 'STRING' },
-            },
-          },
+          description: 'Lädt alle gespeicherten Infos über den Nutzer.',
+          parameters: { type: 'OBJECT', properties: {} },
         },
         {
           name: 'send_telegram_message',
-          description: 'Sendet eine Telegram-Nachricht an einen Chat. ' +
-                       'Frage IMMER zuerst: "Soll ich das schicken?" und warte auf Bestätigung.',
+          description: 'Sendet eine Telegram-Nachricht. Frage IMMER zuerst nach Bestätigung.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1043,37 +871,34 @@ function buildJonyTools() {
         },
         {
           name: 'send_email',
-          description: 'Verfasst und sendet eine freie E-Mail. ' +
-                       'Frage IMMER zuerst: "Soll ich diese E-Mail an [Adresse] senden?" ' +
-                       'und zeige Betreff + Text. Warte auf Bestätigung. ' +
-                       'Bei "an mich" → nutze eugen.priss@yahoo.com. ' +
-                       'Wenn kein Empfänger klar → frag nach der E-Mail-Adresse.',
+          description: 'Sendet eine freie E-Mail. ⛔ NIEMALS ohne Bestätigung senden. ' +
+                       'Bei "an mich" → eugen.priss@yahoo.com. ' +
+                       'Frage vorher nach Ton UND Adresse (falls unbekannt).',
           parameters: {
             type: 'OBJECT',
             properties: {
-              to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
-              subject: { type: 'STRING', description: 'Betreff der E-Mail' },
-              body: { type: 'STRING', description: 'Inhalt der E-Mail' },
+              to: { type: 'STRING' },
+              subject: { type: 'STRING' },
+              body: { type: 'STRING' },
             },
             required: ['to', 'subject', 'body'],
           },
         },
         {
           name: 'find_contact',
-          description: 'Sucht einen Kontakt im Gedächtnis (Name oder Alias). ' +
+          description: 'Sucht einen Kontakt im Gedächtnis. ' +
                        'Rufe das IMMER auf, bevor du eine E-Mail an einen Namen schickst.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              name: { type: 'STRING', description: 'Name oder Alias (z.B. "alex", "chef")' },
+              name: { type: 'STRING' },
             },
             required: ['name'],
           },
         },
         {
           name: 'save_contact',
-          description: 'Speichert/aktualisiert einen Kontakt. ' +
-                       'Felder: email, telegram, phone, aliases, relation, birthday, tone, notes.',
+          description: 'Speichert/aktualisiert einen Kontakt.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1081,10 +906,10 @@ function buildJonyTools() {
               email: { type: 'STRING' },
               telegram: { type: 'STRING' },
               phone: { type: 'STRING' },
-              aliases: { type: 'STRING', description: 'Komma-getrennt' },
+              aliases: { type: 'STRING' },
               relation: { type: 'STRING' },
               birthday: { type: 'STRING' },
-              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+              tone: { type: 'STRING' },
               notes: { type: 'STRING' },
             },
             required: ['name'],
@@ -1092,7 +917,7 @@ function buildJonyTools() {
         },
         {
           name: 'forget_contact',
-          description: 'Löscht einen Kontakt komplett.',
+          description: 'Löscht einen Kontakt.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1103,13 +928,12 @@ function buildJonyTools() {
         },
         {
           name: 'list_contacts',
-          description: 'Listet alle gespeicherten Kontakte auf.',
+          description: 'Listet alle Kontakte auf.',
           parameters: { type: 'OBJECT', properties: {} },
         },
         {
           name: 'save_user_profile',
-          description: 'Speichert Nutzer-Profil-Daten (Name, Adresse, Geburtsdatum). ' +
-                       'Nutze es, wenn der Nutzer solche Infos über sich erzählt.',
+          description: 'Speichert Nutzer-Profil (Name, Adresse, Geburtsdatum, Telefon).',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1133,7 +957,7 @@ function buildBusinessTools() {
       functionDeclarations: [
         {
           name: 'generate_script',
-          description: 'Erstellt das Instagram-Karussell-Skript. Sage danach NUR "Skript ist da, schau in die App."',
+          description: 'Erstellt das Instagram-Karussell-Skript.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1159,12 +983,11 @@ function buildBusinessTools() {
         },
         {
           name: 'send_carousel_email',
-          description: 'Sendet das zuletzt erstellte Karussell mit allen Bildern per E-Mail. ' +
-                       'Frage IMMER zuerst nach der E-Mail-Adresse, falls nicht genannt.',
+          description: 'Sendet das Karussell per E-Mail. Frage IMMER nach Adresse UND Bestätigung.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              to: { type: 'STRING', description: 'Empfänger-E-Mail-Adresse' },
+              to: { type: 'STRING' },
             },
             required: ['to'],
           },
@@ -1186,21 +1009,13 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
       if (fc.name === 'get_weather') {
         let loc = fc.args.location;
         if (isHereKeyword(loc)) {
-          if (userProfile.current_city) {
-            loc = userProfile.current_city;
-          } else if (userProfile.hometown) {
-            loc = userProfile.hometown;
-          }
+          loc = userProfile.current_city || userProfile.hometown || loc;
         }
         result = await fetchWeather(loc, fc.args.timeframe);
       } else if (fc.name === 'find_restaurants') {
         let loc = fc.args.location;
         if (isHereKeyword(loc)) {
-          if (userProfile.current_city) {
-            loc = userProfile.current_city;
-          } else if (userProfile.hometown) {
-            loc = userProfile.hometown;
-          }
+          loc = userProfile.current_city || userProfile.hometown || loc;
         }
         result = await fetchRestaurants(loc, fc.args.cuisine);
       } else if (fc.name === 'save_user_preference') {
@@ -1259,15 +1074,13 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
   }
 }
 
-// ==================== MESSENGER + EMAIL HANDLER ====================
+// ==================== HANDLER ====================
 
 async function handleSendTelegram(chatId, text) {
   try {
     const res = await sendTelegramMessage(chatId, text);
-    console.log(`✅ Telegram gesendet an ${res.to}`);
     return { success: true, to: res.to, message: 'Nachricht gesendet.' };
   } catch (e) {
-    console.error('❌ Telegram-Send-Fehler:', e.message);
     return { error: e.message };
   }
 }
@@ -1283,10 +1096,8 @@ async function handleSendEmail(to, subject, body, profile = {}) {
       const errText = await res.text();
       throw new Error(`Server-Fehler: ${res.status} ${errText.substring(0, 100)}`);
     }
-    console.log(`✅ Freie E-Mail an ${to} gesendet: "${subject}"`);
     return { success: true, message: `E-Mail an ${to} gesendet.` };
   } catch (e) {
-    console.error('❌ send_email Fehler:', e.message);
     return { error: e.message };
   }
 }
@@ -1303,12 +1114,9 @@ async function handleSendCarouselEmail(userId, to, profile = {}) {
       message: `Karussell "${res.topic}" mit ${res.imageCount} Bildern an ${to} gesendet.`,
     };
   } catch (e) {
-    console.error('❌ E-Mail-Fehler:', e.message);
     return { error: e.message };
   }
 }
-
-// ==================== KONTAKT HANDLER ====================
 
 async function handleFindContact(userId, name) {
   try {
@@ -1320,7 +1128,6 @@ async function handleFindContact(userId, name) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('❌ find_contact:', e.message);
     return { error: e.message };
   }
 }
@@ -1335,7 +1142,6 @@ async function handleSaveContact(userId, name, fields) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('❌ save_contact:', e.message);
     return { error: e.message };
   }
 }
@@ -1350,7 +1156,6 @@ async function handleForgetContact(userId, name) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('❌ forget_contact:', e.message);
     return { error: e.message };
   }
 }
@@ -1361,7 +1166,6 @@ async function handleListContacts(userId) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('❌ list_contacts:', e.message);
     return { error: e.message };
   }
 }
@@ -1376,7 +1180,6 @@ async function handleSaveUserProfile(userId, fields) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
-    console.error('❌ save_user_profile:', e.message);
     return { error: e.message };
   }
 }
@@ -1399,8 +1202,6 @@ async function fetchWeather(location, timeframe = 'aktuell') {
     feels_like: data.current?.feels_like,
     today_min: data.today?.min,
     today_max: data.today?.max,
-    tomorrow_min: data.tomorrow?.min,
-    tomorrow_max: data.tomorrow?.max,
     tomorrow_desc: data.tomorrow?.description,
     rain_chance: data.today?.rain_chance,
   };
@@ -1450,10 +1251,7 @@ async function getUserPreferences(userId) {
 
 async function generateScriptAndSend(clientWs, userId, topic, audience, focus, slideCount) {
   console.log(`📝 Groq generiert Skript: "${topic}"`);
-
-  if (!process.env.GROQ_API_KEY) {
-    return { error: 'GROQ_API_KEY fehlt.' };
-  }
+  if (!process.env.GROQ_API_KEY) return { error: 'GROQ_API_KEY fehlt.' };
 
   const count = slideCount && slideCount >= 1 && slideCount <= 10 ? slideCount : 8;
 
@@ -1467,35 +1265,19 @@ Anzahl Slides: ${count}
 Antworte NUR mit einem JSON-Objekt:
 {
   "slides": [
-    {
-      "slide": 1,
-      "title": "Kurzer Hook-Titel (max 5 Wörter, deutsch)",
-      "body": "Erklärender Text (max 20 Wörter, deutsch)",
-      "image_prompt": "DETAILED ENGLISH IMAGE PROMPT"
-    }
+    {"slide": 1, "title": "Kurzer Hook", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}
   ]
 }
-
-REGELN FÜR image_prompt:
-Der image_prompt MUSS auf ENGLISCH sein und MINDESTENS 35-50 Wörter enthalten.
-Elemente: SUBJECT, ACTION, SETTING, LIGHTING, CAMERA, STYLE, QUALITY, MOOD.
-
-- Titel max 5 Wörter, Body max 20 Wörter (DEUTSCH)
-- Slide 1 = Hook, mittlere = Inhalt, letzter = Call-to-Action
 
 NUR das JSON.`;
 
   let lastError = null;
   for (const modelName of GROQ_FALLBACKS) {
     try {
-      console.log(`   Versuch Groq-Modell: ${modelName}`);
       const completion = await groq.chat.completions.create({
         messages: [
-          {
-            role: 'system',
-            content: 'Du erstellst Instagram-Karussell-Skripte als JSON. Antworte AUSSCHLIESSLICH mit gültigem JSON.'
-          },
-          { role: 'user', content: prompt }
+          { role: 'system', content: 'Antworte AUSSCHLIESSLICH mit gültigem JSON.' },
+          { role: 'user', content: prompt },
         ],
         model: modelName,
         temperature: 0.7,
@@ -1503,8 +1285,6 @@ NUR das JSON.`;
       });
 
       const text = completion.choices[0]?.message?.content || '';
-      console.log(`   ✅ Klappt mit: ${modelName}`);
-
       let slides = null;
       try {
         const parsed = JSON.parse(text);
@@ -1514,43 +1294,24 @@ NUR das JSON.`;
         return { error: 'JSON-Parse-Fehler: ' + e.message };
       }
 
-      if (!slides || slides.length === 0) {
-        return { error: 'Skript ist leer' };
-      }
+      if (!slides || slides.length === 0) return { error: 'Skript ist leer' };
 
-      console.log(`✅ Skript mit ${slides.length} Slides via Groq (${modelName})`);
-
-      if (userId) {
-        setScript(userId, topic, slides);
-      }
-
-      clientWs.send(JSON.stringify({
-        type: 'script',
-        topic: topic,
-        slides: slides,
-      }));
+      if (userId) setScript(userId, topic, slides);
+      clientWs.send(JSON.stringify({ type: 'script', topic, slides }));
 
       return {
         success: true,
         slide_count: slides.length,
-        model: modelName,
-        message: `Skript mit ${slides.length} Slides in App angezeigt. ` +
-                 `Sage NUR: "Skript ist da, schau in die App."`,
+        message: `Skript mit ${slides.length} Slides in App angezeigt.`,
       };
     } catch (e) {
       lastError = e;
       const errMsg = e.message || String(e);
-      if (errMsg.includes('404') || errMsg.includes('does not exist') || errMsg.includes('no access')) {
-        console.log(`   ⏭️  ${modelName} nicht verfügbar`);
-        continue;
-      } else {
-        console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
-        continue;
-      }
+      if (errMsg.includes('404') || errMsg.includes('does not exist')) continue;
+      console.error(`   ❌ ${modelName}:`, errMsg);
     }
   }
 
-  console.error('❌ Alle Groq-Modelle fehlgeschlagen:', lastError?.message);
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
 
@@ -1566,23 +1327,16 @@ async function translateToEnglishImagePrompt(germanPrompt) {
       messages: [
         {
           role: 'system',
-          content: 'Du bist ein Prompt-Engineer für FLUX.1 Bildgenerierung. ' +
-                   'REGELN: Output MUSS 40-60 Wörter enthalten. ' +
-                   'Subjekt mit Details, Aktion, Umgebung, Beleuchtung, Kamerawinkel, Stil, Qualität, Stimmung. ' +
-                   'KEINE generischen Phrasen. ' +
-                   'Antworte NUR mit dem englischen Prompt in EINER Zeile. Keine Anführungszeichen.'
+          content: 'Du bist ein Prompt-Engineer für FLUX.1. Output 40-60 Wörter englisch. ' +
+                   'NUR der Prompt, eine Zeile, keine Anführungszeichen.'
         },
         { role: 'user', content: germanPrompt }
       ],
       model: 'openai/gpt-oss-20b',
       temperature: 0.4,
     });
-
-    const translated = completion.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || germanPrompt;
-    console.log(`   🌐 Verfeinert (${translated.length} Zeichen): "${translated.substring(0, 120)}..."`);
-    return translated;
+    return completion.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || germanPrompt;
   } catch (e) {
-    console.log(`   ⚠️ Verfeinerung fehlgeschlagen: ${e.message}`);
     return germanPrompt;
   }
 }
@@ -1590,80 +1344,51 @@ async function translateToEnglishImagePrompt(germanPrompt) {
 async function generateImageWithCloudflare(englishPrompt) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-
-  if (!accountId || !apiToken) {
-    throw new Error('CLOUDFLARE_ACCOUNT_ID oder CLOUDFLARE_API_TOKEN fehlt.');
-  }
+  if (!accountId || !apiToken) throw new Error('CLOUDFLARE credentials fehlen.');
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-
-  console.log(`   Cloudflare Request...`);
-
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      prompt: englishPrompt,
-      steps: 8,
-    }),
+    body: JSON.stringify({ prompt: englishPrompt, steps: 8 }),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Cloudflare HTTP ${response.status}: ${errorText.substring(0, 200)}`);
-  }
-
+  if (!response.ok) throw new Error(`Cloudflare HTTP ${response.status}`);
   const data = await response.json();
-
-  if (!data.success || !data.result?.image) {
-    throw new Error(`Cloudflare-Fehler: ${JSON.stringify(data.errors || data)}`);
-  }
-
-  const imageBase64 = data.result.image;
-  console.log(`   ✅ Cloudflare lieferte Bild (${imageBase64.length} Zeichen)`);
-
-  return { imageBase64, mimeType: 'image/jpeg' };
+  if (!data.success || !data.result?.image) throw new Error('Cloudflare lieferte kein Bild');
+  return { imageBase64: data.result.image, mimeType: 'image/jpeg' };
 }
 
 async function generateImageAndSend(clientWs, userId, prompt, slideNumber) {
-  console.log(`🎨 Generiere Slide ${slideNumber} via Cloudflare Workers AI...`);
+  console.log(`🎨 Generiere Slide ${slideNumber}...`);
 
   const lastImgTime = clientWs._lastImageTime || 0;
   const timeSince = Date.now() - lastImgTime;
   const minGap = 2000;
-  if (timeSince < minGap) {
-    await sleep(minGap - timeSince);
-  }
+  if (timeSince < minGap) await sleep(minGap - timeSince);
   clientWs._lastImageTime = Date.now();
 
   try {
     const englishPrompt = await translateToEnglishImagePrompt(prompt);
-
     let result = null;
     let lastError = null;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`   Versuch ${attempt}/3...`);
         result = await generateImageWithCloudflare(englishPrompt);
         break;
       } catch (e) {
         lastError = e;
-        console.log(`   ⏭️  Versuch ${attempt} fehlgeschlagen: ${e.message}`);
         if (attempt < 3) await sleep(3000 * attempt);
       }
     }
 
     if (!result) throw lastError || new Error('Cloudflare fehlgeschlagen');
 
-    console.log(`✅ Slide ${slideNumber} generiert via Cloudflare`);
-
-    if (userId) {
-      addImage(userId, slideNumber, result.imageBase64, result.mimeType);
-    }
+    if (userId) addImage(userId, slideNumber, result.imageBase64, result.mimeType);
 
     clientWs.send(JSON.stringify({
       type: 'image',
@@ -1672,9 +1397,8 @@ async function generateImageAndSend(clientWs, userId, prompt, slideNumber) {
       data: result.imageBase64,
     }));
 
-    return { success: true, slide: slideNumber, model: 'cloudflare-flux-schnell' };
+    return { success: true, slide: slideNumber };
   } catch (e) {
-    console.error('❌ Cloudflare-Fehler:', e.message);
     return { error: 'Bildgenerierung fehlgeschlagen: ' + e.message, slide: slideNumber };
   }
 }
@@ -1686,7 +1410,6 @@ export function setupGeminiWebSocket(server) {
 
   wss.on('connection', async (clientWs, req) => {
     console.log('📱 App verbunden via WebSocket');
-
     activeClients.add(clientWs);
 
     let userProfile = {};
@@ -1717,7 +1440,6 @@ export function setupGeminiWebSocket(server) {
           if (clientWs._uiMode === 'voice') {
             clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
           } else {
-            console.log('💬 Chat-Modus: keine Gemini Live Session gestartet (spart Kosten)');
             clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: 'jony' }));
           }
           return;
@@ -1727,20 +1449,17 @@ export function setupGeminiWebSocket(server) {
           const newMode = msg.mode || 'voice';
           const oldMode = clientWs._uiMode;
           clientWs._uiMode = newMode;
-          console.log(`🎛️ UI-Modus: ${oldMode} → ${newMode}`);
 
           if (oldMode === 'voice' && newMode === 'chat') {
             if (clientWs._session) {
               try { await clientWs._session.close(); } catch (e) {}
               clientWs._session = null;
-              console.log('🔌 Live-Session geschlossen (spart Kosten im Chat-Modus)');
             }
           }
 
           if (oldMode === 'chat' && newMode === 'voice') {
             if (!clientWs._session) {
               clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
-              console.log('🔌 Live-Session gestartet (Voice-Modus)');
             }
           }
           return;
@@ -1761,23 +1480,6 @@ export function setupGeminiWebSocket(server) {
             if (!userProfile.current_city) {
               userProfile.current_city = userProfile.hometown;
             }
-          }
-
-          const current = clientWs._lastMode || 'normal';
-          const mode = await detectMode(
-            userProfile.user_id, msg.imu_state, msg.lat, msg.lon, null, current
-          );
-
-          if (clientWs._session && mode !== current) {
-            clientWs._lastMode = mode;
-            console.log(`🎭 Modus-Wechsel (IMU): ${current} → ${mode}`);
-            clientWs.send(JSON.stringify({ type: 'mode', mode }));
-            try {
-              clientWs._session.sendClientContent({
-                turns: [{ role: 'user', parts: [{ text: modeInstruction(mode) }] }],
-                turnComplete: true,
-              });
-            } catch (e) {}
           }
           return;
         }
@@ -1802,7 +1504,6 @@ export function setupGeminiWebSocket(server) {
             turnComplete: true,
           });
         }
-
       } catch (error) {
         console.error('❌ WS-Nachricht Fehler:', error);
       }
@@ -1826,7 +1527,6 @@ export function setupGeminiWebSocket(server) {
       const prompt = buildProactivePrompt(role);
       if (!prompt) return;
 
-      console.log(`📢 Proaktiv-Trigger (${role}, ${Math.round(elapsed / 1000)}s)`);
       try {
         clientWs._session.sendClientContent({
           turns: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -1844,10 +1544,7 @@ export function setupGeminiWebSocket(server) {
         clientWs._proactiveTimer = null;
       }
       if (clientWs._session) {
-        try {
-          await clientWs._session.close();
-          console.log('✅ Session sauber geschlossen');
-        } catch (e) {}
+        try { await clientWs._session.close(); } catch (e) {}
         clientWs._session = null;
       }
     });
@@ -1870,5 +1567,5 @@ export function setupGeminiWebSocket(server) {
 // ==================== TELEGRAM → APP FORWARDING ====================
 
 onTelegramMessage((payload) => {
-  console.log(`📨 Telegram (App-Push deaktiviert): ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
+  console.log(`📨 Telegram: ${payload.fromName}: "${payload.text.substring(0, 60)}"`);
 });
