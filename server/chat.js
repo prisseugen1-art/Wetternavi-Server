@@ -36,6 +36,56 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+// ==================== DRAFT-SPEICHER (10 Min TTL) ====================
+// { userId: { id, to, subject, body, tone, createdAt } }
+const draftStore = new Map();
+const DRAFT_TTL_MS = 10 * 60 * 1000;
+
+function cleanOldDrafts() {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [userId, draft] of draftStore.entries()) {
+    if ((now - draft.createdAt) > DRAFT_TTL_MS) {
+      draftStore.delete(userId);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) console.log(`🧹 ${cleaned} abgelaufene Drafts gelöscht`);
+}
+
+setInterval(cleanOldDrafts, 60 * 1000);
+
+export function setDraft(userId, draft) {
+  if (!userId) return null;
+  const item = {
+    id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    ...draft,
+    createdAt: Date.now(),
+  };
+  draftStore.set(userId, item);
+  console.log(`📝 Draft gespeichert für ${userId.substring(0,8)}...: an ${draft.to}`);
+  return item;
+}
+
+export function getDraft(userId) {
+  if (!userId) return null;
+  const draft = draftStore.get(userId);
+  if (!draft) return null;
+  if ((Date.now() - draft.createdAt) > DRAFT_TTL_MS) {
+    draftStore.delete(userId);
+    return null;
+  }
+  return draft;
+}
+
+export function clearDraft(userId) {
+  if (!userId) return false;
+  const had = draftStore.has(userId);
+  draftStore.delete(userId);
+  if (had) console.log(`🧹 Draft gelöscht für ${userId.substring(0,8)}...`);
+  return had;
+}
+
 // ==================== KONTEXT ====================
 
 function getTimeContext() {
@@ -196,7 +246,10 @@ const CONTACT_RULES = [
   '',
   'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
   '',
-  'Schritt 5: JETZT erst verfassen. Zeige Entwurf.',
+  'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
+  '  ⛔ Schreibe den Entwurf NIEMALS als Text in deine Antwort!',
+  '  Die App zeigt die Entwurf-Karte automatisch.',
+  '  Antworte dem Nutzer nur kurz: "Entwurf ist da. Prüf ihn."',
   '',
   'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
   '',
@@ -253,14 +306,35 @@ const ATTACHMENT_RULE = [
   '',
   'WENN Anhänge bereit sind:',
   '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
-  '- Erwähne sie im Entwurf: "Mit Anhang: rechnung.pdf"',
-  '- Du brauchst NICHTS weiter zu tun — die Anhänge kommen automatisch mit.',
+  '- Erwähne sie im show_draft NICHT explizit im body.',
+  '- Die App zeigt sie in der Entwurf-Karte automatisch an.',
   '',
   'WENN KEINE Anhänge bereit sind:',
-  '- Erwähne keine Anhänge.',
   '- Wenn der Nutzer fragt "kannst du das PDF anhängen?" → antworte:',
-  '  "Klicke auf den 📎-Button in der Entwurf-Karte, wähle die Datei.',
-  '   Ich hänge sie dann automatisch an."',
+  '  "Klicke auf den 📎-Button in der Entwurf-Karte, wähle die Datei."',
+].join('\n');
+
+// ==================== DRAFT-REGEL ====================
+
+const DRAFT_RULE = [
+  '===========================================',
+  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
+  '===========================================',
+  '',
+  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
+  '',
+  '⛔ SCHREIBE DEN ENTWURF NIEMALS ALS TEXT IN DEINE ANTWORT!',
+  '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Nachricht.',
+  '',
+  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
+  'Du sagst dem Nutzer nur EINEN kurzen Satz wie:',
+  '- "Entwurf ist da. Prüf ihn."',
+  '- "Hab einen Entwurf erstellt."',
+  '',
+  'NACH dem show_draft-Aufruf:',
+  '- WARTE auf "ja" / "ok" / "senden"',
+  '- ODER der Nutzer klickt ✅ in der Karte (dann kommt automatisch send_email)',
+  '- ODER der Nutzer sagt "nein" / "ändern"',
 ].join('\n');
 
 // ==================== SYSTEM-PROMPT ====================
@@ -280,7 +354,6 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     }
   }
 
-  // Anhang-Hinweis
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
@@ -344,6 +417,8 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     'ROLLE: ' + roleData.name.toUpperCase(),
     roleData.prompt,
     '',
+    DRAFT_RULE,
+    '',
     CONTACT_RULES,
     '',
     SIGNATURE_RULE,
@@ -353,7 +428,7 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     '===========================================',
     '📧 E-MAIL-VERSAND',
     '===========================================',
-    'Tool: send_email(to, subject, body, tone)',
+    'Ablauf: show_draft(to, subject, body, tone) → Bestätigung → send_email(to, subject, body, tone)',
     '⛔ NIEMALS ohne Bestätigung senden.',
     'STANDARD "an mich" → eugen.priss@yahoo.com',
     '',
@@ -363,7 +438,7 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     'get_weather, find_restaurants, save_user_preference, get_user_preferences,',
     'find_contact, save_contact, forget_contact, list_contacts,',
     'find_group, save_group, forget_group, list_groups, resolve_recipients,',
-    'save_user_profile, send_email',
+    'save_user_profile, show_draft, send_email',
     '',
     'NIEMALS Wetter/Restaurants erfinden.'
   );
@@ -540,17 +615,31 @@ const JONY_TOOLS = [
     },
   },
   {
+    name: 'show_draft',
+    description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
+                 'Rufe das auf, wenn Ton + Adresse geklärt sind. ' +
+                 '⛔ Schreibe den Entwurf NICHT als Text. Antworte dem Nutzer nur kurz.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        to: { type: 'STRING', description: 'Empfänger-Adresse' },
+        subject: { type: 'STRING', description: 'Betreff' },
+        body: { type: 'STRING', description: 'Nur Text der E-Mail (OHNE Signatur, OHNE "An:"/"Betreff:")' },
+        tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+      },
+      required: ['to', 'subject', 'body', 'tone'],
+    },
+  },
+  {
     name: 'send_email',
-    description: 'Sendet eine E-Mail. Frage IMMER zuerst nach Bestätigung. ' +
-                 'Schreibe KEINE Signatur — der Server macht das. ' +
-                 '📎 Anhänge werden AUTOMATISCH mitgeschickt, wenn welche bereit sind.',
+    description: 'Sendet die E-Mail NACH Bestätigung. Nur aufrufen, wenn Nutzer "ja"/"ok"/"senden" gesagt hat.',
     parameters: {
       type: 'OBJECT',
       properties: {
         to: { type: 'STRING' },
         subject: { type: 'STRING' },
-        body: { type: 'STRING', description: 'NUR Anrede + Inhalt — OHNE Signatur' },
-        tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+        body: { type: 'STRING' },
+        tone: { type: 'STRING' },
       },
       required: ['to', 'subject', 'body', 'tone'],
     },
@@ -758,6 +847,46 @@ async function saveUserProfile(userId, fields) {
   return await res.json();
 }
 
+// ⬇️ NEU: show_draft — speichert Draft + sendet WebSocket-Event
+async function showDraft(userId, to, subject, body, tone, attachments = []) {
+  if (!to || !subject || !body) {
+    return { error: 'to, subject, body required' };
+  }
+
+  const draft = setDraft(userId, {
+    to,
+    subject,
+    body,
+    tone: tone || 'persönlich',
+  });
+
+  // WebSocket-Event an alle App-Clients
+  broadcastToClients({
+    type: 'draft_shown',
+    draft: {
+      id: draft.id,
+      to: draft.to,
+      subject: draft.subject,
+      body: draft.body,
+      tone: draft.tone,
+      attachments: (attachments || []).map(a => ({
+        id: a.id,
+        filename: a.filename,
+        size: a.size,
+      })),
+    },
+  });
+
+  console.log(`📝 Draft angezeigt: an ${to} (${tone})`);
+
+  return {
+    success: true,
+    draft_id: draft.id,
+    message: 'Entwurf wird in der App angezeigt. Warte auf Bestätigung des Nutzers.',
+  };
+}
+
+// ⬇️ sendFreeEmail — cleart jetzt auch den Draft
 async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlich') {
   console.log(`📧 Freie E-Mail an ${to}: "${subject}" (Ton: ${tone})`);
   const res = await fetch(SELF_URL + '/api/send-email', {
@@ -770,6 +899,12 @@ async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlic
   }
   const data = await res.json();
   const attachInfo = data.attachmentCount > 0 ? ` (mit ${data.attachmentCount} Anhängen)` : '';
+
+  // Draft löschen nach erfolgreichem Versand
+  if (profile?.user_id) {
+    clearDraft(profile.user_id);
+  }
+
   return { success: true, to, subject, message: `E-Mail an ${to} gesendet${attachInfo}.` };
 }
 
@@ -907,7 +1042,7 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 // ==================== TOOL DISPATCH ====================
 
-async function executeChatTool(name, args, userId, profile, currentLocation = null) {
+async function executeChatTool(name, args, userId, profile, currentLocation = null, attachments = []) {
   if (name === 'get_weather') {
     let loc = args.location;
     if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city;
@@ -933,7 +1068,13 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
   if (name === 'list_groups') return await listGroups(userId);
   if (name === 'resolve_recipients') return await resolveRecipients(userId, args.names);
   if (name === 'save_user_profile') return await saveUserProfile(userId, args);
-  if (name === 'send_email') return await sendFreeEmail(args.to, args.subject, args.body, profile, args.tone || 'persönlich');
+  if (name === 'show_draft') {
+    return await showDraft(userId, args.to, args.subject, args.body, args.tone, attachments);
+  }
+  if (name === 'send_email') {
+    const profileWithId = { ...profile, user_id: userId };
+    return await sendFreeEmail(args.to, args.subject, args.body, profileWithId, args.tone || 'persönlich');
+  }
   if (name === 'generate_script') {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
@@ -1175,7 +1316,7 @@ export async function handleChatMessage(
 
         let toolResult;
         try {
-          toolResult = await executeChatTool(fc.name, fc.args || {}, userId, enrichedProfile, currentLocation);
+          toolResult = await executeChatTool(fc.name, fc.args || {}, userId, enrichedProfile, currentLocation, attachments);
         } catch (e) {
           toolResult = { error: e.message };
         }
