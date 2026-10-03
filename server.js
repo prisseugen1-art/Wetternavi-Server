@@ -20,6 +20,62 @@ const PORT = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
+// ========== ANHANG-SPEICHER (RAM, 5 Min TTL) ==========
+// Struktur: Map { userId: [ { id, filename, mimeType, data, size, createdAt } ] }
+const attachmentStore = new Map();
+const ATTACHMENT_TTL_MS = 5 * 60 * 1000; // 5 Minuten
+
+function cleanOldAttachments() {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [userId, list] of attachmentStore.entries()) {
+    const fresh = list.filter(a => (now - a.createdAt) < ATTACHMENT_TTL_MS);
+    if (fresh.length === 0) {
+      attachmentStore.delete(userId);
+    } else if (fresh.length !== list.length) {
+      attachmentStore.set(userId, fresh);
+    }
+    cleaned += (list.length - fresh.length);
+  }
+  if (cleaned > 0) {
+    console.log(`🧹 ${cleaned} abgelaufene Anhänge gelöscht`);
+  }
+}
+
+setInterval(cleanOldAttachments, 60 * 1000);
+
+function addAttachment(userId, filename, mimeType, base64Data) {
+  if (!userId) throw new Error('user_id required');
+  const list = attachmentStore.get(userId) || [];
+  const item = {
+    id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    filename: filename || 'anhang',
+    mimeType: mimeType || 'application/octet-stream',
+    data: base64Data,
+    size: Math.round(base64Data.length * 0.75),
+    createdAt: Date.now(),
+  };
+  list.push(item);
+  attachmentStore.set(userId, list);
+  console.log(`📎 Anhang hinzugefügt für ${userId.substring(0,8)}...: ${filename} (${Math.round(item.size/1024)} KB)`);
+  return item;
+}
+
+function getAttachments(userId) {
+  if (!userId) return [];
+  const list = attachmentStore.get(userId) || [];
+  const now = Date.now();
+  return list.filter(a => (now - a.createdAt) < ATTACHMENT_TTL_MS);
+}
+
+function clearAttachments(userId) {
+  if (!userId) return 0;
+  const count = (attachmentStore.get(userId) || []).length;
+  attachmentStore.delete(userId);
+  console.log(`🧹 ${count} Anhänge gelöscht für ${userId.substring(0,8)}...`);
+  return count;
+}
+
 // ========== DATENBANK ==========
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -149,13 +205,11 @@ function normalizeContactName(name) {
 function findContactInData(userData, searchName) {
   const normalized = normalizeContactName(searchName);
 
-  // 1. Direkter Treffer
   const directKey = 'contact_' + normalized;
   if (userData[directKey + '_email'] || userData[directKey + '_telegram']) {
     return buildContactFromData(userData, normalized);
   }
 
-  // 2. Über Aliase
   for (const key of Object.keys(userData)) {
     if (!key.startsWith('contact_') || !key.endsWith('_aliases')) continue;
     const aliases = String(userData[key] || '').toLowerCase();
@@ -166,7 +220,6 @@ function findContactInData(userData, searchName) {
     }
   }
 
-  // 3. Über Relation
   const relationSearch = searchName.toLowerCase()
     .replace(/^(meine|mein|meiner)\s+/, '')
     .trim();
@@ -198,11 +251,9 @@ function buildContactFromData(userData, contactName) {
   };
 }
 
-// ⬇️ NEU: Gruppen-Hilfsfunktionen
 function findGroupInData(userData, searchName) {
   const normalized = normalizeContactName(searchName);
   const directKey = 'group_' + normalized + '_members';
-
   if (userData[directKey]) {
     return buildGroupFromData(userData, normalized);
   }
@@ -213,7 +264,6 @@ function buildGroupFromData(userData, groupName) {
   const prefix = 'group_' + groupName + '_';
   const membersRaw = userData[prefix + 'members'] || '';
   const members = membersRaw.split(',').map(s => s.trim()).filter(Boolean);
-
   return {
     name: groupName,
     members: members,
@@ -366,6 +416,105 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
+// ========== ANHANG-API ==========
+
+// -------- Anhang hinzufügen --------
+app.post('/api/attachments/add', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, filename, mimeType, data } = args;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+    if (!data) {
+      return res.status(400).json({ error: 'data (Base64) required' });
+    }
+
+    const estimatedSize = Math.round(data.length * 0.75);
+    if (estimatedSize > 20 * 1024 * 1024) {
+      return res.status(413).json({
+        error: 'Datei zu groß (max 20 MB pro Anhang)',
+        size: estimatedSize,
+      });
+    }
+
+    const item = addAttachment(user_id, filename, mimeType, data);
+    const current = getAttachments(user_id);
+
+    res.json({
+      success: true,
+      attachment: {
+        id: item.id,
+        filename: item.filename,
+        mimeType: item.mimeType,
+        size: item.size,
+      },
+      total: current.length,
+    });
+  } catch (error) {
+    console.error('❌ attachment-add Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Anhänge auflisten --------
+app.get('/api/attachments/list/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const list = getAttachments(userId);
+    res.json({
+      count: list.length,
+      attachments: list.map(a => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        ageSeconds: Math.round((Date.now() - a.createdAt) / 1000),
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Einzelnen Anhang löschen --------
+app.post('/api/attachments/remove', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, id } = args;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+
+    const list = attachmentStore.get(user_id) || [];
+    const filtered = id ? list.filter(a => a.id !== id) : [];
+    attachmentStore.set(user_id, filtered);
+
+    console.log(`🗑️ Anhang entfernt: ${id || 'alle'} (${list.length - filtered.length} Stück)`);
+    res.json({ success: true, removed: list.length - filtered.length });
+  } catch (error) {
+    console.error('❌ attachment-remove Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// -------- Alle Anhänge löschen --------
+app.post('/api/attachments/clear', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id } = args;
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+
+    const count = clearAttachments(user_id);
+    res.json({ success: true, removed: count });
+  } catch (error) {
+    console.error('❌ attachment-clear Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== KONTAKT-API ==========
 
 app.post('/api/contacts/find', async (req, res) => {
@@ -495,7 +644,6 @@ app.get('/api/contacts/list/:userId', async (req, res) => {
   }
 });
 
-// ⬇️ ERWEITERT: resolve berücksichtigt jetzt auch Gruppen
 app.post('/api/contacts/resolve', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -511,7 +659,6 @@ app.post('/api/contacts/resolve', async (req, res) => {
     const seenContacts = new Set();
 
     for (const item of names) {
-      // Prüfe erst, ob es eine Gruppe ist
       const group = findGroupInData(userData, item);
       if (group && group.members.length > 0) {
         console.log(`👥 Gruppe "${item}" → ${group.members.length} Mitglieder`);
@@ -527,7 +674,6 @@ app.post('/api/contacts/resolve', async (req, res) => {
         continue;
       }
 
-      // Einzelner Kontakt
       const contact = findContactInData(userData, item);
       if (contact) {
         if (!seenContacts.has(contact.name)) {
@@ -552,9 +698,8 @@ app.post('/api/contacts/resolve', async (req, res) => {
   }
 });
 
-// ========== GRUPPEN-API (NEU) ==========
+// ========== GRUPPEN-API ==========
 
-// -------- Gruppe speichern --------
 app.post('/api/groups/save', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -564,10 +709,9 @@ app.post('/api/groups/save', async (req, res) => {
       return res.status(400).json({ error: 'user_id and name required' });
     }
     if (!members) {
-      return res.status(400).json({ error: 'members required (komma-getrennt oder Array)' });
+      return res.status(400).json({ error: 'members required' });
     }
 
-    // members kann String (komma-getrennt) oder Array sein
     let membersList;
     if (Array.isArray(members)) {
       membersList = members.map(m => String(m).trim()).filter(Boolean);
@@ -603,7 +747,6 @@ app.post('/api/groups/save', async (req, res) => {
   }
 });
 
-// -------- Gruppe suchen --------
 app.post('/api/groups/find', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -629,7 +772,6 @@ app.post('/api/groups/find', async (req, res) => {
   }
 });
 
-// -------- Gruppe löschen --------
 app.post('/api/groups/forget', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -660,7 +802,6 @@ app.post('/api/groups/forget', async (req, res) => {
   }
 });
 
-// -------- Alle Gruppen auflisten --------
 app.get('/api/groups/list/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -690,7 +831,8 @@ app.get('/api/groups/list/:userId', async (req, res) => {
   }
 });
 
-// -------- Nutzer-Profil speichern --------
+// ========== NUTZER-PROFIL ==========
+
 app.post('/api/user-profile/save', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -807,6 +949,7 @@ app.post('/api/delete-user-data', async (req, res) => {
     await pool.query('DELETE FROM user_presence WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM user_home WHERE user_id = $1', [userId]);
     await pool.query('DELETE FROM chat_history WHERE user_id = $1', [userId]);
+    clearAttachments(userId);
     console.log('🗑️ Daten gelöscht für', userId);
     res.json({ success: true });
   } catch (error) {
@@ -917,12 +1060,16 @@ app.post('/api/chat', async (req, res) => {
       ? { lat: parseFloat(lat), lon: parseFloat(lon), city: city || null }
       : (city ? { city } : null);
 
+    // ⬇️ Anhänge für diesen Nutzer holen
+    const attachments = getAttachments(user_id);
+
     const result = await handleChatMessage(
       user_id,
       message,
       role || 'freund',
       mode || 'jony',
-      currentLocation
+      currentLocation,
+      attachments
     );
     res.json({ success: true, ...result });
   } catch (error) {
@@ -959,7 +1106,6 @@ app.post('/api/send-email', async (req, res) => {
       return res.status(400).json({ error: 'to, subject, body required' });
     }
 
-    // ⬇️ NEU: Komma-getrennte Empfänger splitten
     const recipients = String(to)
       .split(',')
       .map(e => e.trim())
@@ -970,7 +1116,16 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     const finalTone = tone || 'persönlich';
-    console.log(`📧 Sende an ${recipients.length} Empfänger: ${recipients.join(', ')} (Ton: ${finalTone})`);
+
+    // ⬇️ Anhänge: aus Request ODER aus Nutzer-Speicher
+    let finalAttachments = [];
+    if (args.attachments && Array.isArray(args.attachments) && args.attachments.length > 0) {
+      finalAttachments = args.attachments;
+    } else if (profile?.user_id) {
+      finalAttachments = getAttachments(profile.user_id);
+    }
+
+    console.log(`📧 Sende an ${recipients.length} Empfänger: ${recipients.join(', ')} (Ton: ${finalTone}, Anhänge: ${finalAttachments.length})`);
 
     const results = [];
     const errors = [];
@@ -978,17 +1133,21 @@ app.post('/api/send-email', async (req, res) => {
     for (let i = 0; i < recipients.length; i++) {
       const recipient = recipients[i];
       try {
-        await sendEmail(recipient, subject, body, profile || {}, finalTone);
+        await sendEmail(recipient, subject, body, profile || {}, finalTone, finalAttachments);
         results.push({ to: recipient, status: 'ok' });
       } catch (e) {
         console.error(`❌ Fehler bei ${recipient}:`, e.message);
         errors.push({ to: recipient, error: e.message });
       }
 
-      // ⬇️ 800ms Pause zwischen Empfängern (Apps Script Rate-Limit)
       if (i < recipients.length - 1) {
         await new Promise(r => setTimeout(r, 800));
       }
+    }
+
+    // Nach erfolgreichem Versand: Anhänge aus Speicher löschen
+    if (results.length > 0 && profile?.user_id) {
+      clearAttachments(profile.user_id);
     }
 
     res.json({
@@ -997,6 +1156,7 @@ app.post('/api/send-email', async (req, res) => {
       failed: errors.length,
       results,
       errors,
+      attachmentCount: finalAttachments.length,
     });
   } catch (error) {
     console.error('❌ send-email Fehler:', error);
@@ -1044,7 +1204,6 @@ server.listen(PORT, async () => {
     console.error('❌ Chat-Init-Fehler:', e.message);
   }
 
-  // ==================== TELEGRAM ====================
   try {
     const tgBot = await initTelegram();
     if (tgBot) {
@@ -1071,7 +1230,6 @@ server.listen(PORT, async () => {
     console.error('❌ Telegram-Init-Fehler:', e.message);
   }
 
-  // ==================== EMAIL ====================
   try {
     initEmail();
   } catch (e) {

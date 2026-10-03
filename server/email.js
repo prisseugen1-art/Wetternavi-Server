@@ -18,7 +18,6 @@ function buildSignature(profile = {}, tone = 'persönlich') {
   } else if (tone === 'persönlich') {
     greeting = 'Viele Grüße\n' + name;
   } else {
-    // locker (Default bei allem anderen)
     greeting = 'LG ' + name;
   }
 
@@ -57,7 +56,7 @@ export function initEmail() {
   return { initialized: true };
 }
 
-// ==================== HILFSFUNKTION ====================
+// ==================== APPS SCRIPT mit Retry ====================
 
 async function callAppsScript(payload) {
   if (!initialized) throw new Error('E-Mail-Service nicht initialisiert');
@@ -83,8 +82,8 @@ async function callAppsScript(payload) {
         lastError = new Error('Apps Script HTTP ' + response.status + ': ' + text.substring(0, 100));
 
         if (attempt < maxAttempts) {
-          const wait = 1500 * attempt; // 1.5s, 3s
-          console.log(`   ⏳ Apps Script ${response.status}, Retry in ${wait}ms...`);
+          const wait = 1500 * attempt;
+          console.log('   ⏳ Apps Script ' + response.status + ', Retry in ' + wait + 'ms...');
           await new Promise(r => setTimeout(r, wait));
           continue;
         }
@@ -103,7 +102,7 @@ async function callAppsScript(payload) {
       lastError = e;
       if (attempt < maxAttempts && (e.message?.includes('fetch') || e.message?.includes('network'))) {
         const wait = 1500 * attempt;
-        console.log(`   ⏳ Netzwerkfehler, Retry in ${wait}ms...`);
+        console.log('   ⏳ Netzwerkfehler, Retry in ' + wait + 'ms...');
         await new Promise(r => setTimeout(r, wait));
         continue;
       }
@@ -114,17 +113,42 @@ async function callAppsScript(payload) {
   throw lastError || new Error('Apps Script Aufruf fehlgeschlagen');
 }
 
+// ==================== ANHÄNGE HELFER ====================
+
+// Konvertiert Server-Anhang-Format → Apps-Script-Format
+function prepareAttachmentsForAppsScript(attachments = []) {
+  if (!Array.isArray(attachments)) return [];
+
+  return attachments
+    .filter(a => a && a.data)
+    .map(a => ({
+      filename: a.filename || 'anhang',
+      mimeType: a.mimeType || 'application/octet-stream',
+      content: a.data, // Base64
+    }));
+}
+
 // ==================== SIMPLE EMAIL ====================
 
-export async function sendEmail(to, subject, body, profile = {}, tone = 'persönlich') {
-  console.log('📧 Sende E-Mail an ' + to + ': "' + subject + '" (Ton: ' + tone + ')');
+export async function sendEmail(to, subject, body, profile = {}, tone = 'persönlich', attachments = []) {
+  if (!to) throw new Error('Empfänger erforderlich');
+  if (!subject) throw new Error('Betreff erforderlich');
+  if (!body) throw new Error('Text erforderlich');
+
+  const attachmentCount = Array.isArray(attachments) ? attachments.length : 0;
+  console.log('📧 Sende E-Mail an ' + to + ': "' + subject + '" (Ton: ' + tone + ', Anhänge: ' + attachmentCount + ')');
+
   const finalBody = body + '\n\n' + buildSignature(profile, tone);
+  const attachmentPayload = prepareAttachmentsForAppsScript(attachments);
+
   const result = await callAppsScript({
     to,
     subject,
     body: finalBody,
+    attachments: attachmentPayload,
   });
-  console.log('✅ E-Mail gesendet an ' + to);
+
+  console.log('✅ E-Mail gesendet an ' + to + (attachmentPayload.length > 0 ? ' (mit ' + attachmentPayload.length + ' Anhängen)' : ''));
   return { success: true, to, result };
 }
 
@@ -171,9 +195,9 @@ export async function sendCarouselByEmail(to, carousel, profile = {}) {
   lines.push('');
   lines.push('Viel Erfolg! 🚀');
 
-  // Signatur (Ton: persönlich für Karussell)
   const body = lines.join('\n') + '\n\n' + buildSignature(profile, 'persönlich');
 
+  // Karussell-Bilder als Anhänge
   const attachments = images.map((img) => ({
     filename: 'slide_' + img.n + '.jpg',
     mimeType: img.mime || 'image/jpeg',
