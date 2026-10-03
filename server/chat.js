@@ -1000,6 +1000,9 @@ export async function handleChatMessage(
             tools: [{ functionDeclarations: tools }],
             temperature: 0.8,
             maxOutputTokens: 500,
+            // Neu hinzugefügt – camelCase-Schreibweise erforderlich
+            thinkingConfig: {
+            thinkingLevel: 'low'
           },
         });
         usedModel = modelName;
