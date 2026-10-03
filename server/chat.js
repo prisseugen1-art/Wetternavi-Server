@@ -992,7 +992,7 @@ export async function handleChatMessage(
 
     for (const modelName of CHAT_MODELS) {
       try {
-        response = await ai.models.generateContent({
+                response = await ai.models.generateContent({
           model: modelName,
           contents,
           config: {
@@ -1000,9 +1000,9 @@ export async function handleChatMessage(
             tools: [{ functionDeclarations: tools }],
             temperature: 0.8,
             maxOutputTokens: 500,
-            // Neu hinzugefügt – camelCase-Schreibweise erforderlich
             thinkingConfig: {
-            thinkingLevel: 'low'
+              thinkingLevel: 'low',
+            },
           },
         });
         usedModel = modelName;
