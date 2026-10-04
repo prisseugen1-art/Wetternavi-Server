@@ -657,6 +657,26 @@ app.get('/api/draft/get/:userId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ========== TELEGRAM CAROUSEL SEND ==========
+
+app.post('/api/telegram/send-carousel', async (req, res) => {
+  try {
+    const { chat_id, topic, slides, images } = req.body || {};
+
+    if (!chat_id || !topic) {
+      return res.status(400).json({ error: 'chat_id and topic required' });
+    }
+
+    const { sendTelegramCarousel } = await import('./server/telegram.js');
+    const result = await sendTelegramCarousel(chat_id, topic, slides || [], images || []);
+
+    console.log(`✅ Karussell an Telegram gesendet: ${result.imagesSent} Bilder`);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ telegram-send-carousel Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== TELEGRAM-SEND ==========
 

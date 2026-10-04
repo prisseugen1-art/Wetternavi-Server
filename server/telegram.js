@@ -1,9 +1,7 @@
 // server/telegram.js
 
-import { Bot, webhookCallback } from 'grammy';
+import { Bot, webhookCallback, InputFile } from 'grammy';
 import { generateTelegramReply, getTelegramSessionInfo, clearTelegramSession } from './telegram_agent.js';
-
-// ==================== KONFIGURATION ====================
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'jony-webhook-secret';
@@ -12,13 +10,9 @@ const ALLOWED_CHAT_IDS = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
   .map(s => s.trim())
   .filter(Boolean);
 
-// ==================== ZUSTAND ====================
-
 let bot = null;
 const messageListeners = [];
 let botUsername = null;
-
-// ==================== HELFER ====================
 
 function isAllowed(chatId) {
   if (ALLOWED_CHAT_IDS.length === 0) return true;
@@ -30,8 +24,6 @@ function sanitizeText(text) {
   return String(text).trim().substring(0, 4000);
 }
 
-// ==================== BOT INITIALISIEREN ====================
-
 export async function initTelegram() {
   if (!BOT_TOKEN) {
     console.log('⚠️  TELEGRAM_BOT_TOKEN fehlt – Telegram wird übersprungen');
@@ -42,7 +34,6 @@ export async function initTelegram() {
 
   bot = new Bot(BOT_TOKEN);
 
-  // ---- /start Command ----
   bot.command('start', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) {
@@ -57,20 +48,15 @@ export async function initTelegram() {
       `Hallo ${name}! 👋\n\n` +
       `Ich bin Jony, dein Begleiter.\n\n` +
       `Schreib mir einfach – ich antworte direkt.\n\n` +
-      `Verfügbare Modi:\n` +
-      `• "Jony, Party" → Party-Modus\n` +
-      `• "Jony, Freund" → Freund-Modus (Standard)\n\n` +
       `📌 Deine Chat-ID: \`${chatId}\``,
       { parse_mode: 'Markdown' }
     );
   });
 
-  // ---- /id Command ----
   bot.command('id', async (ctx) => {
     await ctx.reply(`Deine Chat-ID: \`${ctx.chat.id}\``, { parse_mode: 'Markdown' });
   });
 
-  // ---- /status Command ----
   bot.command('status', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) {
@@ -82,15 +68,13 @@ export async function initTelegram() {
     await ctx.reply(`✅ Jony ist online.\n${roleText}`);
   });
 
-  // ---- /reset Command ----
   bot.command('reset', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) return;
     clearTelegramSession(chatId);
-    await ctx.reply('🔄 Session zurückgesetzt. Wir fangen neu an.');
+    await ctx.reply('🔄 Session zurückgesetzt.');
   });
 
-  // ---- Eingehende Text-Nachrichten ----
   bot.on('message:text', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) return;
@@ -103,7 +87,6 @@ export async function initTelegram() {
 
     console.log(`📩 Telegram von ${fromName} ${username} (${chatId}): "${text.substring(0, 80)}"`);
 
-    // Event an Listener weitergeben (falls App offen ist)
     const payload = {
       chatId,
       fromName,
@@ -122,13 +105,9 @@ export async function initTelegram() {
       }
     }
 
-    // ==================== AUTONOME ANTWORT ====================
     try {
-      // Typing-Indikator senden
       await ctx.replyWithChatAction('typing');
-
       const reply = await generateTelegramReply(chatId, text, null);
-
       if (reply && reply.trim()) {
         await ctx.reply(reply);
         console.log(`📤 Telegram-Antwort gesendet an ${chatId}`);
@@ -139,7 +118,6 @@ export async function initTelegram() {
     }
   });
 
-  // ---- Bot-Info ----
   try {
     const me = await bot.api.getMe();
     botUsername = me.username;
@@ -152,7 +130,7 @@ export async function initTelegram() {
   return bot;
 }
 
-// ==================== SENDEN (falls manuell aus App nötig) ====================
+// ==================== TEXT SENDEN ====================
 
 export async function sendTelegramMessage(chatId, text) {
   if (!bot) throw new Error('Telegram-Bot nicht initialisiert');
@@ -161,6 +139,79 @@ export async function sendTelegramMessage(chatId, text) {
   console.log(`📤 Sende Telegram an ${chatId}: "${cleanText.substring(0, 80)}"`);
   await bot.api.sendMessage(chatId, cleanText);
   return { success: true, to: chatId };
+}
+
+// ==================== FOTO SENDEN ====================
+
+export async function sendTelegramPhoto(chatId, base64Data, caption = '') {
+  if (!bot) throw new Error('Telegram-Bot nicht initialisiert');
+  if (!base64Data) throw new Error('base64Data erforderlich');
+
+  // Base64 → Buffer
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  const inputFile = new InputFile(buffer, 'slide.jpg');
+
+  console.log(`📤 Sende Telegram-Foto an ${chatId} (${Math.round(buffer.length / 1024)} KB)`);
+
+  const result = await bot.api.sendPhoto(chatId, inputFile, {
+    caption: caption ? caption.substring(0, 1024) : undefined,
+  });
+
+  return { success: true, to: chatId, messageId: result.message_id };
+}
+
+// ==================== KARUSSELL SENDEN ====================
+
+export async function sendTelegramCarousel(chatId, topic, slides = [], images = []) {
+  if (!bot) throw new Error('Telegram-Bot nicht initialisiert');
+  if (!chatId) throw new Error('chat_id erforderlich');
+
+  console.log(`📨 Sende Karussell "${topic}" an ${chatId} (${images.length} Bilder)`);
+
+  // 1. Header-Nachricht
+  const headerLines = [
+    `🎨 *${topic}*`,
+    '',
+    `${slides.length} Slides · ${images.length} Bilder`,
+  ];
+  await bot.api.sendMessage(chatId, headerLines.join('\n'), { parse_mode: 'Markdown' });
+
+  // 2. Jedes Slide als Foto + Text
+  let imagesSent = 0;
+  const sortedImages = [...images].sort((a, b) => a.n - b.n);
+
+  for (const img of sortedImages) {
+    const slide = slides.find(s => s.slide === img.n) || {};
+    const title = slide.title || `Slide ${img.n}`;
+    const body = slide.body || '';
+
+    const caption = `${img.n}. ${title}\n\n${body}`;
+
+    try {
+      await sendTelegramPhoto(chatId, img.data, caption);
+      imagesSent++;
+
+      // Rate-Limit-Schutz: 1 Sek zwischen Bildern
+      if (imagesSent < sortedImages.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch (e) {
+      console.error(`❌ Fehler bei Slide ${img.n}:`, e.message);
+      // Text als Fallback
+      try {
+        await bot.api.sendMessage(chatId, `Slide ${img.n}: ${title}\n\n${body}`);
+      } catch (e2) {}
+    }
+  }
+
+  console.log(`✅ Karussell an Telegram gesendet: ${imagesSent} Bilder`);
+
+  return {
+    success: true,
+    to: chatId,
+    imagesSent,
+  };
 }
 
 // ==================== WEBHOOK ====================
@@ -194,11 +245,8 @@ export async function getTelegramWebhookInfo() {
     const info = await bot.api.getWebhookInfo();
     return {
       url: info.url || '(keine URL gesetzt)',
-      hasCustomCertificate: info.has_custom_certificate,
       pendingUpdateCount: info.pending_update_count,
-      lastErrorDate: info.last_error_date,
       lastErrorMessage: info.last_error_message,
-      maxConnections: info.max_connections,
       allowedUpdates: info.allowed_updates,
     };
   } catch (e) {

@@ -38,7 +38,7 @@ const groq = new OpenAI({
 
 // ==================== KONFIG ====================
 
-const CHAT_SESSION_RESET_MS = 8 * 60 * 60 * 1000; // 8 Std
+const CHAT_SESSION_RESET_MS = 8 * 60 * 60 * 1000;
 
 // ==================== DRAFT-SPEICHER ====================
 
@@ -105,7 +105,7 @@ function getTimeContext() {
   return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
 }
 
-// ==================== FUNDAMENT-PROMPT (für ALLE Modi) ====================
+// ==================== FUNDAMENT (für ALLE Modi) ====================
 
 const LANGUAGE_RULE = [
   'SPRACHREGEL: Antworte auf Deutsch oder Russisch – je nachdem, in welcher Sprache der Nutzer schreibt.',
@@ -132,9 +132,7 @@ const TONE_RULES = [
   '',
   'A) NEUER KONTAKT: → Frage "Formell, persönlich oder locker?"',
   'B) BEKANNTER KONTAKT: → Kein Nachfragen, nutze gespeicherten Ton',
-  'C) BEHÖRDEN (finanzamt, amt, behörde, rathaus, polizei, gericht,',
-  '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
-  '   → Automatisch formell, kein Nachfragen',
+  'C) BEHÖRDEN: → Automatisch formell, kein Nachfragen',
   'D) TON-WECHSEL nur auf explizite Aufforderung',
 ].join('\n');
 
@@ -143,165 +141,89 @@ const CONTACT_RULES = [
   '📇 KONTAKT- & GRUPPEN-GEDÄCHTNIS',
   '===========================================',
   '',
-  '🚨 EISERNE REGELN — NIE BRECHEN 🚨',
+  '🚨 EISERNE REGELN 🚨',
   '',
   'REGEL 1: NIEMALS eine E-Mail verfassen, bevor du:',
-  '  a) Weißt welcher TON (formell/persönlich/locker)',
+  '  a) Weißt welcher TON',
   '  b) Die E-Mail-ADRESSE des Empfängers kennst',
   '',
-  'REGEL 2: NIEMALS eine E-Mail versenden, ohne dass:',
-  '  a) Der Nutzer den kompletten Entwurf gesehen hat',
-  '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
+  'REGEL 2: NIEMALS eine E-Mail versenden, ohne Bestätigung des Nutzers.',
   '',
-  'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
+  'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]":',
   '',
   'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
   '',
-  'Schritt 2: Prüfe Ergebnis.',
-  '  - EINZELKONTAKT GEFUNDEN: → Ton + Adresse → Schritt 5',
-  '  - GRUPPE GEFUNDEN: → alle Mitglieder auflösen',
-  '  - NICHT GEFUNDEN: → STOPP! Schreibe NOCH NICHTS. → Schritt 3',
+  'Schritt 2:',
+  '  - EINZELKONTAKT: → Ton + Adresse übernehmen → Schritt 5',
+  '  - GRUPPE: → alle Mitglieder auflösen',
+  '  - NICHT GEFUNDEN: → STOPP! → Schritt 3',
   '',
-  'Schritt 3: Prüfe Behörden-Keyword',
-  '  - BEHÖRDE: → Ton = formell → Schritt 4',
-  '  - SONST: → Frage "Formell, persönlich oder locker?" → WARTE → Schritt 4',
+  'Schritt 3: Behörde? → formell. Sonst: Frage nach Ton.',
   '',
-  'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
+  'Schritt 4: Frage nach E-Mail-Adresse → WARTE',
   '',
-  'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
+  'Schritt 5: show_draft(to, subject, body, tone) aufrufen',
   '',
-  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-REGEL unten)',
+  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-REGEL)',
   '',
-  'Schritt 7: send_email(to, subject, body, tone)',
-  '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
+  'Schritt 7: send_email nach Bestätigung',
   '',
   'KONTAKT-VERWALTUNG:',
-  '- "Vergiss Alex" → forget_contact(name: "alex")',
-  '- "Welche Kontakte kenne ich?" → list_contacts()',
+  '- "Vergiss Alex" → forget_contact',
+  '- "Welche Kontakte kenne ich?" → list_contacts',
   '',
   '👥 GRUPPEN:',
-  '- "Meine Familie sind Mama, Papa, Alex"',
-  '  → save_group(name: "familie", members: ["mama", "papa", "alex"])',
-  '- "Schreib an meine Familie: ..."',
-  '  → find_group("familie") → alle Mitglieder werden aufgelöst',
-  '- "Vergiss die Gruppe Familie" → forget_group("familie")',
-  '- "Welche Gruppen habe ich?" → list_groups()',
+  '- "Meine Familie sind Mama, Papa, Alex" → save_group',
+  '- "Schreib an meine Familie" → find_group',
+  '- "Welche Gruppen habe ich?" → list_groups',
   '',
-  'MEHRERE EMPFÄNGER:',
-  '- "Schreib an Alex und Constantin: ..."',
-  '  → resolve_recipients(["alex", "constantin"])',
-  '',
-  'NUTZER-PROFIL (lerne aus Kontext):',
-  '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
-  '- "Ich wohne in ..." → save_user_profile(address: "...")',
-  '- "Meine E-Mail ist ..." → save_user_profile(default_email: "...")',
+  'NUTZER-PROFIL:',
+  '- "Ich bin Eugen Priss" → save_user_profile(name)',
+  '- "Ich wohne in ..." → save_user_profile(address)',
+  '- "Meine E-Mail ist ..." → save_user_profile(default_email)',
 ].join('\n');
 
 const DRAFT_CONFIRMATION = [
   '===========================================',
-  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
+  '📝 ENTWURF-REGEL (gilt für NORMALE E-Mails)',
   '===========================================',
   '',
-  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
+  '⚠️ GILT NICHT für Karussells! (siehe Business-Workflow)',
   '',
-  '⛔ SCHREIBE DEN ENTWURF NIEMALS ALS TEXT IN DEINE ANTWORT!',
-  '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Nachricht.',
+  'Wenn Ton + Adresse geklärt sind → show_draft aufrufen.',
   '',
-  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
-  'Du antwortest dem Nutzer nur mit EINEM kurzen Satz wie:',
-  '- "Entwurf ist da. Prüf ihn."',
-  '- "Hab einen Entwurf erstellt."',
+  '⛔ SCHREIBE DEN ENTWURF NIEMALS ALS TEXT!',
   '',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  '⏸️ NACH show_draft: WARTE auf Reaktion',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  'Die App zeigt die Karte automatisch.',
+  'Du antwortest nur: "Entwurf ist da. Prüf ihn."',
   '',
-  '✅ JA-WÖRTER → Rufe SOFORT send_email auf:',
-  '- "ja" / "jep" / "jup" / "ok" / "okay"',
-  '- "senden" / "schick" / "schick weg" / "schick ab"',
-  '- "raus" / "raus damit" / "weg damit" / "los"',
-  '- "passt" / "passt so" / "so lassen" / "ab damit"',
-  '- "sende" / "sende ab" / "los geht\'s"',
-  '- "yes" / "yep" / "jo" / "klar"',
+  '✅ JA-WÖRTER (send_email aufrufen):',
+  '- "ja" / "ok" / "senden" / "schick weg" / "raus damit" / "los"',
   '',
-  'WICHTIG:',
-  '- "schick weg" = SENDEN (nicht warten!)',
-  '- "raus damit" = SENDEN',
-  '- "weg" (allein) = SENDEN',
+  '❌ NEIN-WÖRTER (verwerfen):',
+  '- "nein" / "abbrechen" / "löschen" / "vergiss es" / "ändern"',
   '',
-  '❌ NEIN-WÖRTER → Verwirf den Entwurf (KEIN send_email):',
-  '- "nein" / "no" / "nö"',
-  '- "abbrechen" / "cancel" / "stop" / "stopp"',
-  '- "vergiss es" / "vergiss das" / "lösch" / "lösche"',
-  '- "verwerfen" / "verwerfe"',
-  '- "anders" / "änder" / "ändern" / "nochmal" / "neu"',
-  '- "gefällt mir nicht" / "passt nicht"',
-  '',
-  'WICHTIG:',
-  '- "lösch das" = ABBRECHEN (nicht senden!)',
-  '- "vergiss es" = ABBRECHEN',
-  '- "schmeiß weg" = ABBRECHEN',
-  '',
-  '🖱️ APP-BUTTONS (automatisch):',
-  '- Wenn App ✅ klickt → automatisch send_email',
-  '- Wenn App ❌ klickt → automatisch verwerfen',
-  '',
-  '❓ UNKLAR → Kurze Rückfrage:',
-  '- "Soll ich senden oder verwerfen?"',
-  '',
-  'NACH DEM SENDEN:',
-  '- Kurz bestätigen: "✅ Ist raus."',
-  '',
-  'NACH DEM VERWERFEN:',
-  '- Kurz bestätigen: "Okay, verworfen."',
+  'NACH DEM SENDEN: "✅ Ist raus."',
+  'NACH DEM VERWERFEN: "Okay, verworfen."',
 ].join('\n');
 
 const SIGNATURE_RULE = [
-  '===========================================',
-  '✍️ SIGNATUR-REGEL',
-  '===========================================',
-  '',
-  'Du schreibst E-Mails OHNE Signatur am Ende.',
-  'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
-  'Der Server fügt die Signatur automatisch hinzu.',
-  '',
-  '⛔ NIEMALS selbst unterschreiben.',
+  '✍️ SIGNATUR-REGEL: Du schreibst KEINE Signatur. Der Server hängt sie an.',
 ].join('\n');
 
 const ATTACHMENT_RULE = [
-  '===========================================',
-  '📎 ANHANG-REGEL',
-  '===========================================',
-  '',
-  'Anhänge werden AUTOMATISCH mitgeschickt — du rufst KEIN Tool extra auf.',
-  '',
-  'WENN Anhänge bereit sind:',
-  '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
-  '- Erwähne sie NICHT explizit im body.',
-  '- Die App zeigt sie in der Karte.',
+  '📎 ANHANG-REGEL: Anhänge werden AUTOMATISCH mitgeschickt.',
 ].join('\n');
 
 const TELEGRAM_RULE = [
-  '===========================================',
-  '📨 TELEGRAM',
-  '===========================================',
-  '',
-  'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
-  'Frage IMMER zuerst: "Soll ich das schicken?"',
-  '',
-  'Standard-Empfänger (Eugen): 8448058381',
+  '📨 TELEGRAM: send_telegram_message(chat_id, text)',
+  'Standard-Eugen: 8448058381',
+  'Frage IMMER zuerst nach Bestätigung.',
 ].join('\n');
 
 const STANDORT_RULE = [
-  '===========================================',
-  'STANDORT-REGEL',
-  '===========================================',
-  '',
-  'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
-  'nutze das als location für get_weather / find_restaurants.',
+  '📍 STANDORT: "hier"/"bei mir" → aktueller Standort.',
 ].join('\n');
-
-// ==================== FUNDAMENT-BAUSTEIN ====================
 
 function buildFoundation(profile, attachments = []) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -310,7 +232,6 @@ function buildFoundation(profile, attachments = []) {
   const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
 
-  // Nutzer-Profil-Block
   const profileLines = [];
   if (profile.user_name) profileLines.push('Name: ' + profile.user_name);
   if (profile.user_address) profileLines.push('Adresse: ' + profile.user_address);
@@ -318,22 +239,17 @@ function buildFoundation(profile, attachments = []) {
   if (profile.user_phone) profileLines.push('Telefon: ' + profile.user_phone);
   profileLines.push('Standard-E-Mail: ' + (profile.user_email_default || 'eugen.priss@yahoo.com'));
 
-  // Standort
   let locationInfo = 'Standort: ' + (profile.hometown || 'unbekannt');
   if (profile.current_city) {
     locationInfo = 'Aktueller Standort: ' + profile.current_city;
-    if (profile.current_lat != null && profile.current_lon != null) {
-      locationInfo += ' (GPS: ' + profile.current_lat.toFixed(3) + ', ' + profile.current_lon.toFixed(3) + ')';
-    }
   }
 
-  // Anhänge
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
       '  - ' + a.filename + ' (' + Math.round(a.size / 1024) + ' KB)'
     );
-    attachmentNote = '📎 AKTUELLE ANHÄNGE: ' + attachments.length + ' Datei(en) bereit:\n' + lines.join('\n');
+    attachmentNote = '📎 AKTUELLE ANHÄNGE:\n' + lines.join('\n');
   }
 
   const lines = [
@@ -341,7 +257,8 @@ function buildFoundation(profile, attachments = []) {
     '',
     ANTI_REPETITION,
     '',
-    'Heute ist ' + today + ' (' + timeCtx + '). Nutzer: ' + name + '.',
+    'Heute ist ' + today + ' (' + timeCtx + ').',
+    'Nutzer: ' + name + '.',
     locationInfo,
     '',
     'NUTZER-PROFIL:',
@@ -349,9 +266,9 @@ function buildFoundation(profile, attachments = []) {
     '',
     TONE_RULES,
     '',
-    CONTACT_RULES,
-    '',
     DRAFT_CONFIRMATION,
+    '',
+    CONTACT_RULES,
     '',
     SIGNATURE_RULE,
     '',
@@ -374,58 +291,16 @@ function buildFoundation(profile, attachments = []) {
 // ==================== JONY-ROLLEN ====================
 
 const ROLES = {
-  freund: {
-    name: 'Freund',
-    prompt: [
-      'Du bist im FREUND-MODUS.',
-      '- Sei wie ein guter, alter Freund.',
-      '- Sprich aus dem Bauch.',
-      '- 1-3 Sätze.',
-      '- Variiere.',
-    ].join('\n'),
-  },
-  party: {
-    name: 'Party',
-    prompt: [
-      'Du bist im PARTY-MODUS.',
-      '- Locker, jugendlich, mit Humor.',
-      '- Coole Kumpel.',
-      '- Aktiv, nicht aufdringlich.',
-    ].join('\n'),
-  },
-  berater: {
-    name: 'Berater',
-    prompt: [
-      'Du bist im BERATER-MODUS.',
-      '- Sachlich, präzise.',
-      '- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.',
-      '- 2-4 Sätze.',
-    ].join('\n'),
-  },
-  kids: {
-    name: 'Kids',
-    prompt: [
-      'Du bist im KIDS-MODUS – für Kinder (8-14 Jahre).',
-      '- Locker, entspannt, wie ein älterer Cousin (14-16).',
-      '- NIE herablassend, NIE peinlich.',
-      '- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.',
-      '',
-      'WENN DU MIT NIKLAS SPRICHST (11):',
-      '- Er spielt Fußball (mit Papa).',
-      '- Er ist stark in Mathe.',
-      '- Sein Bruder Konstantin ist über 18.',
-      '',
-      'GEDÄCHTNIS: Wenn Niklas was über sich erzählt → save_user_preference (key: "niklas_<thema>").',
-    ].join('\n'),
-  },
+  freund: { name: 'Freund', prompt: 'Sei wie ein guter, alter Freund. 1-3 Sätze.' },
+  party: { name: 'Party', prompt: 'Locker, jugendlich, mit Humor. Coole Kumpel.' },
+  berater: { name: 'Berater', prompt: 'Sachlich, präzise. Bei Recht/Medizin: Hinweis auf Prüfung.' },
+  kids: { name: 'Kids', prompt: 'Für Kinder (8-14). Locker wie älterer Cousin. Gaming, Fußball, coole Fakten.' },
 };
 
 const JONY_BASE = [
   'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).',
   'Ehrlich, warmherzig, direkt, humorvoll. Kein Assistent – ein Freund.',
-  '',
-  'Du bist hier im TEXT-CHAT (App).',
-  'Antworte kurz: 1-3 Sätze. Chat-Stil, kein Aufsatz.',
+  'Du bist hier im TEXT-CHAT (App). Antworte kurz: 1-3 Sätze.',
 ].join('\n');
 
 const JONY_TOOLS_LIST = [
@@ -435,7 +310,7 @@ const JONY_TOOLS_LIST = [
   'save_user_profile, show_draft, send_email, send_telegram_message',
 ].join('\n');
 
-// ==================== BUSINESS-WORKFLOW ====================
+// ==================== BUSINESS-WORKFLOW (KORRIGIERT) ====================
 
 const BUSINESS_WORKFLOW = [
   '===========================================',
@@ -443,38 +318,64 @@ const BUSINESS_WORKFLOW = [
   '===========================================',
   '',
   'Du bist Content-Stratege für Instagram-Karussells.',
-  '',
-  '🚨 WICHTIG: Du SPRICHST Skripte NIEMALS laut vor.',
+  '🚨 Du SPRICHST Skripte NIEMALS laut vor.',
   '',
   'WORKFLOW:',
   '1. Thema klären',
   '2. Sage: "Alles klar, ich erstelle das Skript."',
   '3. Rufe generate_script auf',
   '4. Nach Tool: "Skript ist da. Schau in die App."',
-  '5. Bei "mach Bilder": generate_image für JEDEN Slide einzeln',
-  '6. Bei "schick per Mail":',
-  '   - "an mich" → nutze Standard-E-Mail (oben im Fundament)',
-  '   - Andere Adresse genannt → nimm sie direkt',
-  '   - KEINE Adresse genannt → frage nach',
-  '   - IMMER kurz bestätigen, dann send_carousel_email',
+  '5. Bei "mach Bilder": generate_image für JEDEN Slide',
   '',
-  'STIL: Direkt, präzise, kurz. KEIN Smalltalk.',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '🚨 KARUSSELL VERSENDEN — WICHTIGSTE REGEL 🚨',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '',
-  'VERBOTEN:',
-  '- Skript vorlesen',
-  '- Smalltalk',
-  '- Tools nach Fehler wiederholen',
+  'Wenn der Nutzer ein KARUSSELL verschicken will',
+  '(egal ob "per Mail", "an mich", "an X", "auf Telegram"):',
+  '',
+  '⛔ NIEMALS show_draft aufrufen für ein Karussell!',
+  '⛔ NIEMALS send_email aufrufen für ein Karussell!',
+  '',
+  '✅ STATTDESSEN:',
+  '',
+  'A) KARUSSELL PER E-MAIL → send_carousel_email(to)',
+  '   - Hängt ALLE Karussell-Bilder automatisch an',
+  '   - "an mich" → ' + 'eugen.priss@yahoo.com',
+  '   - Andere Adresse → direkt nutzen',
+  '   - Bestätige kurz und rufe das Tool auf',
+  '',
+  'B) KARUSSELL PER TELEGRAM → send_carousel_telegram(chat_id)',
+  '   - Schickt alle Bilder + Text an den Chat',
+  '   - "an mich" → chat_id "8448058381"',
+  '   - Bestätige kurz und rufe das Tool auf',
+  '',
+  'C) BEIDE KANÄLE → beide Tools hintereinander',
+  '',
+  'BEISPIEL:',
+  'Nutzer: "Schick mir das per Mail"',
+  'Jony: "Soll ich das Karussell an eugen.priss@yahoo.com senden?"',
+  'Nutzer: "Ja"',
+  'Jony: (ruft send_carousel_email auf — NICHT show_draft!)',
+  '',
+  'BEISPIEL "beide":',
+  'Nutzer: "An beide"',
+  'Jony: "Mail + Telegram an dich?"',
+  'Nutzer: "Ja"',
+  'Jony: (send_carousel_email UND send_carousel_telegram)',
+  '',
+  'STIL: Direkt, präzise, kurz.',
 ].join('\n');
 
 const BUSINESS_TOOLS_LIST = [
-  'generate_script, generate_image, send_carousel_email',
-  '(plus alle Kontakt-/Gruppen-Tools aus dem Fundament)',
+  'generate_script, generate_image,',
+  'send_carousel_email, send_carousel_telegram,',
+  'plus alle Kontakt-/Gruppen-/E-Mail-Tools aus dem Fundament.',
 ].join('\n');
 
-// ==================== SYSTEM-PROMPT BAUEN ====================
+// ==================== PROMPT-BUILD ====================
 
 function buildSystemPrompt(profile, role, mode, attachments = []) {
-  // Fundament für ALLE Modi
   const foundation = buildFoundation(profile, attachments);
 
   if (mode === 'business') {
@@ -490,7 +391,6 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     ].join('\n');
   }
 
-  // Jony-Modus
   const roleData = ROLES[role] || ROLES.freund;
 
   return [
@@ -498,9 +398,7 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     '',
     JONY_BASE,
     '',
-    '===========================================',
-    'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
-    '===========================================',
+    'ROLLE: ' + roleData.name.toUpperCase(),
     roleData.prompt,
     '',
     '===========================================',
@@ -662,8 +560,7 @@ const JONY_TOOLS = [
   },
   {
     name: 'show_draft',
-    description: 'Zeigt den E-Mail-Entwurf als Karte in der App. ' +
-                 '⛔ Schreibe den Entwurf NICHT als Text.',
+    description: 'Zeigt E-Mail-Entwurf als Karte (NUR für normale E-Mails, NICHT für Karussells).',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -677,7 +574,7 @@ const JONY_TOOLS = [
   },
   {
     name: 'send_email',
-    description: 'Sendet die E-Mail nach Bestätigung.',
+    description: 'Sendet die E-Mail nach Bestätigung (NUR für normale E-Mails).',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -703,7 +600,6 @@ const JONY_TOOLS = [
   },
 ];
 
-// Business-Modus: zusätzlich zum Fundament noch Karussell-Tools
 const BUSINESS_TOOLS = [
   ...JONY_TOOLS,
   {
@@ -734,11 +630,22 @@ const BUSINESS_TOOLS = [
   },
   {
     name: 'send_carousel_email',
-    description: 'Sendet das Karussell per E-Mail.',
+    description: 'Sendet das Karussell MIT ALLEN BILDERN als E-Mail-Anhang. ' +
+                 'Nutze das IMMER wenn der Nutzer ein Karussell per Mail will.',
     parameters: {
       type: 'OBJECT',
       properties: { to: { type: 'STRING' } },
       required: ['to'],
+    },
+  },
+  {
+    name: 'send_carousel_telegram',
+    description: 'Sendet das Karussell MIT ALLEN BILDERN an Telegram. ' +
+                 'Nutze das IMMER wenn der Nutzer ein Karussell auf Telegram will.',
+    parameters: {
+      type: 'OBJECT',
+      properties: { chat_id: { type: 'STRING' } },
+      required: ['chat_id'],
     },
   },
 ];
@@ -957,7 +864,7 @@ async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlic
 }
 
 async function sendTelegram(chatId, text) {
-  console.log(`📨 Sende Telegram an ${chatId}: "${text.substring(0, 60)}"`);
+  console.log(`📨 Sende Telegram an ${chatId}`);
   const res = await fetch(SELF_URL + '/api/telegram/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -967,8 +874,67 @@ async function sendTelegram(chatId, text) {
     const errText = await res.text();
     return { error: `Telegram-Versand fehlgeschlagen: ${res.status} ${errText.substring(0, 100)}` };
   }
-  const data = await res.json();
   return { success: true, to: chatId, message: 'Telegram-Nachricht gesendet.' };
+}
+
+// Karussell per Mail
+async function sendCarouselEmail(userId, to, profile = {}) {
+  console.log(`📧 Sende Karussell per Mail an ${to}`);
+  const carousel = getCarousel(userId);
+  if (!carousel) {
+    return { error: 'Kein Karussell im Speicher. Erst eins erstellen.' };
+  }
+
+  try {
+    const res = await sendCarouselByEmail(to, carousel, profile);
+    return {
+      success: true,
+      to,
+      topic: res.topic,
+      imageCount: res.imageCount,
+      message: `Karussell "${res.topic}" mit ${res.imageCount} Bildern an ${to} gesendet.`,
+    };
+  } catch (e) {
+    return { error: 'E-Mail-Versand fehlgeschlagen: ' + e.message };
+  }
+}
+
+// Karussell per Telegram (Bilder + Text)
+async function sendCarouselTelegram(userId, chatId) {
+  console.log(`📨 Sende Karussell per Telegram an ${chatId}`);
+  const carousel = getCarousel(userId);
+  if (!carousel) {
+    return { error: 'Kein Karussell im Speicher. Erst eins erstellen.' };
+  }
+
+  try {
+    const res = await fetch(SELF_URL + '/api/telegram/send-carousel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        topic: carousel.topic,
+        slides: carousel.slides,
+        images: carousel.images,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { error: `Telegram-Karussell-Versand fehlgeschlagen: ${res.status}` };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      to: chatId,
+      topic: carousel.topic,
+      imageCount: data.imagesSent || carousel.images.length,
+      message: `Karussell "${carousel.topic}" mit ${data.imagesSent || carousel.images.length} Bildern auf Telegram gesendet.`,
+    };
+  } catch (e) {
+    return { error: 'Telegram-Versand fehlgeschlagen: ' + e.message };
+  }
 }
 
 // ==================== SCRIPT + IMAGE ====================
@@ -1148,10 +1114,10 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
     return await generateImageAndBroadcast(args.prompt, args.slide_number, userId);
   }
   if (name === 'send_carousel_email') {
-    const carousel = getCarousel(userId);
-    if (!carousel) return { error: 'Kein Karussell gefunden.' };
-    const res = await sendCarouselByEmail(args.to, carousel, profile);
-    return { success: true, message: `Karussell "${res.topic}" an ${args.to} gesendet.` };
+    return await sendCarouselEmail(userId, args.to, profile);
+  }
+  if (name === 'send_carousel_telegram') {
+    return await sendCarouselTelegram(userId, args.chat_id);
   }
   return { error: 'Unbekanntes Tool: ' + name };
 }
@@ -1175,7 +1141,7 @@ async function loadChatHistory(userId, limit = 10) {
     const ageMs = now - newestTime;
 
     if (ageMs > CHAT_SESSION_RESET_MS) {
-      console.log(`📭 Chat-Session-Reset: Letzte Nachricht ${Math.round(ageMs/60000)} Min alt → neue Session`);
+      console.log(`📭 Chat-Session-Reset: Letzte Nachricht ${Math.round(ageMs/60000)} Min alt`);
       return [];
     }
 
@@ -1186,9 +1152,7 @@ async function loadChatHistory(userId, limit = 10) {
       const rowTime = new Date(row.created_at).getTime();
       const gapMs = prevTime - rowTime;
 
-      if (gapMs > CHAT_SESSION_RESET_MS) {
-        break;
-      }
+      if (gapMs > CHAT_SESSION_RESET_MS) break;
       sessionMessages.push(row);
       prevTime = rowTime;
     }
@@ -1265,8 +1229,6 @@ export async function initChatTable() {
   }
 }
 
-// ==================== PROFIL ====================
-
 async function loadUserProfile(userId) {
   try {
     const res = await fetch(SELF_URL + '/api/profile/' + userId);
@@ -1277,8 +1239,6 @@ async function loadUserProfile(userId) {
     return {};
   }
 }
-
-// ==================== MODUS-ERKENNUNG ====================
 
 function detectChatMode(message, currentMode = 'jony') {
   const t = message.toLowerCase();
@@ -1320,7 +1280,7 @@ export async function handleChatMessage(
 ) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-  console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}" (Anhänge: ${attachments.length})`);
+  console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
@@ -1333,8 +1293,6 @@ export async function handleChatMessage(
 
   const profile = await loadUserProfile(userId);
   const history = await loadChatHistory(userId, 8);
-
-  console.log(`   📚 History: ${history.length} Nachrichten aus aktueller Session`);
 
   const enrichedProfile = {
     ...profile,
@@ -1374,17 +1332,14 @@ export async function handleChatMessage(
             tools: [{ functionDeclarations: tools }],
             temperature: 0.8,
             maxOutputTokens: 500,
-            thinkingConfig: {
-              thinkingLevel: 'low'
-            },
+            thinkingConfig: { thinkingLevel: 'low' },
           },
         });
         console.log(`   ✅ Chat-Modell: ${modelName}`);
         break;
       } catch (e) {
         const errMsg = e.message || String(e);
-        if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('no longer available')) {
-          console.log(`   ⏭️  ${modelName} nicht verfügbar`);
+        if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) {
           continue;
         }
         if (errMsg.includes('thinking') || errMsg.includes('Thinking')) {
@@ -1399,14 +1354,11 @@ export async function handleChatMessage(
                 maxOutputTokens: 500,
               },
             });
-            console.log(`   ✅ Chat-Modell (ohne thinkingConfig): ${modelName}`);
             break;
           } catch (e2) {
-            console.error(`   ❌ Retry ohne thinkingConfig fehlgeschlagen:`, e2.message);
             continue;
           }
         }
-        console.error(`   ❌ Fehler bei ${modelName}:`, errMsg);
         continue;
       }
     }

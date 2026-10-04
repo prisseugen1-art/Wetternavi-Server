@@ -51,7 +51,7 @@ function getTimeContext() {
   return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
 }
 
-// ==================== FUNDAMENT-PROMPT (für ALLE Modi) ====================
+// ==================== FUNDAMENT (für ALLE Modi) ====================
 
 const LANGUAGE_RULE = [
   '===========================================',
@@ -181,61 +181,37 @@ const CONTACT_RULES = [
 
 const DRAFT_RULE = [
   '===========================================',
-  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
+  '📝 ENTWURF-REGEL (gilt für NORMALE E-Mails)',
   '===========================================',
   '',
-  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
+  '⚠️ GILT NICHT für Karussells! (siehe Business-Workflow)',
+  '',
+  'Wenn Ton + Adresse geklärt sind → show_draft aufrufen.',
   '',
   '⛔ LIES DEN ENTWURF NIEMALS LAUT VOR!',
   '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Sprache.',
   '',
-  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
-  'Du sagst dem Nutzer nur EINEN kurzen Satz wie:',
+  'Die App zeigt die Karte automatisch.',
+  'Du sagst nur EINEN kurzen Satz:',
   '- "Entwurf ist da. Schau auf den Bildschirm."',
-  '- "Hab einen Entwurf erstellt."',
   '',
   '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '⏸️ NACH show_draft: WARTE auf Reaktion',
   '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '',
   '✅ JA-WÖRTER → Rufe SOFORT send_email auf:',
-  '- "ja" / "jep" / "jup" / "ok" / "okay"',
-  '- "senden" / "schick" / "schick weg" / "schick ab"',
-  '- "raus" / "raus damit" / "weg damit" / "los"',
-  '- "passt" / "passt so" / "so lassen" / "ab damit"',
-  '- "sende" / "sende ab" / "los geht\'s"',
-  '- "yes" / "yep" / "jo" / "klar"',
+  '- "ja" / "jep" / "ok" / "okay"',
+  '- "senden" / "schick" / "schick weg" / "raus"',
+  '- "los" / "passt" / "ab damit"',
   '',
-  'WICHTIG:',
-  '- "schick weg" = SENDEN (nicht warten!)',
-  '- "raus damit" = SENDEN',
-  '- "weg" (allein) = SENDEN',
+  '❌ NEIN-WÖRTER → Verwirf den Entwurf:',
+  '- "nein" / "abbrechen" / "lösch" / "lösche"',
+  '- "vergiss es" / "verwerfen" / "ändern"',
   '',
-  '❌ NEIN-WÖRTER → Verwirf den Entwurf (KEIN send_email):',
-  '- "nein" / "no" / "nö"',
-  '- "abbrechen" / "cancel" / "stop" / "stopp"',
-  '- "vergiss es" / "vergiss das" / "lösch" / "lösche"',
-  '- "verwerfen" / "verwerfe"',
-  '- "anders" / "änder" / "ändern" / "nochmal" / "neu"',
-  '- "gefällt mir nicht" / "passt nicht"',
+  '❓ UNKLAR → Rückfrage: "Senden oder verwerfen?"',
   '',
-  'WICHTIG:',
-  '- "lösch das" = ABBRECHEN (nicht senden!)',
-  '- "vergiss es" = ABBRECHEN',
-  '- "schmeiß weg" = ABBRECHEN',
-  '',
-  '🖱️ APP-BUTTONS (automatisch):',
-  '- Wenn App ✅ klickt → automatisch send_email',
-  '- Wenn App ❌ klickt → automatisch verwerfen',
-  '',
-  '❓ UNKLAR → Kurze Rückfrage:',
-  '- "Soll ich senden oder verwerfen?"',
-  '',
-  'NACH DEM SENDEN:',
-  '- Kurz bestätigen: "✅ Ist raus."',
-  '',
-  'NACH DEM VERWERFEN:',
-  '- Kurz bestätigen: "Okay, verworfen."',
+  'NACH DEM SENDEN: "✅ Ist raus."',
+  'NACH DEM VERWERFEN: "Okay, verworfen."',
 ].join('\n');
 
 const SIGNATURE_RULE = [
@@ -260,7 +236,6 @@ const ATTACHMENT_RULE = [
   'WENN Anhänge bereit sind:',
   '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
   '- Erwähne sie NICHT explizit im body.',
-  '- Die App zeigt sie in der Karte.',
 ].join('\n');
 
 const TELEGRAM_RULE = [
@@ -292,7 +267,6 @@ function buildFoundation(profile, attachments = []) {
   const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
 
-  // Nutzer-Profil-Block
   const profileLines = [];
   if (profile.user_name) profileLines.push('Name: ' + profile.user_name);
   if (profile.user_address) profileLines.push('Adresse: ' + profile.user_address);
@@ -300,7 +274,6 @@ function buildFoundation(profile, attachments = []) {
   if (profile.user_phone) profileLines.push('Telefon: ' + profile.user_phone);
   profileLines.push('Standard-E-Mail: ' + (profile.user_email_default || 'eugen.priss@yahoo.com'));
 
-  // Standort
   let locationInfo = 'Standort: ' + (profile.hometown || 'unbekannt');
   if (profile.current_city) {
     locationInfo = 'Aktueller Standort: ' + profile.current_city;
@@ -309,7 +282,6 @@ function buildFoundation(profile, attachments = []) {
     }
   }
 
-  // Anhänge
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
@@ -417,7 +389,7 @@ const JONY_TOOLS_LIST = [
   'save_user_profile, show_draft, send_email, send_telegram_message',
 ].join('\n');
 
-// ==================== BUSINESS-WORKFLOW ====================
+// ==================== BUSINESS-WORKFLOW (KORRIGIERT) ====================
 
 const BUSINESS_WORKFLOW = [
   '===========================================',
@@ -434,27 +406,51 @@ const BUSINESS_WORKFLOW = [
   '3. Rufe generate_script auf',
   '4. Nach Tool: "Skript ist da. Schau in die App."',
   '5. Bei "mach Bilder": generate_image für JEDEN Slide einzeln',
-  '6. Bei "schick per Mail":',
-  '   - "an mich" → nutze Standard-E-Mail (oben im Fundament)',
-  '   - Andere Adresse genannt → nimm sie direkt',
-  '   - KEINE Adresse genannt → frage nach',
-  '   - IMMER kurz bestätigen, dann send_carousel_email',
   '',
-  'STIL: Direkt, präzise, kurz. KEIN Smalltalk.',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '🚨 KARUSSELL VERSENDEN — WICHTIGSTE REGEL 🚨',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '',
-  'VERBOTEN:',
-  '- Skript vorlesen',
-  '- Smalltalk',
-  '- Tools nach Fehler wiederholen',
+  'Wenn der Nutzer ein KARUSSELL verschicken will',
+  '(egal ob "per Mail", "an mich", "an X", "auf Telegram"):',
+  '',
+  '⛔ NIEMALS show_draft aufrufen für ein Karussell!',
+  '⛔ NIEMALS send_email aufrufen für ein Karussell!',
+  '',
+  '✅ STATTDESSEN:',
+  '',
+  'A) KARUSSELL PER E-MAIL → send_carousel_email(to)',
+  '   - Hängt ALLE Karussell-Bilder automatisch an',
+  '   - "an mich" → eugen.priss@yahoo.com',
+  '   - Andere Adresse → direkt nutzen',
+  '   - Bestätige kurz und rufe das Tool auf',
+  '',
+  'B) KARUSSELL PER TELEGRAM → send_carousel_telegram(chat_id)',
+  '   - Schickt alle Bilder + Text an den Chat',
+  '   - "an mich" → chat_id "8448058381"',
+  '   - Bestätige kurz und rufe das Tool auf',
+  '',
+  'C) BEIDE KANÄLE → beide Tools hintereinander',
+  '',
+  'BEISPIEL 1:',
+  'Nutzer: "Schick mir das per Mail"',
+  'Jony: "Soll ich das Karussell an eugen.priss@yahoo.com senden?"',
+  'Nutzer: "Ja"',
+  'Jony: (ruft send_carousel_email auf — NICHT show_draft!)',
+  '',
+  'BEISPIEL 2:',
+  'Nutzer: "An beide"',
+  'Jony: "Mail + Telegram an dich?"',
+  'Nutzer: "Ja"',
+  'Jony: (send_carousel_email UND send_carousel_telegram)',
+  '',
+  'STIL: Direkt, präzise, kurz.',
 ].join('\n');
 
 const BUSINESS_TOOLS_LIST = [
-  'generate_script, generate_image, send_carousel_email',
-  '',
-  'PLUS alle Kontakt-/Gruppen-/E-Mail-Tools aus dem Fundament.',
-  'PLUS: Du kannst auch im Business-Modus ganz normale E-Mails',
-  '      verfassen (show_draft / send_email) — wenn der Nutzer das',
-  '      ausdrücklich verlangt. Karussell bleibt aber dein Hauptfokus.',
+  'generate_script, generate_image,',
+  'send_carousel_email, send_carousel_telegram,',
+  'plus alle Kontakt-/Gruppen-/E-Mail-Tools aus dem Fundament.',
 ].join('\n');
 
 // ==================== PROMPT-BUILD ====================
@@ -589,16 +585,13 @@ const PROACTIVE_INTERVALS = {
 
 function buildProactivePrompt(role) {
   if (role === 'kids') {
-    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
-           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem.';
+    return '[SYSTEM-INSTRUKTION] Es ist kurz still. Sei PROAKTIV aber LOCKER: Frag nach was Coolem.';
   }
   if (role === 'party') {
-    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
-           'Sei PROAKTIV: Lockerer Spruch, 1 Satz.';
+    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. Sei PROAKTIV: Lockerer Spruch, 1 Satz.';
   }
   if (role === 'freund') {
-    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
-           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. 1 kurzer Satz.';
+    return '[SYSTEM-INSTRUKTION] Es ist still. Sei sanft proaktiv: Neugierige Frage. 1 kurzer Satz.';
   }
   return null;
 }
@@ -888,7 +881,7 @@ function buildJonyTools() {
       functionDeclarations: [
         {
           name: 'get_weather',
-          description: 'Ruft das aktuelle Wetter und die Vorhersage für einen Ort ab.',
+          description: 'Ruft das aktuelle Wetter ab.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -941,12 +934,10 @@ function buildJonyTools() {
         },
         {
           name: 'find_contact',
-          description: 'Sucht einen Kontakt im Gedächtnis.',
+          description: 'Sucht einen Kontakt.',
           parameters: {
             type: 'OBJECT',
-            properties: {
-              name: { type: 'STRING' },
-            },
+            properties: { name: { type: 'STRING' } },
             required: ['name'],
           },
         },
@@ -974,9 +965,7 @@ function buildJonyTools() {
           description: 'Löscht einen Kontakt.',
           parameters: {
             type: 'OBJECT',
-            properties: {
-              name: { type: 'STRING' },
-            },
+            properties: { name: { type: 'STRING' } },
             required: ['name'],
           },
         },
@@ -987,26 +976,21 @@ function buildJonyTools() {
         },
         {
           name: 'find_group',
-          description: 'Sucht eine Gruppe (z.B. "familie").',
+          description: 'Sucht eine Gruppe.',
           parameters: {
             type: 'OBJECT',
-            properties: {
-              name: { type: 'STRING' },
-            },
+            properties: { name: { type: 'STRING' } },
             required: ['name'],
           },
         },
         {
           name: 'save_group',
-          description: 'Speichert eine Gruppe. members ist eine Liste von Kontakt-Namen.',
+          description: 'Speichert eine Gruppe.',
           parameters: {
             type: 'OBJECT',
             properties: {
               name: { type: 'STRING' },
-              members: {
-                type: 'ARRAY',
-                items: { type: 'STRING' },
-              },
+              members: { type: 'ARRAY', items: { type: 'STRING' } },
               notes: { type: 'STRING' },
             },
             required: ['name', 'members'],
@@ -1017,9 +1001,7 @@ function buildJonyTools() {
           description: 'Löscht eine Gruppe.',
           parameters: {
             type: 'OBJECT',
-            properties: {
-              name: { type: 'STRING' },
-            },
+            properties: { name: { type: 'STRING' } },
             required: ['name'],
           },
         },
@@ -1030,21 +1012,18 @@ function buildJonyTools() {
         },
         {
           name: 'resolve_recipients',
-          description: 'Löst mehrere Namen (Kontakte + Gruppen) zu Empfängern auf.',
+          description: 'Löst mehrere Namen zu Empfängern auf.',
           parameters: {
             type: 'OBJECT',
             properties: {
-              names: {
-                type: 'ARRAY',
-                items: { type: 'STRING' },
-              },
+              names: { type: 'ARRAY', items: { type: 'STRING' } },
             },
             required: ['names'],
           },
         },
         {
           name: 'save_user_profile',
-          description: 'Speichert Nutzer-Profil (Name, Adresse, Geburtsdatum, Telefon).',
+          description: 'Speichert Nutzer-Profil.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1059,22 +1038,22 @@ function buildJonyTools() {
         },
         {
           name: 'show_draft',
-          description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
-                       '⛔ Lies ihn NICHT laut vor. Sage nur kurz: "Entwurf ist da."',
+          description: 'Zeigt E-Mail-Entwurf als Karte (NUR für normale E-Mails, NICHT für Karussells). ' +
+                       '⛔ Lies ihn NICHT laut vor.',
           parameters: {
             type: 'OBJECT',
             properties: {
               to: { type: 'STRING' },
               subject: { type: 'STRING' },
-              body: { type: 'STRING', description: 'Nur Text der E-Mail (ohne Signatur)' },
-              tone: { type: 'STRING', description: 'formell | persönlich | locker' },
+              body: { type: 'STRING' },
+              tone: { type: 'STRING' },
             },
             required: ['to', 'subject', 'body', 'tone'],
           },
         },
         {
           name: 'send_email',
-          description: 'Sendet die E-Mail NACH Bestätigung.',
+          description: 'Sendet die E-Mail nach Bestätigung (NUR für normale E-Mails).',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1098,7 +1077,7 @@ function buildBusinessTools() {
         // Fundament-Tools
         {
           name: 'find_contact',
-          description: 'Sucht einen Kontakt im Gedächtnis.',
+          description: 'Sucht einen Kontakt.',
           parameters: {
             type: 'OBJECT',
             properties: { name: { type: 'STRING' } },
@@ -1226,7 +1205,7 @@ function buildBusinessTools() {
         },
         {
           name: 'send_telegram_message',
-          description: 'Sendet eine Telegram-Nachricht. Frage IMMER zuerst nach Bestätigung.',
+          description: 'Sendet eine Telegram-Nachricht (Text). Frage IMMER zuerst.',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1238,7 +1217,7 @@ function buildBusinessTools() {
         },
         {
           name: 'show_draft',
-          description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
+          description: 'Zeigt E-Mail-Entwurf als Karte (NUR für normale E-Mails, NICHT für Karussells). ' +
                        '⛔ Lies ihn NICHT laut vor.',
           parameters: {
             type: 'OBJECT',
@@ -1253,7 +1232,7 @@ function buildBusinessTools() {
         },
         {
           name: 'send_email',
-          description: 'Sendet die E-Mail NACH Bestätigung.',
+          description: 'Sendet die E-Mail nach Bestätigung (NUR für normale E-Mails).',
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -1265,7 +1244,7 @@ function buildBusinessTools() {
             required: ['to', 'subject', 'body', 'tone'],
           },
         },
-        // Karussell-spezifische Tools
+        // Karussell-Tools
         {
           name: 'generate_script',
           description: 'Erstellt das Instagram-Karussell-Skript.',
@@ -1294,13 +1273,22 @@ function buildBusinessTools() {
         },
         {
           name: 'send_carousel_email',
-          description: 'Sendet das Karussell per E-Mail.',
+          description: 'Sendet das Karussell MIT ALLEN BILDERN als E-Mail-Anhang. ' +
+                       'Nutze das IMMER wenn der Nutzer ein Karussell per Mail will.',
           parameters: {
             type: 'OBJECT',
-            properties: {
-              to: { type: 'STRING' },
-            },
+            properties: { to: { type: 'STRING' } },
             required: ['to'],
+          },
+        },
+        {
+          name: 'send_carousel_telegram',
+          description: 'Sendet das Karussell MIT ALLEN BILDERN an Telegram. ' +
+                       'Nutze das IMMER wenn der Nutzer ein Karussell auf Telegram will.',
+          parameters: {
+            type: 'OBJECT',
+            properties: { chat_id: { type: 'STRING' } },
+            required: ['chat_id'],
           },
         },
       ],
@@ -1378,6 +1366,8 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         );
       } else if (fc.name === 'send_carousel_email') {
         result = await handleSendCarouselEmail(userProfile.user_id, fc.args.to, userProfile);
+      } else if (fc.name === 'send_carousel_telegram') {
+        result = await handleSendCarouselTelegram(userProfile.user_id, fc.args.chat_id);
       }
     } catch (e) {
       console.error('❌ Tool-Fehler:', e);
@@ -1457,6 +1447,38 @@ async function handleSendCarouselEmail(userId, to, profile = {}) {
     return {
       success: true,
       message: `Karussell "${res.topic}" mit ${res.imageCount} Bildern an ${to} gesendet.`,
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleSendCarouselTelegram(userId, chatId) {
+  try {
+    const carousel = getCarousel(userId);
+    if (!carousel) {
+      return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
+    }
+
+    const res = await fetch(SELF_URL + '/api/telegram/send-carousel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        topic: carousel.topic,
+        slides: carousel.slides,
+        images: carousel.images,
+      }),
+    });
+
+    if (!res.ok) {
+      return { error: `Telegram-Karussell fehlgeschlagen: ${res.status}` };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      message: `Karussell "${carousel.topic}" mit ${data.imagesSent} Bildern auf Telegram gesendet.`,
     };
   } catch (e) {
     return { error: e.message };
@@ -1909,13 +1931,11 @@ export function setupGeminiWebSocket(server) {
               clientWs._session.sendClientContent({
                 turns: [{
                   role: 'user',
-                  parts: [{ text: '[SYSTEM] Anhänge bereit: ' + names + '. Du kannst sie bei show_draft/send_email nutzen.' }],
+                  parts: [{ text: '[SYSTEM] Anhänge bereit: ' + names + '.' }],
                 }],
                 turnComplete: true,
               });
-            } catch (e) {
-              console.error('❌ Anhang-Info an Gemini Fehler:', e.message);
-            }
+            } catch (e) {}
           }
 
           clientWs.send(JSON.stringify({
@@ -1929,7 +1949,6 @@ export function setupGeminiWebSocket(server) {
         if (msg.type === 'attachment_removed') {
           const freshAttachments = await fetchUserAttachments(userProfile.user_id);
           clientWs._currentAttachments = freshAttachments;
-          console.log(`📎 Anhang entfernt. Jetzt: ${freshAttachments.length}`);
           return;
         }
 
