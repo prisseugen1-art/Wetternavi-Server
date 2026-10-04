@@ -7,7 +7,7 @@ import pg from 'pg';
 import http from 'http';
 import { SensorEvent, SensorBus, SensorSource } from './sensors/sensor_events.js';
 import { setupGeminiWebSocket, broadcastToClients } from './server/gemini_live.js';
-import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo } from './server/telegram.js';
+import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo, sendTelegramMessage } from './server/telegram.js';
 import { handleChatMessage, getChatHistory, initChatTable, getDraft, clearDraft } from './server/chat.js';
 import { initEmail, getEmailStatus, sendEmail } from './server/email.js';
 
@@ -509,31 +509,44 @@ app.post('/api/attachments/clear', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// ========== TELEGRAM-SEND-API ==========
 
-app.post('/api/telegram/send', async (req, res) => {
+// ========== DRAFT-API ==========
+
+app.post('/api/draft/save', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
-    const { chat_id, text } = args;
+    const { user_id, to, subject, body, tone } = args;
 
-    if (!chat_id || !text) {
-      return res.status(400).json({ error: 'chat_id and text required' });
+    if (!user_id || !to || !subject || !body) {
+      return res.status(400).json({ error: 'user_id, to, subject, body required' });
     }
 
-    const { sendTelegramMessage } = await import('./server/telegram.js');
-    const result = await sendTelegramMessage(chat_id, text);
+    const { setDraft } = await import('./server/chat.js');
+    const draft = setDraft(user_id, { to, subject, body, tone: tone || 'persönlich' });
 
-    console.log(`📨 Telegram gesendet an ${chat_id}`);
-    res.json({ success: true, to: chat_id });
+    broadcastToClients({
+      type: 'draft_shown',
+      draft: {
+        id: draft.id,
+        to: draft.to,
+        subject: draft.subject,
+        body: draft.body,
+        tone: draft.tone,
+        attachments: getAttachments(user_id).map(a => ({
+          id: a.id,
+          filename: a.filename,
+          size: a.size,
+        })),
+      },
+    });
+
+    res.json({ success: true, draft_id: draft.id });
   } catch (error) {
-    console.error('❌ telegram-send Fehler:', error);
+    console.error('❌ draft-save Fehler:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ========== DRAFT-API ==========
-
-// -------- Draft bestätigen + senden --------
 app.post('/api/draft/send', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -594,43 +607,7 @@ app.post('/api/draft/send', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// -------- Draft speichern (für Voice-Modus) --------
-app.post('/api/draft/save', async (req, res) => {
-  try {
-    const args = req.body?.args || req.body || {};
-    const { user_id, to, subject, body, tone } = args;
 
-    if (!user_id || !to || !subject || !body) {
-      return res.status(400).json({ error: 'user_id, to, subject, body required' });
-    }
-
-    const { setDraft } = await import('./server/chat.js');
-    const draft = setDraft(user_id, { to, subject, body, tone: tone || 'persönlich' });
-
-    broadcastToClients({
-      type: 'draft_shown',
-      draft: {
-        id: draft.id,
-        to: draft.to,
-        subject: draft.subject,
-        body: draft.body,
-        tone: draft.tone,
-        attachments: getAttachments(user_id).map(a => ({
-          id: a.id,
-          filename: a.filename,
-          size: a.size,
-        })),
-      },
-    });
-
-    res.json({ success: true, draft_id: draft.id });
-  } catch (error) {
-    console.error('❌ draft-save Fehler:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// -------- Draft abbrechen --------
 app.post('/api/draft/cancel', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -650,7 +627,6 @@ app.post('/api/draft/cancel', async (req, res) => {
   }
 });
 
-// -------- Aktuellen Draft abrufen --------
 app.get('/api/draft/get/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -678,6 +654,27 @@ app.get('/api/draft/get/:userId', async (req, res) => {
       })),
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== TELEGRAM-SEND ==========
+
+app.post('/api/telegram/send', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { chat_id, text } = args;
+
+    if (!chat_id || !text) {
+      return res.status(400).json({ error: 'chat_id and text required' });
+    }
+
+    const result = await sendTelegramMessage(chat_id, text);
+
+    console.log(`📨 Telegram gesendet an ${chat_id}`);
+    res.json({ success: true, to: chat_id });
+  } catch (error) {
+    console.error('❌ telegram-send Fehler:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1311,12 +1308,12 @@ app.post('/api/send-email', async (req, res) => {
       }
     }
 
-        if (results.length > 0 && profile?.user_id) {
+    if (results.length > 0 && profile?.user_id) {
       clearAttachments(profile.user_id);
       clearDraft(profile.user_id);
     }
 
-    // ⬇️ NEU: App informieren — Karte verschwinden lassen
+    // ⬇️ App informieren — Karte verschwinden lassen
     if (results.length > 0) {
       broadcastToClients({
         type: 'draft_sent',
@@ -1333,7 +1330,11 @@ app.post('/api/send-email', async (req, res) => {
       errors,
       attachmentCount: finalAttachments.length,
     });
-
+  } catch (error) {
+    console.error('❌ send-email Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== TELEGRAM ==========
 
