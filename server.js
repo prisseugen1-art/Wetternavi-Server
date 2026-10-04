@@ -588,11 +588,39 @@ app.post('/api/draft/send', async (req, res) => {
     clearDraft(user_id);
     clearAttachments(user_id);
 
-    broadcastToClients({
+        broadcastToClients({
       type: 'draft_sent',
       sent: results.length,
       failed: errors.length,
     });
+
+    // ✅ Jony-Feedback im Chat — Text + Persistenz
+    let confirmText;
+    if (errors.length === 0) {
+      confirmText = `✅ E-Mail an ${recipients.join(', ')} ist raus.`;
+    } else if (results.length === 0) {
+      confirmText = `❌ Versand fehlgeschlagen. Grund: ${errors[0]?.error || 'unbekannt'}`;
+    } else {
+      confirmText = `⚠️ ${results.length} gesendet, ${errors.length} fehlgeschlagen.`;
+    }
+
+    try {
+      await pool.query(`
+        INSERT INTO chat_history (user_id, role, content)
+        VALUES ($1, 'assistant', $2)
+      `, [user_id, confirmText]);
+    } catch (e) {
+      console.error('⚠️ Chat-History-Fehler (draft/send):', e.message);
+    }
+
+    // Live an alle verbundenen Clients broadcasten
+    broadcastToClients({
+      type: 'transcript',
+      role: 'assistant',
+      text: confirmText,
+    });
+
+    console.log(`📢 Jony-Feedback: "${confirmText}"`);
 
     res.json({
       success: errors.length === 0,
@@ -601,6 +629,7 @@ app.post('/api/draft/send', async (req, res) => {
       results,
       errors,
       attachmentCount: attachments.length,
+      message: confirmText,
     });
   } catch (error) {
     console.error('❌ draft-send Fehler:', error);
