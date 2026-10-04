@@ -325,7 +325,45 @@ app.post('/api/debug/delete-key', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// 🚨 EINMALIGER MERGE — NACH BENUTZUNG SOFORT WIEDER LÖSCHEN 🚨
+app.post('/api/debug/merge-users', async (req, res) => {
+  try {
+    const { from_user_id, to_user_id } = req.body;
+    if (!from_user_id || !to_user_id) {
+      return res.status(400).json({ error: 'from_user_id and to_user_id required' });
+    }
+    if (from_user_id === to_user_id) {
+      return res.status(400).json({ error: 'IDs sind identisch' });
+    }
 
+    const fromData = await getUserData(from_user_id);
+    const toData = await getUserData(to_user_id);
+
+    // Ziel gewinnt bei Konflikten (toData überschreibt fromData)
+    const merged = { ...fromData, ...toData };
+
+    await pool.query(`
+      INSERT INTO user_data (user_id, data)
+      VALUES ($1, $2::jsonb)
+      ON CONFLICT (user_id) DO UPDATE
+      SET data = $2::jsonb,
+          updated_at = NOW()
+    `, [to_user_id, JSON.stringify(merged)]);
+
+    console.log(`🔀 Merge: ${from_user_id.substring(0,8)} (${Object.keys(fromData).length} Keys) → ${to_user_id.substring(0,8)} (${Object.keys(toData).length} Keys) = ${Object.keys(merged).length} Keys`);
+    res.json({
+      success: true,
+      from_user_id,
+      to_user_id,
+      from_keys: Object.keys(fromData).length,
+      to_keys: Object.keys(toData).length,
+      merged_keys: Object.keys(merged).length,
+    });
+  } catch (error) {
+    console.error('❌ Merge-Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 app.get('/api/debug/home/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
