@@ -225,25 +225,127 @@ const STANDORT_RULE = [
   '📍 STANDORT: "hier"/"bei mir" → aktueller Standort.',
 ].join('\n');
 
+// ==================== FUNDAMENT-BAUSTEIN (★ GEFIXT ★) ====================
+
 function buildFoundation(profile, attachments = []) {
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
   const timeCtx = getTimeContext();
-  const name = profile.name || 'Nutzer';
+  const name = profile.user_name || profile.name || 'Nutzer';
 
+  // ═════════════════════════════════════════════════════
+  // ✅ FUNDAMENT-FIX: KOMPLETTES user_data in den Prompt
+  // ═════════════════════════════════════════════════════
+
+  const INTERNAL_KEYS = new Set([
+    'user_id', 'current_lat', 'current_lon', 'current_city',
+  ]);
+
+  const PROFILE_LABELS = {
+    user_name: 'Name',
+    user_address: 'Adresse',
+    user_birthdate: 'Geburtsdatum',
+    user_phone: 'Telefon',
+    user_email_default: 'Standard-E-Mail',
+    user_tone_default: 'Standard-Ton',
+    name: 'Name',
+    nickname: 'Spitzname',
+    age: 'Alter',
+    hometown: 'Heimatstadt',
+  };
+
+  // ---- 1. Nutzer-Profil-Felder (dedupliziert) ----
   const profileLines = [];
-  if (profile.user_name) profileLines.push('Name: ' + profile.user_name);
-  if (profile.user_address) profileLines.push('Adresse: ' + profile.user_address);
-  if (profile.user_birthdate) profileLines.push('Geburtsdatum: ' + profile.user_birthdate);
-  if (profile.user_phone) profileLines.push('Telefon: ' + profile.user_phone);
-  profileLines.push('Standard-E-Mail: ' + (profile.user_email_default || 'eugen.priss@yahoo.com'));
+  const seenLabels = new Set();
+  for (const key of Object.keys(profile || {})) {
+    if (INTERNAL_KEYS.has(key)) continue;
+    const label = PROFILE_LABELS[key];
+    if (!label || seenLabels.has(label)) continue;
+    const val = String(profile[key] || '').trim();
+    if (!val) continue;
+    seenLabels.add(label);
+    profileLines.push(label + ': ' + val);
+  }
+  if (!seenLabels.has('Standard-E-Mail')) {
+    profileLines.push('Standard-E-Mail: eugen.priss@yahoo.com');
+  }
 
+  // ---- 2. Kontakte aus contact_*_* ----
+  const contactsMap = new Map();
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    const m = key.match(/^contact_(.+?)_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/);
+    if (!m) continue;
+    const [, cname, field] = m;
+    if (rawVal === null || rawVal === undefined) continue;
+    const v = String(rawVal).trim();
+    if (!v) continue;
+    if (!contactsMap.has(cname)) contactsMap.set(cname, {});
+    contactsMap.get(cname)[field] = v;
+  }
+  const contactLines = [];
+  for (const [cname, c] of [...contactsMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!c.email && !c.telegram && !c.phone && !c.relation && !c.notes) continue;
+    const meta = [];
+    if (c.relation) meta.push('Relation: ' + c.relation);
+    if (c.tone) meta.push('Ton: ' + c.tone);
+    if (c.birthday) meta.push('Geburtstag: ' + c.birthday);
+    if (c.aliases) meta.push('Aliase: ' + c.aliases);
+    const info = [];
+    if (c.email) info.push('E-Mail: ' + c.email);
+    if (c.telegram) info.push('Telegram: ' + c.telegram);
+    if (c.phone) info.push('Tel: ' + c.phone);
+    let line = '- ' + cname;
+    if (meta.length) line += ' (' + meta.join(', ') + ')';
+    if (info.length) line += ' → ' + info.join(' | ');
+    if (c.notes) line += ' — Notiz: ' + c.notes;
+    contactLines.push(line);
+  }
+
+  // ---- 3. Gruppen aus group_*_* ----
+  const groupsMap = new Map();
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    const m = key.match(/^group_(.+?)_(members|notes|learned)$/);
+    if (!m) continue;
+    const [, gname, field] = m;
+    if (rawVal === null || rawVal === undefined) continue;
+    const v = String(rawVal).trim();
+    if (!v) continue;
+    if (!groupsMap.has(gname)) groupsMap.set(gname, {});
+    groupsMap.get(gname)[field] = v;
+  }
+  const groupLines = [];
+  for (const [gname, g] of [...groupsMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!g.members) continue;
+    const members = g.members.split(',').map(s => s.trim()).filter(Boolean);
+    if (!members.length) continue;
+    let line = '- ' + gname + ': ' + members.join(', ');
+    if (g.notes) line += ' (Notiz: ' + g.notes + ')';
+    groupLines.push(line);
+  }
+
+  // ---- 4. Freie Fakten (alles andere) ----
+  const freeFacts = [];
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    if (INTERNAL_KEYS.has(key)) continue;
+    if (PROFILE_LABELS[key]) continue;
+    if (/^contact_.+?_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/.test(key)) continue;
+    if (/^group_.+?_(members|notes|learned)$/.test(key)) continue;
+    if (rawVal === null || rawVal === undefined) continue;
+    const val = String(rawVal).trim();
+    if (!val) continue;
+    freeFacts.push({ key, value: val });
+  }
+  freeFacts.sort((a, b) => a.key.localeCompare(b.key));
+  const factLines = freeFacts.map(f => '- ' + f.key + ': ' + f.value);
+
+  // ---- Standort ----
   let locationInfo = 'Standort: ' + (profile.hometown || 'unbekannt');
   if (profile.current_city) {
     locationInfo = 'Aktueller Standort: ' + profile.current_city;
   }
 
+  // ---- Anhänge ----
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
@@ -252,7 +354,8 @@ function buildFoundation(profile, attachments = []) {
     attachmentNote = '📎 AKTUELLE ANHÄNGE:\n' + lines.join('\n');
   }
 
-  const lines = [
+  // ---- Zusammenbau ----
+  const sections = [
     LANGUAGE_RULE,
     '',
     ANTI_REPETITION,
@@ -261,8 +364,27 @@ function buildFoundation(profile, attachments = []) {
     'Nutzer: ' + name + '.',
     locationInfo,
     '',
-    'NUTZER-PROFIL:',
+    '╔═══════════════════════════════════════════╗',
+    '║ 🧠 DEIN LANGZEIT-GEDÄCHTNIS ÜBER EUGEN    ║',
+    '╚═══════════════════════════════════════════╝',
+    '',
+    '⚠️ WICHTIG: Das hier ist dein KOMPLETTES Wissen über Eugen.',
+    'Wenn er dich etwas über sich, seine Familie, Kontakte oder',
+    'gespeicherte Fakten fragt → antworte DIREKT aus diesem Wissen.',
+    'Rufe NICHT find_contact / get_user_preferences, wenn die Antwort',
+    'hier bereits steht.',
+    '',
+    '── NUTZER-PROFIL ──',
     profileLines.join('\n'),
+    '',
+    '── KONTAKTE (' + contactLines.length + ') ──',
+    contactLines.length > 0 ? contactLines.join('\n') : '(noch keine)',
+    '',
+    '── GRUPPEN (' + groupLines.length + ') ──',
+    groupLines.length > 0 ? groupLines.join('\n') : '(noch keine)',
+    '',
+    '── WEITERE FAKTEN (' + factLines.length + ') ──',
+    factLines.length > 0 ? factLines.join('\n') : '(noch keine)',
     '',
     TONE_RULES,
     '',
@@ -280,12 +402,12 @@ function buildFoundation(profile, attachments = []) {
   ];
 
   if (attachmentNote) {
-    lines.push('');
-    lines.push('===========================================');
-    lines.push(attachmentNote);
+    sections.push('');
+    sections.push('===========================================');
+    sections.push(attachmentNote);
   }
 
-  return lines.join('\n');
+  return sections.join('\n');
 }
 
 // ==================== JONY-ROLLEN ====================
@@ -310,7 +432,7 @@ const JONY_TOOLS_LIST = [
   'save_user_profile, show_draft, send_email, send_telegram_message',
 ].join('\n');
 
-// ==================== BUSINESS-WORKFLOW (KORRIGIERT) ====================
+// ==================== BUSINESS-WORKFLOW ====================
 
 const BUSINESS_WORKFLOW = [
   '===========================================',
@@ -341,7 +463,7 @@ const BUSINESS_WORKFLOW = [
   '',
   'A) KARUSSELL PER E-MAIL → send_carousel_email(to)',
   '   - Hängt ALLE Karussell-Bilder automatisch an',
-  '   - "an mich" → ' + 'eugen.priss@yahoo.com',
+  '   - "an mich" → eugen.priss@yahoo.com',
   '   - Andere Adresse → direkt nutzen',
   '   - Bestätige kurz und rufe das Tool auf',
   '',
@@ -877,7 +999,6 @@ async function sendTelegram(chatId, text) {
   return { success: true, to: chatId, message: 'Telegram-Nachricht gesendet.' };
 }
 
-// Karussell per Mail
 async function sendCarouselEmail(userId, to, profile = {}) {
   console.log(`📧 Sende Karussell per Mail an ${to}`);
   const carousel = getCarousel(userId);
@@ -899,7 +1020,6 @@ async function sendCarouselEmail(userId, to, profile = {}) {
   }
 }
 
-// Karussell per Telegram (Bilder + Text)
 async function sendCarouselTelegram(userId, chatId) {
   console.log(`📨 Sende Karussell per Telegram an ${chatId}`);
   const carousel = getCarousel(userId);

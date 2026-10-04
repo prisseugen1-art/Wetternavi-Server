@@ -258,30 +258,134 @@ const STANDORT_RULE = [
   'nutze das als location für get_weather / find_restaurants.',
 ].join('\n');
 
-// ==================== FUNDAMENT-BAUSTEIN ====================
+// ==================== FUNDAMENT-BAUSTEIN (★ GEFIXT ★) ====================
 
 function buildFoundation(profile, attachments = []) {
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
   const timeCtx = getTimeContext();
-  const name = profile.name || 'Nutzer';
+  const name = profile.user_name || profile.name || 'Nutzer';
 
+  // ═════════════════════════════════════════════════════
+  // ✅ FUNDAMENT-FIX: KOMPLETTES user_data in den Prompt
+  // ═════════════════════════════════════════════════════
+
+  const INTERNAL_KEYS = new Set([
+    'user_id', 'current_lat', 'current_lon', 'current_city',
+  ]);
+
+  const PROFILE_LABELS = {
+    user_name: 'Name',
+    user_address: 'Adresse',
+    user_birthdate: 'Geburtsdatum',
+    user_phone: 'Telefon',
+    user_email_default: 'Standard-E-Mail',
+    user_tone_default: 'Standard-Ton',
+    name: 'Name',
+    nickname: 'Spitzname',
+    age: 'Alter',
+    hometown: 'Heimatstadt',
+  };
+
+  // ---- 1. Nutzer-Profil-Felder (dedupliziert) ----
   const profileLines = [];
-  if (profile.user_name) profileLines.push('Name: ' + profile.user_name);
-  if (profile.user_address) profileLines.push('Adresse: ' + profile.user_address);
-  if (profile.user_birthdate) profileLines.push('Geburtsdatum: ' + profile.user_birthdate);
-  if (profile.user_phone) profileLines.push('Telefon: ' + profile.user_phone);
-  profileLines.push('Standard-E-Mail: ' + (profile.user_email_default || 'eugen.priss@yahoo.com'));
+  const seenLabels = new Set();
+  for (const key of Object.keys(profile || {})) {
+    if (INTERNAL_KEYS.has(key)) continue;
+    const label = PROFILE_LABELS[key];
+    if (!label || seenLabels.has(label)) continue;
+    const val = String(profile[key] || '').trim();
+    if (!val) continue;
+    seenLabels.add(label);
+    profileLines.push(label + ': ' + val);
+  }
+  if (!seenLabels.has('Standard-E-Mail')) {
+    profileLines.push('Standard-E-Mail: eugen.priss@yahoo.com');
+  }
 
+  // ---- 2. Kontakte aus contact_*_* ----
+  const contactsMap = new Map();
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    const m = key.match(/^contact_(.+?)_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/);
+    if (!m) continue;
+    const [, cname, field] = m;
+    if (rawVal === null || rawVal === undefined) continue;
+    const v = String(rawVal).trim();
+    if (!v) continue;
+    if (!contactsMap.has(cname)) contactsMap.set(cname, {});
+    contactsMap.get(cname)[field] = v;
+  }
+  const contactLines = [];
+  for (const [cname, c] of [...contactsMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!c.email && !c.telegram && !c.phone && !c.relation && !c.notes) continue;
+    const meta = [];
+    if (c.relation) meta.push('Relation: ' + c.relation);
+    if (c.tone) meta.push('Ton: ' + c.tone);
+    if (c.birthday) meta.push('Geburtstag: ' + c.birthday);
+    if (c.aliases) meta.push('Aliase: ' + c.aliases);
+    const info = [];
+    if (c.email) info.push('E-Mail: ' + c.email);
+    if (c.telegram) info.push('Telegram: ' + c.telegram);
+    if (c.phone) info.push('Tel: ' + c.phone);
+    let line = '- ' + cname;
+    if (meta.length) line += ' (' + meta.join(', ') + ')';
+    if (info.length) line += ' → ' + info.join(' | ');
+    if (c.notes) line += ' — Notiz: ' + c.notes;
+    contactLines.push(line);
+  }
+
+  // ---- 3. Gruppen aus group_*_* ----
+  const groupsMap = new Map();
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    const m = key.match(/^group_(.+?)_(members|notes|learned)$/);
+    if (!m) continue;
+    const [, gname, field] = m;
+    if (rawVal === null || rawVal === undefined) continue;
+    const v = String(rawVal).trim();
+    if (!v) continue;
+    if (!groupsMap.has(gname)) groupsMap.set(gname, {});
+    groupsMap.get(gname)[field] = v;
+  }
+  const groupLines = [];
+  for (const [gname, g] of [...groupsMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!g.members) continue;
+    const members = g.members.split(',').map(s => s.trim()).filter(Boolean);
+    if (!members.length) continue;
+    let line = '- ' + gname + ': ' + members.join(', ');
+    if (g.notes) line += ' (Notiz: ' + g.notes + ')';
+    groupLines.push(line);
+  }
+
+  // ---- 4. Freie Fakten (alles andere) ----
+  const freeFacts = [];
+  for (const [key, rawVal] of Object.entries(profile || {})) {
+    if (INTERNAL_KEYS.has(key)) continue;
+    if (PROFILE_LABELS[key]) continue;
+    if (/^contact_.+?_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/.test(key)) continue;
+    if (/^group_.+?_(members|notes|learned)$/.test(key)) continue;
+    if (rawVal === null || rawVal === undefined) continue;
+    const val = String(rawVal).trim();
+    if (!val) continue;
+    freeFacts.push({ key, value: val });
+  }
+  freeFacts.sort((a, b) => a.key.localeCompare(b.key));
+  const factLines = freeFacts.map(f => '- ' + f.key + ': ' + f.value);
+
+  // ---- Standort ----
   let locationInfo = 'Standort: ' + (profile.hometown || 'unbekannt');
   if (profile.current_city) {
     locationInfo = 'Aktueller Standort: ' + profile.current_city;
     if (profile.current_lat != null && profile.current_lon != null) {
-      locationInfo += ' (GPS: ' + profile.current_lat.toFixed(3) + ', ' + profile.current_lon.toFixed(3) + ')';
+      const lat = Number(profile.current_lat);
+      const lon = Number(profile.current_lon);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        locationInfo += ' (GPS: ' + lat.toFixed(3) + ', ' + lon.toFixed(3) + ')';
+      }
     }
   }
 
+  // ---- Anhänge ----
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
@@ -290,7 +394,8 @@ function buildFoundation(profile, attachments = []) {
     attachmentNote = '📎 AKTUELLE ANHÄNGE: ' + attachments.length + ' Datei(en) bereit:\n' + lines.join('\n');
   }
 
-  const lines = [
+  // ---- Zusammenbau ----
+  const sections = [
     LANGUAGE_RULE,
     '',
     ANTI_REPETITION,
@@ -301,8 +406,27 @@ function buildFoundation(profile, attachments = []) {
     '',
     locationInfo,
     '',
-    'NUTZER-PROFIL:',
+    '╔═══════════════════════════════════════════╗',
+    '║ 🧠 DEIN LANGZEIT-GEDÄCHTNIS ÜBER EUGEN    ║',
+    '╚═══════════════════════════════════════════╝',
+    '',
+    '⚠️ WICHTIG: Das hier ist dein KOMPLETTES Wissen über Eugen.',
+    'Wenn er dich etwas über sich, seine Familie, Kontakte oder',
+    'gespeicherte Fakten fragt → antworte DIREKT aus diesem Wissen.',
+    'Rufe NICHT find_contact / get_user_preferences, wenn die Antwort',
+    'hier bereits steht.',
+    '',
+    '── NUTZER-PROFIL ──',
     profileLines.join('\n'),
+    '',
+    '── KONTAKTE (' + contactLines.length + ') ──',
+    contactLines.length > 0 ? contactLines.join('\n') : '(noch keine)',
+    '',
+    '── GRUPPEN (' + groupLines.length + ') ──',
+    groupLines.length > 0 ? groupLines.join('\n') : '(noch keine)',
+    '',
+    '── WEITERE FAKTEN (' + factLines.length + ') ──',
+    factLines.length > 0 ? factLines.join('\n') : '(noch keine)',
     '',
     TONE_RULES,
     '',
@@ -320,12 +444,12 @@ function buildFoundation(profile, attachments = []) {
   ];
 
   if (attachmentNote) {
-    lines.push('');
-    lines.push('===========================================');
-    lines.push(attachmentNote);
+    sections.push('');
+    sections.push('===========================================');
+    sections.push(attachmentNote);
   }
 
-  return lines.join('\n');
+  return sections.join('\n');
 }
 
 // ==================== JONY-ROLLEN ====================
@@ -389,7 +513,7 @@ const JONY_TOOLS_LIST = [
   'save_user_profile, show_draft, send_email, send_telegram_message',
 ].join('\n');
 
-// ==================== BUSINESS-WORKFLOW (KORRIGIERT) ====================
+// ==================== BUSINESS-WORKFLOW ====================
 
 const BUSINESS_WORKFLOW = [
   '===========================================',
@@ -646,21 +770,16 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const agentConfig = AGENTS[agentType] || AGENTS.jony;
 
+  // ★ FIX: KOMPLETTES user_data aus DB übernehmen (vorher nur 8 Felder)
   if (userProfile.user_id) {
     try {
       const dbRes = await fetch(SELF_URL + '/api/profile/' + userProfile.user_id);
       if (dbRes.ok) {
         const dbData = await dbRes.json();
         const dbProfile = dbData.data || {};
-        if (dbProfile.name) userProfile.name = dbProfile.name;
-        if (dbProfile.nickname) userProfile.nickname = dbProfile.nickname;
-        if (dbProfile.hometown) userProfile.hometown = dbProfile.hometown;
-        if (dbProfile.user_name) userProfile.user_name = dbProfile.user_name;
-        if (dbProfile.user_address) userProfile.user_address = dbProfile.user_address;
-        if (dbProfile.user_birthdate) userProfile.user_birthdate = dbProfile.user_birthdate;
-        if (dbProfile.user_phone) userProfile.user_phone = dbProfile.user_phone;
-        if (dbProfile.user_email_default) userProfile.user_email_default = dbProfile.user_email_default;
-        console.log(`✅ Profil angereichert: name="${userProfile.name}"`);
+        Object.assign(userProfile, dbProfile);
+        const keyCount = Object.keys(dbProfile).length;
+        console.log(`✅ Profil angereichert: ${keyCount} Keys, name="${userProfile.name || userProfile.user_name || '?'}"`);
       }
     } catch (e) {
       console.error('⚠️ Profil-Anreicherung fehlgeschlagen:', e.message);
@@ -1074,7 +1193,6 @@ function buildBusinessTools() {
   return [
     {
       functionDeclarations: [
-        // Fundament-Tools
         {
           name: 'find_contact',
           description: 'Sucht einen Kontakt.',
@@ -1244,7 +1362,6 @@ function buildBusinessTools() {
             required: ['to', 'subject', 'body', 'tone'],
           },
         },
-        // Karussell-Tools
         {
           name: 'generate_script',
           description: 'Erstellt das Instagram-Karussell-Skript.',
