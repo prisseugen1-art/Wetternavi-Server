@@ -30,7 +30,6 @@ export function getCarousel(userId) {
   if (!userId) return null;
   const s = stores.get(userId);
   if (!s) return null;
-  // Zu alt?
   if (Date.now() - s.createdAt > MAX_AGE_MS) {
     stores.delete(userId);
     return null;
