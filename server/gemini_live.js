@@ -38,28 +38,20 @@ function isHereKeyword(loc) {
   return /^(hier|hier\s+bei\s+mir|bei\s+mir|mein\s+standort|meine\s+position|aktueller\s+standort|vor\s+ort|hier\s+vor\s+ort|здесь|тут|у\s+меня|моё\s+местоположение)$/.test(t);
 }
 
-// ==================== TON-SYSTEM ====================
+function getTimeContext() {
+  const now = new Date();
+  const hour = now.getHours();
+  let timeOfDay;
+  if (hour >= 5 && hour < 11) timeOfDay = 'Morgen';
+  else if (hour >= 11 && hour < 14) timeOfDay = 'Mittag';
+  else if (hour >= 14 && hour < 18) timeOfDay = 'Nachmittag';
+  else if (hour >= 18 && hour < 22) timeOfDay = 'Abend';
+  else timeOfDay = 'Nacht';
+  const weekday = now.toLocaleDateString('de-DE', { weekday: 'long' });
+  return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
+}
 
-const TONE_RULES = [
-  '===========================================',
-  '🎭 TON-SYSTEM',
-  '===========================================',
-  '',
-  'Beim Verfassen von E-Mails wählst du IMMER einen Ton:',
-  '',
-  '- "formell"     → Behörden, Firmen, unbekannte Erwachsene',
-  '- "persönlich"  → Freunde, Familie, bekannte Erwachsene',
-  '- "locker"      → enge Freunde, Kinder, Familie (informell)',
-  '',
-  'A) NEUER KONTAKT: → Frage "Formell, persönlich oder locker?"',
-  'B) BEKANNTER KONTAKT: → Kein Nachfragen, nutze gespeicherten Ton',
-  'C) BEHÖRDEN (finanzamt, amt, behörde, rathaus, polizei, gericht,',
-  '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
-  '   → Automatisch formell, kein Nachfragen',
-  'D) TON-WECHSEL nur auf explizite Aufforderung',
-].join('\n');
-
-// ==================== SPRACHREGEL ====================
+// ==================== FUNDAMENT-PROMPT (für ALLE Modi) ====================
 
 const LANGUAGE_RULE = [
   '===========================================',
@@ -79,8 +71,6 @@ const LANGUAGE_RULE = [
   '',
   'AUSNAHME: Dolmetscher-Modus (nur auf expliziten Befehl)',
 ].join('\n');
-
-// ==================== ANTI-WIEDERHOLUNG ====================
 
 const ANTI_REPETITION = [
   '===========================================',
@@ -108,78 +98,27 @@ const ANTI_REPETITION = [
   '- ODER ERFINDE SELBST WAS NEUES.',
 ].join('\n');
 
-// ==================== KONTEXT ====================
-
-function getTimeContext() {
-  const now = new Date();
-  const hour = now.getHours();
-  let timeOfDay;
-  if (hour >= 5 && hour < 11) timeOfDay = 'Morgen';
-  else if (hour >= 11 && hour < 14) timeOfDay = 'Mittag';
-  else if (hour >= 14 && hour < 18) timeOfDay = 'Nachmittag';
-  else if (hour >= 18 && hour < 22) timeOfDay = 'Abend';
-  else timeOfDay = 'Nacht';
-  const weekday = now.toLocaleDateString('de-DE', { weekday: 'long' });
-  return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
-}
-
-// ==================== ROLLEN ====================
-
-const ROLES = {
-  freund: {
-    name: 'Freund',
-    prompt: [
-      'Du bist im FREUND-MODUS.',
-      '- Sei wie ein guter, alter Freund.',
-      '- Sprich aus dem Bauch.',
-      '- 1-3 Sätze.',
-      '- Variiere.',
-    ].join('\n'),
-  },
-  party: {
-    name: 'Party',
-    prompt: [
-      'Du bist im PARTY-MODUS.',
-      '- Locker, jugendlich, mit Humor.',
-      '- Coole Kumpel.',
-      '- Aktiv, nicht aufdringlich.',
-    ].join('\n'),
-  },
-  berater: {
-    name: 'Berater',
-    prompt: [
-      'Du bist im BERATER-MODUS.',
-      '- Sachlich, präzise.',
-      '- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.',
-      '- 2-4 Sätze.',
-    ].join('\n'),
-  },
-  kids: {
-    name: 'Kids',
-    prompt: [
-      'Du bist im KIDS-MODUS – für Kinder (8-14 Jahre).',
-      '- Locker, entspannt, wie ein älterer Cousin (14-16).',
-      '- NIE herablassend, NIE peinlich.',
-      '- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.',
-      '',
-      'WENN DU MIT NIKLAS SPRICHST (11):',
-      '- Er spielt Fußball (mit Papa).',
-      '- Er ist stark in Mathe.',
-      '- Sein Bruder Konstantin ist über 18.',
-      '',
-      'GEDÄCHTNIS: Wenn Niklas was über sich erzählt → save_user_preference (key: "niklas_<thema>").',
-    ].join('\n'),
-  },
-};
-
-// ==================== JONY PROMPT ====================
-
-const JONY_BASE = [
-  'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).',
-  'Ehrlich, warmherzig, direkt, humorvoll. Kein Assistent – ein Freund.',
+const TONE_RULES = [
+  '===========================================',
+  '🎭 TON-SYSTEM',
+  '===========================================',
+  '',
+  'Beim Verfassen von E-Mails wählst du IMMER einen Ton:',
+  '- "formell"     → Behörden, Firmen, unbekannte Erwachsene',
+  '- "persönlich"  → Freunde, Familie, bekannte Erwachsene',
+  '- "locker"      → enge Freunde, Kinder, Familie (informell)',
+  '',
+  'A) NEUER KONTAKT: → Frage "Formell, persönlich oder locker?"',
+  'B) BEKANNTER KONTAKT: → Kein Nachfragen, nutze gespeicherten Ton',
+  'C) BEHÖRDEN (finanzamt, amt, behörde, rathaus, polizei, gericht,',
+  '   krankenkasse, versicherung, standesamt, bürgeramt, ordnungsamt):',
+  '   → Automatisch formell, kein Nachfragen',
+  'D) TON-WECHSEL nur auf explizite Aufforderung',
+  '',
+  'FORMELL: Anrede "Sehr geehrte Damen und Herren,", Gruß "Mit freundlichen Grüßen", Siezen',
+  'PERSÖNLICH: Anrede "Hallo Alex,", Gruß "Viele Grüße", freundlich warm',
+  'LOCKER: Anrede "Hey Alex,", Gruß "LG" oder "Bis dann", duzen',
 ].join('\n');
-
-// ==================== KONTAKT + GRUPPEN ====================
 
 const CONTACT_RULES = [
   '===========================================',
@@ -237,9 +176,8 @@ const CONTACT_RULES = [
   'NUTZER-PROFIL (lerne aus Kontext):',
   '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
   '- "Ich wohne in ..." → save_user_profile(address: "...")',
+  '- "Meine E-Mail ist ..." → save_user_profile(default_email: "...")',
 ].join('\n');
-
-// ==================== ENTWURF-REGEL (Mix) ====================
 
 const DRAFT_RULE = [
   '===========================================',
@@ -300,8 +238,6 @@ const DRAFT_RULE = [
   '- Kurz bestätigen: "Okay, verworfen."',
 ].join('\n');
 
-// ==================== SIGNATUR-REGEL ====================
-
 const SIGNATURE_RULE = [
   '===========================================',
   '✍️ SIGNATUR-REGEL',
@@ -313,8 +249,6 @@ const SIGNATURE_RULE = [
   '',
   '⛔ NIEMALS selbst unterschreiben.',
 ].join('\n');
-
-// ==================== ANHANG-REGEL ====================
 
 const ATTACHMENT_RULE = [
   '===========================================',
@@ -329,37 +263,53 @@ const ATTACHMENT_RULE = [
   '- Die App zeigt sie in der Karte.',
 ].join('\n');
 
-// ==================== BUILD JONY PROMPT ====================
+const TELEGRAM_RULE = [
+  '===========================================',
+  '📨 TELEGRAM',
+  '===========================================',
+  '',
+  'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
+  'Frage IMMER zuerst: "Soll ich das schicken?"',
+  '',
+  'Standard-Empfänger (Eugen): 8448058381',
+].join('\n');
 
-function buildJonyPrompt(profile, role = 'freund', attachments = []) {
-  const roleData = ROLES[role] || ROLES.freund;
+const STANDORT_RULE = [
+  '===========================================',
+  'STANDORT-REGEL',
+  '===========================================',
+  '',
+  'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
+  'nutze das als location für get_weather / find_restaurants.',
+].join('\n');
+
+// ==================== FUNDAMENT-BAUSTEIN ====================
+
+function buildFoundation(profile, attachments = []) {
   const today = new Date().toLocaleDateString('de-DE', {
     weekday: 'long', day: 'numeric', month: 'long',
   });
-  const timeContext = getTimeContext();
-
+  const timeCtx = getTimeContext();
   const name = profile.name || 'Nutzer';
-  const nickname = profile.nickname ? ' (' + profile.nickname + ')' : '';
 
-  let locationLine = null;
+  // Nutzer-Profil-Block
+  const profileLines = [];
+  if (profile.user_name) profileLines.push('Name: ' + profile.user_name);
+  if (profile.user_address) profileLines.push('Adresse: ' + profile.user_address);
+  if (profile.user_birthdate) profileLines.push('Geburtsdatum: ' + profile.user_birthdate);
+  if (profile.user_phone) profileLines.push('Telefon: ' + profile.user_phone);
+  profileLines.push('Standard-E-Mail: ' + (profile.user_email_default || 'eugen.priss@yahoo.com'));
+
+  // Standort
+  let locationInfo = 'Standort: ' + (profile.hometown || 'unbekannt');
   if (profile.current_city) {
-    locationLine = 'Aktueller Standort: ' + profile.current_city;
+    locationInfo = 'Aktueller Standort: ' + profile.current_city;
     if (profile.current_lat != null && profile.current_lon != null) {
-      locationLine += ' (GPS: ' + profile.current_lat.toFixed(3) + ', ' + profile.current_lon.toFixed(3) + ')';
+      locationInfo += ' (GPS: ' + profile.current_lat.toFixed(3) + ', ' + profile.current_lon.toFixed(3) + ')';
     }
   }
 
-  const userProfileLines = [];
-  if (profile.user_name) userProfileLines.push('Name: ' + profile.user_name);
-  if (profile.user_address) userProfileLines.push('Adresse: ' + profile.user_address);
-  if (profile.user_birthdate) userProfileLines.push('Geburtsdatum: ' + profile.user_birthdate);
-  if (profile.user_phone) userProfileLines.push('Telefon: ' + profile.user_phone);
-  if (profile.user_email_default) userProfileLines.push('Standard-E-Mail: ' + profile.user_email_default);
-
-  const userProfileText = userProfileLines.length > 0
-    ? 'NUTZER-PROFIL:\n' + userProfileLines.join('\n')
-    : null;
-
+  // Anhänge
   let attachmentNote = null;
   if (attachments && attachments.length > 0) {
     const lines = attachments.map(a =>
@@ -373,37 +323,16 @@ function buildJonyPrompt(profile, role = 'freund', attachments = []) {
     '',
     ANTI_REPETITION,
     '',
-    TONE_RULES,
-    '',
-    JONY_BASE,
-    '',
-    'Heute ist ' + today + ' (' + timeContext + ').',
-    'Der Nutzer heißt ' + name + nickname + '.',
+    'Heute ist ' + today + ' (' + timeCtx + ').',
+    'Der Nutzer heißt ' + name + '.',
     'Aber nutze seinen Namen NICHT in jeder Antwort. Nur manchmal.',
-  ];
-
-  if (locationLine) {
-    lines.push('');
-    lines.push(locationLine);
-  }
-
-  if (userProfileText) {
-    lines.push('');
-    lines.push(userProfileText);
-  }
-
-  lines.push(
     '',
-    '===========================================',
-    'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
-    '===========================================',
-    roleData.prompt,
+    locationInfo,
     '',
-    '===========================================',
-    'STANDORT-REGEL',
-    '===========================================',
-    'Wenn der Nutzer "hier", "bei mir" oder "mein Standort" sagt →',
-    'nutze das als location für get_weather / find_restaurants.',
+    'NUTZER-PROFIL:',
+    profileLines.join('\n'),
+    '',
+    TONE_RULES,
     '',
     DRAFT_RULE,
     '',
@@ -413,28 +342,10 @@ function buildJonyPrompt(profile, role = 'freund', attachments = []) {
     '',
     ATTACHMENT_RULE,
     '',
-    '===========================================',
-    '📧 E-MAIL-VERSAND',
-    '===========================================',
-    'Ablauf: show_draft(to, subject, body, tone) → Reaktion → send_email',
-    'STANDARD "an mich" → eugen.priss@yahoo.com',
+    TELEGRAM_RULE,
     '',
-    '===========================================',
-    'TELEGRAM',
-    '===========================================',
-    'Tool: send_telegram_message(chat_id, text)',
-    'Frage IMMER zuerst: "Soll ich das schicken?"',
-    '',
-    '===========================================',
-    'TOOLS',
-    '===========================================',
-    'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
-    'find_contact, save_contact, forget_contact, list_contacts,',
-    'find_group, save_group, forget_group, list_groups, resolve_recipients,',
-    'save_user_profile, show_draft, send_email, send_telegram_message',
-    '',
-    'NIEMALS Wetter/Restaurants erfinden.'
-  );
+    STANDORT_RULE,
+  ];
 
   if (attachmentNote) {
     lines.push('');
@@ -445,38 +356,155 @@ function buildJonyPrompt(profile, role = 'freund', attachments = []) {
   return lines.join('\n');
 }
 
-// ==================== BUSINESS PROMPT ====================
+// ==================== JONY-ROLLEN ====================
 
-function buildBusinessPrompt(profile) {
-  const today = new Date().toLocaleDateString('de-DE', {
-    weekday: 'long', day: 'numeric', month: 'long',
-  });
-  const name = profile.name || 'Nutzer';
+const ROLES = {
+  freund: {
+    name: 'Freund',
+    prompt: [
+      'Du bist im FREUND-MODUS.',
+      '- Sei wie ein guter, alter Freund.',
+      '- Sprich aus dem Bauch.',
+      '- 1-3 Sätze.',
+      '- Variiere.',
+    ].join('\n'),
+  },
+  party: {
+    name: 'Party',
+    prompt: [
+      'Du bist im PARTY-MODUS.',
+      '- Locker, jugendlich, mit Humor.',
+      '- Coole Kumpel.',
+      '- Aktiv, nicht aufdringlich.',
+    ].join('\n'),
+  },
+  berater: {
+    name: 'Berater',
+    prompt: [
+      'Du bist im BERATER-MODUS.',
+      '- Sachlich, präzise.',
+      '- Bei Recht/Medizin/Finanzen: Hinweis auf menschliche Prüfung.',
+      '- 2-4 Sätze.',
+    ].join('\n'),
+  },
+  kids: {
+    name: 'Kids',
+    prompt: [
+      'Du bist im KIDS-MODUS – für Kinder (8-14 Jahre).',
+      '- Locker, entspannt, wie ein älterer Cousin (14-16).',
+      '- NIE herablassend, NIE peinlich.',
+      '- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.',
+      '',
+      'WENN DU MIT NIKLAS SPRICHST (11):',
+      '- Er spielt Fußball (mit Papa).',
+      '- Er ist stark in Mathe.',
+      '- Sein Bruder Konstantin ist über 18.',
+      '',
+      'GEDÄCHTNIS: Wenn Niklas was über sich erzählt → save_user_preference (key: "niklas_<thema>").',
+    ].join('\n'),
+  },
+};
+
+const JONY_BASE = [
+  'Du bist Jony, der persönliche Begleiter von Eugen (auch Jackson genannt).',
+  'Ehrlich, warmherzig, direkt, humorvoll. Kein Assistent – ein Freund.',
+].join('\n');
+
+const JONY_TOOLS_LIST = [
+  'get_weather, find_restaurants, get_user_preferences, save_user_preference,',
+  'find_contact, save_contact, forget_contact, list_contacts,',
+  'find_group, save_group, forget_group, list_groups, resolve_recipients,',
+  'save_user_profile, show_draft, send_email, send_telegram_message',
+].join('\n');
+
+// ==================== BUSINESS-WORKFLOW ====================
+
+const BUSINESS_WORKFLOW = [
+  '===========================================',
+  '🏢 BUSINESS-WORKFLOW',
+  '===========================================',
+  '',
+  'Du bist Content-Stratege für Instagram-Karussells.',
+  '',
+  '🚨 WICHTIG: Du SPRICHST Skripte NIEMALS laut vor.',
+  '',
+  'WORKFLOW:',
+  '1. Thema klären',
+  '2. Sage: "Alles klar, ich erstelle das Skript."',
+  '3. Rufe generate_script auf',
+  '4. Nach Tool: "Skript ist da. Schau in die App."',
+  '5. Bei "mach Bilder": generate_image für JEDEN Slide einzeln',
+  '6. Bei "schick per Mail":',
+  '   - "an mich" → nutze Standard-E-Mail (oben im Fundament)',
+  '   - Andere Adresse genannt → nimm sie direkt',
+  '   - KEINE Adresse genannt → frage nach',
+  '   - IMMER kurz bestätigen, dann send_carousel_email',
+  '',
+  'STIL: Direkt, präzise, kurz. KEIN Smalltalk.',
+  '',
+  'VERBOTEN:',
+  '- Skript vorlesen',
+  '- Smalltalk',
+  '- Tools nach Fehler wiederholen',
+].join('\n');
+
+const BUSINESS_TOOLS_LIST = [
+  'generate_script, generate_image, send_carousel_email',
+  '',
+  'PLUS alle Kontakt-/Gruppen-/E-Mail-Tools aus dem Fundament.',
+  'PLUS: Du kannst auch im Business-Modus ganz normale E-Mails',
+  '      verfassen (show_draft / send_email) — wenn der Nutzer das',
+  '      ausdrücklich verlangt. Karussell bleibt aber dein Hauptfokus.',
+].join('\n');
+
+// ==================== PROMPT-BUILD ====================
+
+function buildJonyPrompt(profile, role = 'freund', attachments = []) {
+  const foundation = buildFoundation(profile, attachments);
+  const roleData = ROLES[role] || ROLES.freund;
 
   return [
-    LANGUAGE_RULE,
+    foundation,
+    '',
+    JONY_BASE,
     '',
     '===========================================',
-    'BUSINESS-MODUS',
+    'AKTIVE ROLLE: ' + roleData.name.toUpperCase(),
     '===========================================',
-    'Du bist Jony im BUSINESS-MODUS. Content-Stratege für Instagram-Karussells.',
-    'Heute ist ' + today + '.',
+    roleData.prompt,
     '',
-    'WICHTIG: Du SPRICHST Skripte NIEMALS laut vor.',
+    '===========================================',
+    'MODUS (NORMAL/SILENT)',
+    '===========================================',
+    'NORMAL: aktiv, freundlich.',
+    'SILENT: aufmerksam, aber reagierst NICHT – Ausnahme "Hey Jony".',
     '',
-    'WORKFLOW:',
-    '1. Thema klären',
-    '2. Sage "Alles klar, ich erstelle das Skript."',
-    '3. Rufe generate_script auf',
-    '4. Nach Tool: "Skript ist da. Schau in die App."',
-    '5. Bei "mach Bilder": generate_image für JEDEN Slide',
-    '6. Bei "schick per Mail": ERST Adresse + Bestätigung, DANN send_carousel_email',
+    '===========================================',
+    'SEHEN UND HÖREN',
+    '===========================================',
+    '"Was siehst du?" → beschreibe letzten Video-Frame.',
     '',
-    'Der Nutzer heißt ' + name + '.',
+    '===========================================',
+    'TOOLS',
+    '===========================================',
+    JONY_TOOLS_LIST,
     '',
-    'TOOLS: generate_script, generate_image, send_carousel_email',
+    'NIEMALS Wetter/Restaurants erfinden.',
+  ].join('\n');
+}
+
+function buildBusinessPrompt(profile, attachments = []) {
+  const foundation = buildFoundation(profile, attachments);
+
+  return [
+    foundation,
     '',
-    'VERBOTEN: Skript vorlesen, Smalltalk, Tools nach Fehler wiederholen.',
+    BUSINESS_WORKFLOW,
+    '',
+    '===========================================',
+    'TOOLS',
+    '===========================================',
+    BUSINESS_TOOLS_LIST,
   ].join('\n');
 }
 
@@ -508,6 +536,73 @@ function dolmetscherInstruction(active) {
   return '[SYSTEM-INSTRUKTION] Dolmetscher-Modus beendet.';
 }
 
+// ==================== NAME-PATTERN ====================
+
+const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
+
+const PATTERNS = {
+  business: new RegExp(
+    `\\b(${NAME_PATTERN}.?business|business.?modus|business\\s+mode|бизнес.?мод|бизнес)\\b`,
+    'i'
+  ),
+  backToJony: new RegExp(
+    `\\b(${NAME_PATTERN}.?(zur[üu]ck|freund|normal|back|обратно|вернись)|` +
+    `zur[üu]ck.*(freund|jony|johnny)|` +
+    `freund.?modus|normal.?modus|freundesmodus|` +
+    `вернись.*друг|обратно.*друг|режим.?друга)\\b`,
+    'i'
+  ),
+  party: new RegExp(
+    `\\b(${NAME_PATTERN}.?party|party.?modus|partymodus|party\\s+mode|` +
+    `${NAME_PATTERN}.?пати|пати.?мод|вечеринк)\\b`,
+    'i'
+  ),
+  berater: new RegExp(
+    `\\b(${NAME_PATTERN}.?(berater|sachlich|intellektuell)|` +
+    `berater.?modus|beratermodus|` +
+    `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
+    'i'
+  ),
+  kids: new RegExp(
+    `\\b(${NAME_PATTERN}.?(kids|niklas|kinder|kind|junge|junior|kumpel)|` +
+    `kids.?modus|kinder.?modus|niklas.?modus|junge.?modus|` +
+    `${NAME_PATTERN}.?(детск|пацан|малой|ребенок|ребёнок)|` +
+    `детск.?мод|детск.?режим)\\b`,
+    'i'
+  ),
+  dolmetscher: new RegExp(
+    `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
+    `dolmetscher.?modus|übersetzer|uebersetzer|` +
+    `${NAME_PATTERN}.?(перевод|переводчик)|переводчик|режим.?перевода)\\b`,
+    'i'
+  ),
+};
+
+// ==================== PROAKTIV ====================
+
+const PROACTIVE_INTERVALS = {
+  kids: 25000,
+  party: 15000,
+  freund: 45000,
+  berater: 0,
+};
+
+function buildProactivePrompt(role) {
+  if (role === 'kids') {
+    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
+           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem.';
+  }
+  if (role === 'party') {
+    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
+           'Sei PROAKTIV: Lockerer Spruch, 1 Satz.';
+  }
+  if (role === 'freund') {
+    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
+           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. 1 kurzer Satz.';
+  }
+  return null;
+}
+
 // ==================== AGENT-DEFINITIONEN ====================
 
 const AGENTS = {
@@ -518,7 +613,7 @@ const AGENTS = {
   },
   business: {
     voice: 'Charon',
-    buildPrompt: (profile) => buildBusinessPrompt(profile),
+    buildPrompt: (profile, role, attachments) => buildBusinessPrompt(profile, attachments),
     tools: () => buildBusinessTools(),
   },
 };
@@ -785,73 +880,6 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
   }
 }
 
-// ==================== NAME-PATTERN ====================
-
-const NAME_PATTERN = '(jony|johnny|joni|джони|джонни|джонi)';
-
-const PATTERNS = {
-  business: new RegExp(
-    `\\b(${NAME_PATTERN}.?business|business.?modus|business\\s+mode|бизнес.?мод|бизнес)\\b`,
-    'i'
-  ),
-  backToJony: new RegExp(
-    `\\b(${NAME_PATTERN}.?(zur[üu]ck|freund|normal|back|обратно|вернись)|` +
-    `zur[üu]ck.*(freund|jony|johnny)|` +
-    `freund.?modus|normal.?modus|freundesmodus|` +
-    `вернись.*друг|обратно.*друг|режим.?друга)\\b`,
-    'i'
-  ),
-  party: new RegExp(
-    `\\b(${NAME_PATTERN}.?party|party.?modus|partymodus|party\\s+mode|` +
-    `${NAME_PATTERN}.?пати|пати.?мод|вечеринк)\\b`,
-    'i'
-  ),
-  berater: new RegExp(
-    `\\b(${NAME_PATTERN}.?(berater|sachlich|intellektuell)|` +
-    `berater.?modus|beratermodus|` +
-    `${NAME_PATTERN}.?советник|советник.?мод|консультант)\\b`,
-    'i'
-  ),
-  kids: new RegExp(
-    `\\b(${NAME_PATTERN}.?(kids|niklas|kinder|kind|junge|junior|kumpel)|` +
-    `kids.?modus|kinder.?modus|niklas.?modus|junge.?modus|` +
-    `${NAME_PATTERN}.?(детск|пацан|малой|ребенок|ребёнок)|` +
-    `детск.?мод|детск.?режим)\\b`,
-    'i'
-  ),
-  dolmetscher: new RegExp(
-    `\\b(${NAME_PATTERN}.?(dolmetscher|übersetz|uebersetz|translator)|` +
-    `dolmetscher.?modus|übersetzer|uebersetzer|` +
-    `${NAME_PATTERN}.?(перевод|переводчик)|переводчик|режим.?перевода)\\b`,
-    'i'
-  ),
-};
-
-// ==================== PROAKTIV-INTERVALLE ====================
-
-const PROACTIVE_INTERVALS = {
-  kids: 25000,
-  party: 15000,
-  freund: 45000,
-  berater: 0,
-};
-
-function buildProactivePrompt(role) {
-  if (role === 'kids') {
-    return '[SYSTEM-INSTRUKTION] Es ist kurz still. ' +
-           'Sei PROAKTIV aber LOCKER: Frag nach was Coolem.';
-  }
-  if (role === 'party') {
-    return '[SYSTEM-INSTRUKTION] Es ist seit einer Weile still. ' +
-           'Sei PROAKTIV: Lockerer Spruch, 1 Satz.';
-  }
-  if (role === 'freund') {
-    return '[SYSTEM-INSTRUKTION] Es ist still. ' +
-           'Sei sanft proaktiv: Neugierige Frage oder warme Bemerkung. 1 kurzer Satz.';
-  }
-  return null;
-}
-
 // ==================== TOOLS ====================
 
 function buildJonyTools() {
@@ -1067,6 +1095,177 @@ function buildBusinessTools() {
   return [
     {
       functionDeclarations: [
+        // Fundament-Tools
+        {
+          name: 'find_contact',
+          description: 'Sucht einen Kontakt im Gedächtnis.',
+          parameters: {
+            type: 'OBJECT',
+            properties: { name: { type: 'STRING' } },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'save_contact',
+          description: 'Speichert/aktualisiert einen Kontakt.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              email: { type: 'STRING' },
+              telegram: { type: 'STRING' },
+              phone: { type: 'STRING' },
+              aliases: { type: 'STRING' },
+              relation: { type: 'STRING' },
+              birthday: { type: 'STRING' },
+              tone: { type: 'STRING' },
+              notes: { type: 'STRING' },
+            },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'forget_contact',
+          description: 'Löscht einen Kontakt.',
+          parameters: {
+            type: 'OBJECT',
+            properties: { name: { type: 'STRING' } },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'list_contacts',
+          description: 'Listet alle Kontakte auf.',
+          parameters: { type: 'OBJECT', properties: {} },
+        },
+        {
+          name: 'find_group',
+          description: 'Sucht eine Gruppe.',
+          parameters: {
+            type: 'OBJECT',
+            properties: { name: { type: 'STRING' } },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'save_group',
+          description: 'Speichert eine Gruppe.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              members: { type: 'ARRAY', items: { type: 'STRING' } },
+              notes: { type: 'STRING' },
+            },
+            required: ['name', 'members'],
+          },
+        },
+        {
+          name: 'forget_group',
+          description: 'Löscht eine Gruppe.',
+          parameters: {
+            type: 'OBJECT',
+            properties: { name: { type: 'STRING' } },
+            required: ['name'],
+          },
+        },
+        {
+          name: 'list_groups',
+          description: 'Listet alle Gruppen auf.',
+          parameters: { type: 'OBJECT', properties: {} },
+        },
+        {
+          name: 'resolve_recipients',
+          description: 'Löst mehrere Namen zu Empfängern auf.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              names: { type: 'ARRAY', items: { type: 'STRING' } },
+            },
+            required: ['names'],
+          },
+        },
+        {
+          name: 'save_user_profile',
+          description: 'Speichert Nutzer-Profil.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              name: { type: 'STRING' },
+              address: { type: 'STRING' },
+              birthdate: { type: 'STRING' },
+              phone: { type: 'STRING' },
+              default_email: { type: 'STRING' },
+              default_tone: { type: 'STRING' },
+            },
+          },
+        },
+        {
+          name: 'get_weather',
+          description: 'Ruft das aktuelle Wetter ab.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              location: { type: 'STRING' },
+              timeframe: { type: 'STRING' },
+            },
+            required: ['location'],
+          },
+        },
+        {
+          name: 'find_restaurants',
+          description: 'Findet Restaurants in der Nähe.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              location: { type: 'STRING' },
+              cuisine: { type: 'STRING' },
+            },
+            required: ['location'],
+          },
+        },
+        {
+          name: 'send_telegram_message',
+          description: 'Sendet eine Telegram-Nachricht. Frage IMMER zuerst nach Bestätigung.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              chat_id: { type: 'STRING' },
+              text: { type: 'STRING' },
+            },
+            required: ['chat_id', 'text'],
+          },
+        },
+        {
+          name: 'show_draft',
+          description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
+                       '⛔ Lies ihn NICHT laut vor.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING' },
+              subject: { type: 'STRING' },
+              body: { type: 'STRING' },
+              tone: { type: 'STRING' },
+            },
+            required: ['to', 'subject', 'body', 'tone'],
+          },
+        },
+        {
+          name: 'send_email',
+          description: 'Sendet die E-Mail NACH Bestätigung.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              to: { type: 'STRING' },
+              subject: { type: 'STRING' },
+              body: { type: 'STRING' },
+              tone: { type: 'STRING' },
+            },
+            required: ['to', 'subject', 'body', 'tone'],
+          },
+        },
+        // Karussell-spezifische Tools
         {
           name: 'generate_script',
           description: 'Erstellt das Instagram-Karussell-Skript.',
@@ -1211,9 +1410,6 @@ async function handleSendTelegram(chatId, text) {
 
 async function handleShowDraft(userId, to, subject, body, tone) {
   try {
-    const attachments = await fetchUserAttachments(userId);
-
-    // Draft über API speichern (sendet auch broadcast an App)
     await fetch(SELF_URL + '/api/draft/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
