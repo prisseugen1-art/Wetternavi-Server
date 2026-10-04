@@ -36,8 +36,12 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+// ==================== KONFIG ====================
+
+// Chat-Verlauf-Reset nach 8 Stunden Inaktivität
+const CHAT_SESSION_RESET_MS = 8 * 60 * 60 * 1000; // 8 Std
+
 // ==================== DRAFT-SPEICHER (10 Min TTL) ====================
-// { userId: { id, to, subject, body, tone, createdAt } }
 const draftStore = new Map();
 const DRAFT_TTL_MS = 10 * 60 * 1000;
 
@@ -201,7 +205,7 @@ const BUSINESS_PROMPT = [
   '🚨 WICHTIG: Du SPRICHST NIEMALS Skripte laut vor.',
   '',
   'WORKFLOW:',
-  '1. Thema klären (frag nach Zielgruppe, Fokus)',
+  '1. Thema klären',
   '2. Sage: "Alles klar, ich erstelle das Skript."',
   '3. Rufe generate_script auf',
   '4. Nach dem Tool: "Skript ist da. Schau in die App."',
@@ -228,9 +232,6 @@ const CONTACT_RULES = [
   '  a) Der Nutzer den kompletten Entwurf gesehen hat',
   '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
   '',
-  'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
-  '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
-  '',
   'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
   '',
   'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
@@ -249,15 +250,12 @@ const CONTACT_RULES = [
   'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
   '  ⛔ Schreibe den Entwurf NIEMALS als Text in deine Antwort!',
   '  Die App zeigt die Entwurf-Karte automatisch.',
-  '  Antworte dem Nutzer nur kurz: "Entwurf ist da. Prüf ihn."',
+  '  Antworte nur KURZ: "Entwurf ist da. Prüf ihn."',
   '',
-  'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
+  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-BESTÄTIGUNG unten)',
   '',
   'Schritt 7: send_email(to, subject, body, tone)',
   '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
-  '  📎 Anhänge werden AUTOMATISCH mitgeschickt — du rufst nichts extra auf.',
-  '',
-  'Schritt 8: Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
   '',
   'KONTAKT-VERWALTUNG:',
   '- "Vergiss Alex" → forget_contact(name: "alex")',
@@ -274,11 +272,65 @@ const CONTACT_RULES = [
   'MEHRERE EMPFÄNGER:',
   '- "Schreib an Alex und Constantin: ..."',
   '  → resolve_recipients(["alex", "constantin"])',
-  '- Bei Gruppen mit verschiedenen Kanälen: fragen welcher Kanal',
   '',
   'NUTZER-PROFIL (lerne aus Kontext):',
   '- "Ich bin Eugen Priss" → save_user_profile(name: "...")',
   '- "Ich wohne in ..." → save_user_profile(address: "...")',
+].join('\n');
+
+// ==================== ENTWURF-BESTÄTIGUNG ====================
+
+const DRAFT_CONFIRMATION = [
+  '===========================================',
+  '📝 ENTWURF-BESTÄTIGUNG (SEHR WICHTIG)',
+  '===========================================',
+  '',
+  'Nach show_draft() → Karte erscheint in der App.',
+  'Warte auf die Reaktion des Nutzers.',
+  '',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '✅ JA-WÖRTER → Rufe SOFORT send_email auf:',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '- "ja" / "jep" / "jup" / "ok" / "okay"',
+  '- "senden" / "schick" / "schick weg" / "schick ab"',
+  '- "raus" / "raus damit" / "weg damit" / "los"',
+  '- "passt" / "passt so" / "so lassen" / "ab damit"',
+  '- "sende" / "sende ab" / "los geht\'s"',
+  '- "yes" / "yep" / "jo" / "klar"',
+  '',
+  'WICHTIG:',
+  '- "schick weg" = SENDEN (nicht warten!)',
+  '- "raus damit" = SENDEN',
+  '- "weg" (allein) = SENDEN',
+  '',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '❌ NEIN-WÖRTER → Verwirf den Entwurf (KEIN send_email):',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '- "nein" / "no" / "nö"',
+  '- "abbrechen" / "cancel" / "stop" / "stopp"',
+  '- "vergiss es" / "vergiss das" / "lösch" / "lösche"',
+  '- "verwerfen" / "verwerfe"',
+  '- "anders" / "änder" / "ändern" / "nochmal" / "neu"',
+  '- "gefällt mir nicht" / "passt nicht"',
+  '',
+  'WICHTIG:',
+  '- "lösch das" = ABBRECHEN (nicht senden!)',
+  '- "vergiss es" = ABBRECHEN',
+  '- "schmeiß weg" = ABBRECHEN',
+  '',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '❓ UNKLAR → Kurze Rückfrage:',
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '- "Soll ich senden oder verwerfen?"',
+  '- Warte auf klare Antwort',
+  '',
+  'NACH DEM SENDEN:',
+  '- Kurz bestätigen: "✅ Ist raus."',
+  '- Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
+  '',
+  'NACH DEM VERWERFEN:',
+  '- Kurz bestätigen: "Okay, verworfen."',
+  '- Frage: "Willst du was ändern?"',
 ].join('\n');
 
 // ==================== SIGNATUR-REGEL ====================
@@ -306,35 +358,8 @@ const ATTACHMENT_RULE = [
   '',
   'WENN Anhänge bereit sind:',
   '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
-  '- Erwähne sie im show_draft NICHT explizit im body.',
-  '- Die App zeigt sie in der Entwurf-Karte automatisch an.',
-  '',
-  'WENN KEINE Anhänge bereit sind:',
-  '- Wenn der Nutzer fragt "kannst du das PDF anhängen?" → antworte:',
-  '  "Klicke auf den 📎-Button in der Entwurf-Karte, wähle die Datei."',
-].join('\n');
-
-// ==================== DRAFT-REGEL ====================
-
-const DRAFT_RULE = [
-  '===========================================',
-  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
-  '===========================================',
-  '',
-  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
-  '',
-  '⛔ SCHREIBE DEN ENTWURF NIEMALS ALS TEXT IN DEINE ANTWORT!',
-  '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Nachricht.',
-  '',
-  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
-  'Du sagst dem Nutzer nur EINEN kurzen Satz wie:',
-  '- "Entwurf ist da. Prüf ihn."',
-  '- "Hab einen Entwurf erstellt."',
-  '',
-  'NACH dem show_draft-Aufruf:',
-  '- WARTE auf "ja" / "ok" / "senden"',
-  '- ODER der Nutzer klickt ✅ in der Karte (dann kommt automatisch send_email)',
-  '- ODER der Nutzer sagt "nein" / "ändern"',
+  '- Erwähne sie NICHT explizit im body.',
+  '- Die App zeigt sie in der Karte.',
 ].join('\n');
 
 // ==================== SYSTEM-PROMPT ====================
@@ -417,7 +442,7 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     'ROLLE: ' + roleData.name.toUpperCase(),
     roleData.prompt,
     '',
-    DRAFT_RULE,
+    DRAFT_CONFIRMATION,
     '',
     CONTACT_RULES,
     '',
@@ -428,9 +453,14 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     '===========================================',
     '📧 E-MAIL-VERSAND',
     '===========================================',
-    'Ablauf: show_draft(to, subject, body, tone) → Bestätigung → send_email(to, subject, body, tone)',
-    '⛔ NIEMALS ohne Bestätigung senden.',
+    'Ablauf: show_draft(to, subject, body, tone) → Reaktion → send_email',
     'STANDARD "an mich" → eugen.priss@yahoo.com',
+    '',
+    '===========================================',
+    'TELEGRAM',
+    '===========================================',
+    'Du kannst Telegram-Nachrichten senden mit send_telegram_message.',
+    'Frage IMMER zuerst: "Soll ich das schicken?"',
     '',
     '===========================================',
     'TOOLS',
@@ -438,7 +468,7 @@ function buildSystemPrompt(profile, role, mode, attachments = []) {
     'get_weather, find_restaurants, save_user_preference, get_user_preferences,',
     'find_contact, save_contact, forget_contact, list_contacts,',
     'find_group, save_group, forget_group, list_groups, resolve_recipients,',
-    'save_user_profile, show_draft, send_email',
+    'save_user_profile, show_draft, send_email, send_telegram_message',
     '',
     'NIEMALS Wetter/Restaurants erfinden.'
   );
@@ -498,12 +528,10 @@ const JONY_TOOLS = [
   },
   {
     name: 'find_contact',
-    description: 'Sucht einen Kontakt. Rufe das IMMER auf, bevor du eine E-Mail schickst.',
+    description: 'Sucht einen Kontakt.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        name: { type: 'STRING' },
-      },
+      properties: { name: { type: 'STRING' } },
       required: ['name'],
     },
   },
@@ -528,42 +556,35 @@ const JONY_TOOLS = [
   },
   {
     name: 'forget_contact',
-    description: 'Löscht einen Kontakt komplett.',
+    description: 'Löscht einen Kontakt.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        name: { type: 'STRING' },
-      },
+      properties: { name: { type: 'STRING' } },
       required: ['name'],
     },
   },
   {
     name: 'list_contacts',
-    description: 'Listet alle gespeicherten Kontakte auf.',
+    description: 'Listet alle Kontakte auf.',
     parameters: { type: 'OBJECT', properties: {} },
   },
   {
     name: 'find_group',
-    description: 'Sucht eine Gruppe (z.B. "familie").',
+    description: 'Sucht eine Gruppe.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        name: { type: 'STRING' },
-      },
+      properties: { name: { type: 'STRING' } },
       required: ['name'],
     },
   },
   {
     name: 'save_group',
-    description: 'Speichert eine Gruppe. members ist eine Liste von Kontakt-Namen.',
+    description: 'Speichert eine Gruppe.',
     parameters: {
       type: 'OBJECT',
       properties: {
         name: { type: 'STRING' },
-        members: {
-          type: 'ARRAY',
-          items: { type: 'STRING' },
-        },
+        members: { type: 'ARRAY', items: { type: 'STRING' } },
         notes: { type: 'STRING' },
       },
       required: ['name', 'members'],
@@ -574,9 +595,7 @@ const JONY_TOOLS = [
     description: 'Löscht eine Gruppe.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        name: { type: 'STRING' },
-      },
+      properties: { name: { type: 'STRING' } },
       required: ['name'],
     },
   },
@@ -587,21 +606,18 @@ const JONY_TOOLS = [
   },
   {
     name: 'resolve_recipients',
-    description: 'Löst mehrere Namen (Kontakte + Gruppen) zu vollständigen Empfänger-Daten auf.',
+    description: 'Löst mehrere Namen zu Empfängern auf.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        names: {
-          type: 'ARRAY',
-          items: { type: 'STRING' },
-        },
+        names: { type: 'ARRAY', items: { type: 'STRING' } },
       },
       required: ['names'],
     },
   },
   {
     name: 'save_user_profile',
-    description: 'Speichert Nutzer-Profil (Name, Adresse, Geburtsdatum).',
+    description: 'Speichert Nutzer-Profil.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -616,23 +632,8 @@ const JONY_TOOLS = [
   },
   {
     name: 'show_draft',
-    description: 'Zeigt den E-Mail-Entwurf strukturiert in der App an. ' +
-                 'Rufe das auf, wenn Ton + Adresse geklärt sind. ' +
-                 '⛔ Schreibe den Entwurf NICHT als Text. Antworte dem Nutzer nur kurz.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {
-        to: { type: 'STRING', description: 'Empfänger-Adresse' },
-        subject: { type: 'STRING', description: 'Betreff' },
-        body: { type: 'STRING', description: 'Nur Text der E-Mail (OHNE Signatur, OHNE "An:"/"Betreff:")' },
-        tone: { type: 'STRING', description: 'formell | persönlich | locker' },
-      },
-      required: ['to', 'subject', 'body', 'tone'],
-    },
-  },
-  {
-    name: 'send_email',
-    description: 'Sendet die E-Mail NACH Bestätigung. Nur aufrufen, wenn Nutzer "ja"/"ok"/"senden" gesagt hat.',
+    description: 'Zeigt den E-Mail-Entwurf als Karte in der App. ' +
+                 '⛔ Schreibe den Entwurf NICHT als Text.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -642,6 +643,32 @@ const JONY_TOOLS = [
         tone: { type: 'STRING' },
       },
       required: ['to', 'subject', 'body', 'tone'],
+    },
+  },
+  {
+    name: 'send_email',
+    description: 'Sendet die E-Mail nach Bestätigung.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        to: { type: 'STRING' },
+        subject: { type: 'STRING' },
+        body: { type: 'STRING' },
+        tone: { type: 'STRING' },
+      },
+      required: ['to', 'subject', 'body', 'tone'],
+    },
+  },
+  {
+    name: 'send_telegram_message',
+    description: 'Sendet eine Telegram-Nachricht. Frage IMMER zuerst nach Bestätigung.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        chat_id: { type: 'STRING' },
+        text: { type: 'STRING' },
+      },
+      required: ['chat_id', 'text'],
     },
   },
 ];
@@ -678,9 +705,7 @@ const BUSINESS_TOOLS = [
     description: 'Sendet das Karussell per E-Mail.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        to: { type: 'STRING' },
-      },
+      properties: { to: { type: 'STRING' } },
       required: ['to'],
     },
   },
@@ -847,20 +872,13 @@ async function saveUserProfile(userId, fields) {
   return await res.json();
 }
 
-// ⬇️ NEU: show_draft — speichert Draft + sendet WebSocket-Event
 async function showDraft(userId, to, subject, body, tone, attachments = []) {
   if (!to || !subject || !body) {
     return { error: 'to, subject, body required' };
   }
 
-  const draft = setDraft(userId, {
-    to,
-    subject,
-    body,
-    tone: tone || 'persönlich',
-  });
+  const draft = setDraft(userId, { to, subject, body, tone: tone || 'persönlich' });
 
-  // WebSocket-Event an alle App-Clients
   broadcastToClients({
     type: 'draft_shown',
     draft: {
@@ -882,11 +900,10 @@ async function showDraft(userId, to, subject, body, tone, attachments = []) {
   return {
     success: true,
     draft_id: draft.id,
-    message: 'Entwurf wird in der App angezeigt. Warte auf Bestätigung des Nutzers.',
+    message: 'Entwurf wird in der App angezeigt. Warte auf Reaktion des Nutzers.',
   };
 }
 
-// ⬇️ sendFreeEmail — cleart jetzt auch den Draft
 async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlich') {
   console.log(`📧 Freie E-Mail an ${to}: "${subject}" (Ton: ${tone})`);
   const res = await fetch(SELF_URL + '/api/send-email', {
@@ -900,7 +917,6 @@ async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlic
   const data = await res.json();
   const attachInfo = data.attachmentCount > 0 ? ` (mit ${data.attachmentCount} Anhängen)` : '';
 
-  // Draft löschen nach erfolgreichem Versand
   if (profile?.user_id) {
     clearDraft(profile.user_id);
   }
@@ -908,7 +924,22 @@ async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlic
   return { success: true, to, subject, message: `E-Mail an ${to} gesendet${attachInfo}.` };
 }
 
-// ==================== SCRIPT + IMAGE (Business) ====================
+async function sendTelegram(chatId, text) {
+  console.log(`📨 Sende Telegram an ${chatId}: "${text.substring(0, 60)}"`);
+  const res = await fetch(SELF_URL + '/api/telegram/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    return { error: `Telegram-Versand fehlgeschlagen: ${res.status} ${errText.substring(0, 100)}` };
+  }
+  const data = await res.json();
+  return { success: true, to: chatId, message: 'Telegram-Nachricht gesendet.' };
+}
+
+// ==================== SCRIPT + IMAGE ====================
 
 async function generateScriptAndBroadcast(topic, audience, focus, slideCount, userId) {
   console.log(`📝 Chat-Skript: "${topic}"`);
@@ -1075,6 +1106,9 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
     const profileWithId = { ...profile, user_id: userId };
     return await sendFreeEmail(args.to, args.subject, args.body, profileWithId, args.tone || 'persönlich');
   }
+  if (name === 'send_telegram_message') {
+    return await sendTelegram(args.chat_id, args.text);
+  }
   if (name === 'generate_script') {
     return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   }
@@ -1083,25 +1117,60 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
   }
   if (name === 'send_carousel_email') {
     const carousel = getCarousel(userId);
-    if (!carousel) return { error: 'Kein Karussell gefunden. Erst eins erstellen.' };
+    if (!carousel) return { error: 'Kein Karussell gefunden.' };
     const res = await sendCarouselByEmail(args.to, carousel, profile);
     return { success: true, message: `Karussell "${res.topic}" an ${args.to} gesendet.` };
   }
   return { error: 'Unbekanntes Tool: ' + name };
 }
 
-// ==================== HISTORIE ====================
+// ==================== HISTORIE mit 8-Std-Reset ====================
 
 async function loadChatHistory(userId, limit = 10) {
   try {
+    // Hole die letzten Nachrichten + Zeitstempel
     const result = await pool.query(`
-      SELECT role, content FROM chat_history
+      SELECT role, content, created_at FROM chat_history
       WHERE user_id = $1
       ORDER BY created_at DESC
-      LIMIT $2
-    `, [userId, limit]);
-    return result.rows.reverse();
+      LIMIT 50
+    `, [userId]);
+
+    if (result.rows.length === 0) return [];
+
+    // Prüfe: Wie alt ist die letzte Nachricht?
+    const newest = result.rows[0];
+    const newestTime = new Date(newest.created_at).getTime();
+    const now = Date.now();
+    const ageMs = now - newestTime;
+
+    // Wenn letzte Nachricht > 8 Std alt → neue Session, keine Historie laden
+    if (ageMs > CHAT_SESSION_RESET_MS) {
+      console.log(`📭 Chat-Session-Reset: Letzte Nachricht ${Math.round(ageMs/60000)} Min alt → neue Session`);
+      return [];
+    }
+
+    // Sonst: Finde Session-Start (letzte Lücke > 8 Std)
+    const sessionMessages = [];
+    let prevTime = newestTime;
+
+    for (const row of result.rows) {
+      const rowTime = new Date(row.created_at).getTime();
+      const gapMs = prevTime - rowTime;
+
+      if (gapMs > CHAT_SESSION_RESET_MS) {
+        // Lücke gefunden → Session beginnt hier (nicht mehr laden)
+        break;
+      }
+      sessionMessages.push(row);
+      prevTime = rowTime;
+    }
+
+    // Umkehren → älteste zuerst, auf limit beschränken
+    sessionMessages.reverse();
+    return sessionMessages.slice(-limit);
   } catch (e) {
+    console.error('⚠️ History-Load-Fehler:', e.message);
     return [];
   }
 }
@@ -1122,10 +1191,29 @@ export async function getChatHistory(userId, limit = 50) {
     const result = await pool.query(`
       SELECT role, content, created_at FROM chat_history
       WHERE user_id = $1
-      ORDER BY created_at ASC
-      LIMIT $2
-    `, [userId, limit]);
-    return result.rows;
+      ORDER BY created_at DESC
+      LIMIT 50
+    `, [userId]);
+
+    if (result.rows.length === 0) return [];
+
+    // Session-Reset-Logik: Nur die aktuelle Session zurückgeben
+    const newest = result.rows[0];
+    const newestTime = new Date(newest.created_at).getTime();
+
+    const sessionMessages = [];
+    let prevTime = newestTime;
+
+    for (const row of result.rows) {
+      const rowTime = new Date(row.created_at).getTime();
+      const gapMs = prevTime - rowTime;
+      if (gapMs > CHAT_SESSION_RESET_MS) break;
+      sessionMessages.push(row);
+      prevTime = rowTime;
+    }
+
+    sessionMessages.reverse();
+    return sessionMessages.slice(-limit);
   } catch (e) {
     return [];
   }
@@ -1220,6 +1308,8 @@ export async function handleChatMessage(
 
   const profile = await loadUserProfile(userId);
   const history = await loadChatHistory(userId, 8);
+
+  console.log(`   📚 History: ${history.length} Nachrichten aus aktueller Session`);
 
   const enrichedProfile = {
     ...profile,

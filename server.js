@@ -509,6 +509,27 @@ app.post('/api/attachments/clear', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ========== TELEGRAM-SEND-API ==========
+
+app.post('/api/telegram/send', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { chat_id, text } = args;
+
+    if (!chat_id || !text) {
+      return res.status(400).json({ error: 'chat_id and text required' });
+    }
+
+    const { sendTelegramMessage } = await import('./server/telegram.js');
+    const result = await sendTelegramMessage(chat_id, text);
+
+    console.log(`📨 Telegram gesendet an ${chat_id}`);
+    res.json({ success: true, to: chat_id });
+  } catch (error) {
+    console.error('❌ telegram-send Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== DRAFT-API ==========
 
