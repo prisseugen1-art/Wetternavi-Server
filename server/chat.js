@@ -702,6 +702,10 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
           },
         });
         console.log(`   ✅ Modell: ${modelName}`);
+if (response.usageMetadata) {
+  const u = response.usageMetadata;
+  console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
+}
         break;
       } catch (e) {
         const errMsg = e.message || String(e);
