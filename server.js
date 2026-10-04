@@ -326,31 +326,6 @@ app.post('/api/debug/delete-key', async (req, res) => {
   }
 });
 
-    // Ziel gewinnt bei Konflikten (toData überschreibt fromData)
-    const merged = { ...fromData, ...toData };
-
-    await pool.query(`
-      INSERT INTO user_data (user_id, data)
-      VALUES ($1, $2::jsonb)
-      ON CONFLICT (user_id) DO UPDATE
-      SET data = $2::jsonb,
-          updated_at = NOW()
-    `, [to_user_id, JSON.stringify(merged)]);
-
-    console.log(`🔀 Merge: ${from_user_id.substring(0,8)} (${Object.keys(fromData).length} Keys) → ${to_user_id.substring(0,8)} (${Object.keys(toData).length} Keys) = ${Object.keys(merged).length} Keys`);
-    res.json({
-      success: true,
-      from_user_id,
-      to_user_id,
-      from_keys: Object.keys(fromData).length,
-      to_keys: Object.keys(toData).length,
-      merged_keys: Object.keys(merged).length,
-    });
-  } catch (error) {
-    console.error('❌ Merge-Fehler:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 app.get('/api/debug/home/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -682,6 +657,7 @@ app.get('/api/draft/get/:userId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // ========== TELEGRAM CAROUSEL SEND ==========
 
 app.post('/api/telegram/send-carousel', async (req, res) => {
