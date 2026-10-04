@@ -325,19 +325,6 @@ app.post('/api/debug/delete-key', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-// 🚨 EINMALIGER MERGE — NACH BENUTZUNG SOFORT WIEDER LÖSCHEN 🚨
-app.post('/api/debug/merge-users', async (req, res) => {
-  try {
-    const { from_user_id, to_user_id } = req.body;
-    if (!from_user_id || !to_user_id) {
-      return res.status(400).json({ error: 'from_user_id and to_user_id required' });
-    }
-    if (from_user_id === to_user_id) {
-      return res.status(400).json({ error: 'IDs sind identisch' });
-    }
-
-    const fromData = await getUserData(from_user_id);
-    const toData = await getUserData(to_user_id);
 
     // Ziel gewinnt bei Konflikten (toData überschreibt fromData)
     const merged = { ...fromData, ...toData };
