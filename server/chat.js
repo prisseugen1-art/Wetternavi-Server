@@ -36,6 +36,21 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+// ==================== TOKEN-LOGGING ====================
+
+async function logTokenUsage(userId, source, model, inputTokens, outputTokens, toolCalls = 0) {
+  try {
+    const total = (inputTokens || 0) + (outputTokens || 0);
+    if (total === 0) return;
+    await pool.query(`
+      INSERT INTO token_usage (user_id, source, model, input_tokens, output_tokens, total_tokens, tool_calls)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [userId, source, model, inputTokens || 0, outputTokens || 0, total, toolCalls]);
+  } catch (e) {
+    console.error('⚠️ Token-Log-Fehler:', e.message);
+  }
+}
+
 // ==================== KONFIG ====================
 
 const CHAT_SESSION_RESET_MS = 8 * 60 * 60 * 1000;
@@ -687,6 +702,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   while (attempts < 5) {
     attempts++;
     let response = null;
+    let usedModel = null;
 
     for (const modelName of CHAT_MODELS) {
       try {
@@ -701,11 +717,12 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
             thinkingConfig: { thinkingLevel: 'low' },
           },
         });
+        usedModel = modelName;
         console.log(`   ✅ Modell: ${modelName}`);
-if (response.usageMetadata) {
-  const u = response.usageMetadata;
-  console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
-}
+        if (response.usageMetadata) {
+          const u = response.usageMetadata;
+          console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
+        }
         break;
       } catch (e) {
         const errMsg = e.message || String(e);
@@ -716,6 +733,12 @@ if (response.usageMetadata) {
               model: modelName, contents,
               config: { systemInstruction: { parts: [{ text: systemInstruction }] }, tools: [{ functionDeclarations: tools }], temperature: 0.8, maxOutputTokens: 500 },
             });
+            usedModel = modelName;
+            console.log(`   ✅ Modell: ${modelName} (ohne thinking)`);
+            if (response.usageMetadata) {
+              const u = response.usageMetadata;
+              console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
+            }
             break;
           } catch (e2) { continue; }
         }
@@ -731,6 +754,17 @@ if (response.usageMetadata) {
     const functionCalls = parts.filter(p => p.functionCall);
 
     if (functionCalls.length > 0) {
+      // ★ Token-Logging: Tool-Call-Runde
+      if (response.usageMetadata && usedModel) {
+        const u = response.usageMetadata;
+        await logTokenUsage(
+          userId, 'chat_tool', usedModel,
+          u.promptTokenCount || 0,
+          u.candidatesTokenCount || 0,
+          functionCalls.length
+        );
+      }
+
       contents.push({ role: 'model', parts });
       for (const part of functionCalls) {
         const fc = part.functionCall;
@@ -742,6 +776,17 @@ if (response.usageMetadata) {
         contents.push({ role: 'user', parts: [{ functionResponse: { name: fc.name, response: toolResult } }] });
       }
       continue;
+    }
+
+    // ★ Token-Logging: Normale Antwort-Runde
+    if (response.usageMetadata && usedModel) {
+      const u = response.usageMetadata;
+      await logTokenUsage(
+        userId, 'chat', usedModel,
+        u.promptTokenCount || 0,
+        u.candidatesTokenCount || 0,
+        0
+      );
     }
 
     finalText = parts.filter(p => p.text).map(p => p.text).join('').trim();
