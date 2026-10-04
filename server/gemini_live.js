@@ -344,7 +344,7 @@ const DRAFT_RULE = [
   'NACH DEM VERWERFEN:',
   '- Kurz bestätigen: "Okay, verworfen."',
 ].join('\n');
-
+// ==================== BUILD JONY PROMPT ====================
 
 function buildJonyPrompt(profile, role = 'freund', attachments = []) {
   const roleData = ROLES[role] || ROLES.freund;
