@@ -905,21 +905,17 @@ async function showDraft(userId, to, subject, body, tone, attachments = []) {
 }
 
 async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlich') {
-  console.log(`📧 Freie E-Mail an ${to}: "${subject}" (Ton: ${tone})`);
-  const res = await fetch(SELF_URL + '/api/send-email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to, subject, body, profile, tone }),
-  });
-  if (!res.ok) {
-    return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
-  }
-  const data = await res.json();
-  const attachInfo = data.attachmentCount > 0 ? ` (mit ${data.attachmentCount} Anhängen)` : '';
-
+  ...
   if (profile?.user_id) {
     clearDraft(profile.user_id);
   }
+
+  // ⬇️ NEU: App informieren, dass Draft weg ist
+  broadcastToClients({
+    type: 'draft_sent',
+    sent: 1,
+    failed: 0,
+  });
 
   return { success: true, to, subject, message: `E-Mail an ${to} gesendet${attachInfo}.` };
 }

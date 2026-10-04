@@ -1268,14 +1268,19 @@ async function handleShowDraft(userId, to, subject, body, tone) {
 async function handleSendEmail(to, subject, body, profile = {}, tone = 'persönlich') {
   try {
     const res = await fetch(SELF_URL + '/api/send-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, body, profile, tone }),
+      ...
     });
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Server-Fehler: ${res.status} ${errText.substring(0, 100)}`);
+      ...
     }
+
+    // ⬇️ NEU: App informieren
+    broadcastToClients({
+      type: 'draft_sent',
+      sent: 1,
+      failed: 0,
+    });
+
     return { success: true, message: `E-Mail an ${to} gesendet.` };
   } catch (e) {
     return { error: e.message };
