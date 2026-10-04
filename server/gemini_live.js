@@ -284,7 +284,7 @@ const ATTACHMENT_RULE = [
 
 // ==================== ENTWURF-REGEL ====================
 
-const DRAFT_RULE = [
+
   const DRAFT_RULE = [
   '===========================================',
   '📝 ENTWURF-REGEL (SEHR WICHTIG)',
