@@ -1242,50 +1242,7 @@ async function handleShowDraft(userId, to, subject, body, tone) {
     // Falls kein /api/draft/save Endpunkt existiert, zeigen wir es trotzdem per broadcast
     // (Fallback für Voice — nutzt den /api/draft/get Endpunkt aus server.js)
 
-    broadcastToClients({
-      type: 'draft_shown',
-      draft: {
-        to, subject, body, tone,
-        attachments: attachments.map(a => ({
-          id: a.id,
-          filename: a.filename,
-          size: a.size,
-        })),
-      },
-    });
-
-    console.log(`📝 Voice-Draft angezeigt: an ${to} (${tone})`);
-
-    return {
-      success: true,
-      message: 'Entwurf wird in der App angezeigt. Warte auf Bestätigung des Nutzers.',
-    };
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
-async function handleSendEmail(to, subject, body, profile = {}, tone = 'persönlich') {
-  try {
-    const res = await fetch(SELF_URL + '/api/send-email', {
-      ...
-    });
-    if (!res.ok) {
-      ...
-    }
-
-    // ⬇️ NEU: App informieren
-    broadcastToClients({
-      type: 'draft_sent',
-      sent: 1,
-      failed: 0,
-    });
-
-    return { success: true, message: `E-Mail an ${to} gesendet.` };
-  } catch (e) {
-    return { error: e.message };
-  }
-}
+        return { success: true, message: `E-Mail an ${to} gesendet.` };
 
 async function handleSendCarouselEmail(userId, to, profile = {}) {
   try {

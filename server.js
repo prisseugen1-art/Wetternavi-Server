@@ -1311,8 +1311,18 @@ app.post('/api/send-email', async (req, res) => {
       }
     }
 
-    if (results.length > 0 && profile?.user_id) {
+        if (results.length > 0 && profile?.user_id) {
       clearAttachments(profile.user_id);
+      clearDraft(profile.user_id);
+    }
+
+    // ⬇️ NEU: App informieren — Karte verschwinden lassen
+    if (results.length > 0) {
+      broadcastToClients({
+        type: 'draft_sent',
+        sent: results.length,
+        failed: errors.length,
+      });
     }
 
     res.json({
@@ -1323,11 +1333,7 @@ app.post('/api/send-email', async (req, res) => {
       errors,
       attachmentCount: finalAttachments.length,
     });
-  } catch (error) {
-    console.error('❌ send-email Fehler:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+
 
 // ========== TELEGRAM ==========
 
