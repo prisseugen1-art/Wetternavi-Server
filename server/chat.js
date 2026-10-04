@@ -38,10 +38,10 @@ const groq = new OpenAI({
 
 // ==================== KONFIG ====================
 
-// Chat-Verlauf-Reset nach 8 Stunden Inaktivität
 const CHAT_SESSION_RESET_MS = 8 * 60 * 60 * 1000; // 8 Std
 
-// ==================== DRAFT-SPEICHER (10 Min TTL) ====================
+// ==================== DRAFT-SPEICHER ====================
+
 const draftStore = new Map();
 const DRAFT_TTL_MS = 10 * 60 * 1000;
 
@@ -248,11 +248,8 @@ const CONTACT_RULES = [
   'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
   '',
   'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
-  '  ⛔ Schreibe den Entwurf NIEMALS als Text in deine Antwort!',
-  '  Die App zeigt die Entwurf-Karte automatisch.',
-  '  Antworte nur KURZ: "Entwurf ist da. Prüf ihn."',
   '',
-  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-BESTÄTIGUNG unten)',
+  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-REGEL unten)',
   '',
   'Schritt 7: send_email(to, subject, body, tone)',
   '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
@@ -278,19 +275,28 @@ const CONTACT_RULES = [
   '- "Ich wohne in ..." → save_user_profile(address: "...")',
 ].join('\n');
 
-// ==================== ENTWURF-BESTÄTIGUNG ====================
+// ==================== ENTWURF-REGEL (Mix) ====================
 
 const DRAFT_CONFIRMATION = [
   '===========================================',
-  '📝 ENTWURF-BESTÄTIGUNG (SEHR WICHTIG)',
+  '📝 ENTWURF-REGEL (SEHR WICHTIG)',
   '===========================================',
   '',
-  'Nach show_draft() → Karte erscheint in der App.',
-  'Warte auf die Reaktion des Nutzers.',
+  'Wenn Ton + Adresse geklärt sind, rufst du IMMER show_draft auf.',
+  '',
+  '⛔ SCHREIBE DEN ENTWURF NIEMALS ALS TEXT IN DEINE ANTWORT!',
+  '⛔ WIEDERHOLE NICHT: An:, Betreff:, Text: in deiner Nachricht.',
+  '',
+  'Die App zeigt die Entwurf-Karte automatisch mit 📎-Button.',
+  'Du antwortest dem Nutzer nur mit EINEM kurzen Satz wie:',
+  '- "Entwurf ist da. Prüf ihn."',
+  '- "Hab einen Entwurf erstellt."',
   '',
   '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  '✅ JA-WÖRTER → Rufe SOFORT send_email auf:',
+  '⏸️ NACH show_draft: WARTE auf Reaktion',
   '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '',
+  '✅ JA-WÖRTER → Rufe SOFORT send_email auf:',
   '- "ja" / "jep" / "jup" / "ok" / "okay"',
   '- "senden" / "schick" / "schick weg" / "schick ab"',
   '- "raus" / "raus damit" / "weg damit" / "los"',
@@ -303,9 +309,7 @@ const DRAFT_CONFIRMATION = [
   '- "raus damit" = SENDEN',
   '- "weg" (allein) = SENDEN',
   '',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '❌ NEIN-WÖRTER → Verwirf den Entwurf (KEIN send_email):',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '- "nein" / "no" / "nö"',
   '- "abbrechen" / "cancel" / "stop" / "stopp"',
   '- "vergiss es" / "vergiss das" / "lösch" / "lösche"',
@@ -318,11 +322,12 @@ const DRAFT_CONFIRMATION = [
   '- "vergiss es" = ABBRECHEN',
   '- "schmeiß weg" = ABBRECHEN',
   '',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  '🖱️ APP-BUTTONS (automatisch):',
+  '- Wenn App ✅ klickt → automatisch send_email',
+  '- Wenn App ❌ klickt → automatisch verwerfen',
+  '',
   '❓ UNKLAR → Kurze Rückfrage:',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   '- "Soll ich senden oder verwerfen?"',
-  '- Warte auf klare Antwort',
   '',
   'NACH DEM SENDEN:',
   '- Kurz bestätigen: "✅ Ist raus."',
@@ -905,17 +910,21 @@ async function showDraft(userId, to, subject, body, tone, attachments = []) {
 }
 
 async function sendFreeEmail(to, subject, body, profile = {}, tone = 'persönlich') {
-  ...
+  console.log(`📧 Freie E-Mail an ${to}: "${subject}" (Ton: ${tone})`);
+  const res = await fetch(SELF_URL + '/api/send-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, subject, body, profile, tone }),
+  });
+  if (!res.ok) {
+    return { error: `E-Mail-Versand fehlgeschlagen: ${res.status}` };
+  }
+  const data = await res.json();
+  const attachInfo = data.attachmentCount > 0 ? ` (mit ${data.attachmentCount} Anhängen)` : '';
+
   if (profile?.user_id) {
     clearDraft(profile.user_id);
   }
-
-  // ⬇️ NEU: App informieren, dass Draft weg ist
-  broadcastToClients({
-    type: 'draft_sent',
-    sent: 1,
-    failed: 0,
-  });
 
   return { success: true, to, subject, message: `E-Mail an ${to} gesendet${attachInfo}.` };
 }
@@ -1124,7 +1133,6 @@ async function executeChatTool(name, args, userId, profile, currentLocation = nu
 
 async function loadChatHistory(userId, limit = 10) {
   try {
-    // Hole die letzten Nachrichten + Zeitstempel
     const result = await pool.query(`
       SELECT role, content, created_at FROM chat_history
       WHERE user_id = $1
@@ -1134,19 +1142,16 @@ async function loadChatHistory(userId, limit = 10) {
 
     if (result.rows.length === 0) return [];
 
-    // Prüfe: Wie alt ist die letzte Nachricht?
     const newest = result.rows[0];
     const newestTime = new Date(newest.created_at).getTime();
     const now = Date.now();
     const ageMs = now - newestTime;
 
-    // Wenn letzte Nachricht > 8 Std alt → neue Session, keine Historie laden
     if (ageMs > CHAT_SESSION_RESET_MS) {
       console.log(`📭 Chat-Session-Reset: Letzte Nachricht ${Math.round(ageMs/60000)} Min alt → neue Session`);
       return [];
     }
 
-    // Sonst: Finde Session-Start (letzte Lücke > 8 Std)
     const sessionMessages = [];
     let prevTime = newestTime;
 
@@ -1155,14 +1160,12 @@ async function loadChatHistory(userId, limit = 10) {
       const gapMs = prevTime - rowTime;
 
       if (gapMs > CHAT_SESSION_RESET_MS) {
-        // Lücke gefunden → Session beginnt hier (nicht mehr laden)
         break;
       }
       sessionMessages.push(row);
       prevTime = rowTime;
     }
 
-    // Umkehren → älteste zuerst, auf limit beschränken
     sessionMessages.reverse();
     return sessionMessages.slice(-limit);
   } catch (e) {
@@ -1193,7 +1196,6 @@ export async function getChatHistory(userId, limit = 50) {
 
     if (result.rows.length === 0) return [];
 
-    // Session-Reset-Logik: Nur die aktuelle Session zurückgeben
     const newest = result.rows[0];
     const newestTime = new Date(newest.created_at).getTime();
 

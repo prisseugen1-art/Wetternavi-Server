@@ -196,9 +196,6 @@ const CONTACT_RULES = [
   '  a) Der Nutzer den kompletten Entwurf gesehen hat',
   '  b) Der Nutzer explizit "ja" / "ok" / "senden" gesagt hat',
   '',
-  'REGEL 3: NIEMALS mit dem Verfassen beginnen, solange eine der',
-  '  Pflichtinfos (Ton, Adresse) fehlt. Erst sammeln — DANN verfassen.',
-  '',
   'PFLICHT-ABLAUF bei "Schreib an [Name/Gruppe]: ...":',
   '',
   'Schritt 1: find_contact(name) UND find_group(name) aufrufen',
@@ -215,17 +212,11 @@ const CONTACT_RULES = [
   'Schritt 4: Frage "Wie lautet [Name]s E-Mail-Adresse?" → WARTE',
   '',
   'Schritt 5: Rufe show_draft(to, subject, body, tone) auf.',
-  '  ⛔ Lies den Entwurf NICHT laut vor!',
-  '  Die App zeigt die Entwurf-Karte.',
-  '  Sage dem Nutzer nur KURZ: "Entwurf ist da. Schau auf den Bildschirm."',
   '',
-  'Schritt 6: WARTE auf "ja" / "ok" / "senden"',
+  'Schritt 6: WARTE auf Reaktion (siehe ENTWURF-REGEL unten)',
   '',
   'Schritt 7: send_email(to, subject, body, tone)',
   '  ⛔ Du schreibst KEINE Signatur — der Server hängt sie an.',
-  '  📎 Anhänge werden AUTOMATISCH mitgeschickt — du rufst nichts extra auf.',
-  '',
-  'Schritt 8: Bei NEUEN Kontakten: "Soll ich mir [Name] merken?"',
   '',
   'KONTAKT-VERWALTUNG:',
   '- "Vergiss Alex" → forget_contact(name: "alex")',
@@ -248,44 +239,9 @@ const CONTACT_RULES = [
   '- "Ich wohne in ..." → save_user_profile(address: "...")',
 ].join('\n');
 
-// ==================== SIGNATUR-REGEL ====================
+// ==================== ENTWURF-REGEL (Mix) ====================
 
-const SIGNATURE_RULE = [
-  '===========================================',
-  '✍️ SIGNATUR-REGEL',
-  '===========================================',
-  '',
-  'Du schreibst E-Mails OHNE Signatur am Ende.',
-  'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
-  'Der Server fügt die Signatur automatisch hinzu.',
-  '',
-  '⛔ NIEMALS selbst unterschreiben.',
-].join('\n');
-
-// ==================== ANHANG-REGEL ====================
-
-const ATTACHMENT_RULE = [
-  '===========================================',
-  '📎 ANHANG-REGEL',
-  '===========================================',
-  '',
-  'Anhänge werden AUTOMATISCH mitgeschickt — du rufst KEIN Tool extra auf.',
-  '',
-  'WENN Anhänge bereit sind:',
-  '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
-  '- Erwähne sie im Entwurf NICHT explizit im body.',
-  '- Die App zeigt sie in der Entwurf-Karte automatisch an.',
-  '',
-  'Der Nutzer kann JEDERZEIT einen Anhang hinzufügen:',
-  '- Er klickt auf den 📎-Button in der Entwurf-Karte.',
-  '- Oder sagt "Ich füge jetzt einen Anhang hinzu".',
-  '- Du wirst darüber informiert mit einer System-Nachricht.',
-].join('\n');
-
-// ==================== ENTWURF-REGEL ====================
-
-
-  const DRAFT_RULE = [
+const DRAFT_RULE = [
   '===========================================',
   '📝 ENTWURF-REGEL (SEHR WICHTIG)',
   '===========================================',
@@ -330,20 +286,49 @@ const ATTACHMENT_RULE = [
   '- "vergiss es" = ABBRECHEN',
   '- "schmeiß weg" = ABBRECHEN',
   '',
-  '🖱️ APP-BUTTONS (automatisch, kein Sprachbefehl nötig):',
+  '🖱️ APP-BUTTONS (automatisch):',
   '- Wenn App ✅ klickt → automatisch send_email',
   '- Wenn App ❌ klickt → automatisch verwerfen',
   '',
   '❓ UNKLAR → Kurze Rückfrage:',
   '- "Soll ich senden oder verwerfen?"',
   '',
-  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
   'NACH DEM SENDEN:',
   '- Kurz bestätigen: "✅ Ist raus."',
   '',
   'NACH DEM VERWERFEN:',
   '- Kurz bestätigen: "Okay, verworfen."',
 ].join('\n');
+
+// ==================== SIGNATUR-REGEL ====================
+
+const SIGNATURE_RULE = [
+  '===========================================',
+  '✍️ SIGNATUR-REGEL',
+  '===========================================',
+  '',
+  'Du schreibst E-Mails OHNE Signatur am Ende.',
+  'Kein "LG Jony", kein "Viele Grüße", KEIN NAME.',
+  'Der Server fügt die Signatur automatisch hinzu.',
+  '',
+  '⛔ NIEMALS selbst unterschreiben.',
+].join('\n');
+
+// ==================== ANHANG-REGEL ====================
+
+const ATTACHMENT_RULE = [
+  '===========================================',
+  '📎 ANHANG-REGEL',
+  '===========================================',
+  '',
+  'Anhänge werden AUTOMATISCH mitgeschickt — du rufst KEIN Tool extra auf.',
+  '',
+  'WENN Anhänge bereit sind:',
+  '- Der System-Prompt sagt es dir unter "📎 AKTUELLE ANHÄNGE:"',
+  '- Erwähne sie NICHT explizit im body.',
+  '- Die App zeigt sie in der Karte.',
+].join('\n');
+
 // ==================== BUILD JONY PROMPT ====================
 
 function buildJonyPrompt(profile, role = 'freund', attachments = []) {
@@ -431,8 +416,7 @@ function buildJonyPrompt(profile, role = 'freund', attachments = []) {
     '===========================================',
     '📧 E-MAIL-VERSAND',
     '===========================================',
-    'Ablauf: show_draft(to, subject, body, tone) → Bestätigung → send_email(to, subject, body, tone)',
-    '⛔ NIEMALS ohne Bestätigung senden.',
+    'Ablauf: show_draft(to, subject, body, tone) → Reaktion → send_email',
     'STANDARD "an mich" → eugen.priss@yahoo.com',
     '',
     '===========================================',
@@ -454,6 +438,7 @@ function buildJonyPrompt(profile, role = 'freund', attachments = []) {
 
   if (attachmentNote) {
     lines.push('');
+    lines.push('===========================================');
     lines.push(attachmentNote);
   }
 
@@ -600,7 +585,6 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
     userProfile.current_city = userProfile.hometown;
   }
 
-  // Aktuelle Anhänge holen
   const currentAttachments = await fetchUserAttachments(userProfile.user_id);
   clientWs._currentAttachments = currentAttachments;
 
@@ -1229,8 +1213,8 @@ async function handleShowDraft(userId, to, subject, body, tone) {
   try {
     const attachments = await fetchUserAttachments(userId);
 
-    // Draft über API speichern
-    const res = await fetch(SELF_URL + '/api/draft/save', {
+    // Draft über API speichern (sendet auch broadcast an App)
+    await fetch(SELF_URL + '/api/draft/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1239,10 +1223,33 @@ async function handleShowDraft(userId, to, subject, body, tone) {
       }),
     }).catch(() => null);
 
-    // Falls kein /api/draft/save Endpunkt existiert, zeigen wir es trotzdem per broadcast
-    // (Fallback für Voice — nutzt den /api/draft/get Endpunkt aus server.js)
+    console.log(`📝 Voice-Draft angezeigt: an ${to} (${tone})`);
 
-        return { success: true, message: `E-Mail an ${to} gesendet.` };
+    return {
+      success: true,
+      message: 'Entwurf wird in der App angezeigt. Warte auf Reaktion des Nutzers.',
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function handleSendEmail(to, subject, body, profile = {}, tone = 'persönlich') {
+  try {
+    const res = await fetch(SELF_URL + '/api/send-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, body, profile, tone }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Server-Fehler: ${res.status} ${errText.substring(0, 100)}`);
+    }
+    return { success: true, message: `E-Mail an ${to} gesendet.` };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 
 async function handleSendCarouselEmail(userId, to, profile = {}) {
   try {
@@ -1474,7 +1481,7 @@ async function generateScriptAndSend(clientWs, userId, topic, audience, focus, s
     'Antworte NUR mit einem JSON-Objekt:',
     '{',
     '  "slides": [',
-    '    {"slide": 1, "title": "Kurzer Hook", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}',
+    '    {"slide": 1, "title": "Kurzer Hook-Titel (max 5 Wörter)", "body": "Text max 20 Wörter", "image_prompt": "DETAILED ENGLISH IMAGE PROMPT 35-50 Wörter"}',
     '  ]',
     '}',
     '',
@@ -1694,11 +1701,9 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ⬇️ NEU: App meldet neuen Anhang
         if (msg.type === 'attachment_added') {
           console.log(`📎 Anhang-Event von App: ${msg.filename || 'unbekannt'}`);
 
-          // Anhänge frisch holen
           const freshAttachments = await fetchUserAttachments(userProfile.user_id);
           clientWs._currentAttachments = freshAttachments;
 
@@ -1725,7 +1730,6 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ⬇️ NEU: App meldet Anhang entfernt
         if (msg.type === 'attachment_removed') {
           const freshAttachments = await fetchUserAttachments(userProfile.user_id);
           clientWs._currentAttachments = freshAttachments;
@@ -1733,10 +1737,8 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ⬇️ NEU: App bestätigt Draft (klick auf ✅)
         if (msg.type === 'draft_confirm') {
           console.log(`✅ Draft bestätigt von App`);
-          // Sende internen Trigger an Gemini → send_email aufrufen
           if (clientWs._session) {
             try {
               clientWs._session.sendClientContent({
@@ -1751,7 +1753,6 @@ export function setupGeminiWebSocket(server) {
           return;
         }
 
-        // ⬇️ NEU: App bricht Draft ab (klick auf ❌)
         if (msg.type === 'draft_cancel') {
           console.log(`❌ Draft abgebrochen von App`);
           if (clientWs._session) {
