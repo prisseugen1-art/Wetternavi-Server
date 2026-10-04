@@ -27,6 +27,29 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
+// ==================== TOKEN-LOGGING (VOICE) ====================
+
+let _tokenPool = null;
+async function logVoiceTokens(userId, model, inputTokens, outputTokens) {
+  try {
+    if (!_tokenPool) {
+      const pg = (await import('pg')).default;
+      _tokenPool = new pg.Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+      });
+    }
+    const total = (inputTokens || 0) + (outputTokens || 0);
+    if (total === 0) return;
+    await _tokenPool.query(`
+      INSERT INTO token_usage (user_id, source, model, input_tokens, output_tokens, total_tokens)
+      VALUES ($1, 'voice', $2, $3, $4, $5)
+    `, [userId, model, inputTokens || 0, outputTokens || 0, total]);
+  } catch (e) {
+    console.error('⚠️ Voice-Token-Log-Fehler:', e.message);
+  }
+}
+
 // ==================== HILFE ====================
 
 function isHereKeyword(loc) {
@@ -190,7 +213,7 @@ const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, save_user_prefere
 
 const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram + alle Kontakt-/Gruppen-/E-Mail-Tools';
 
-// ==================== ANTI-REPETITION (nur Voice) ====================
+// ==================== ANTI-REPETITION ====================
 
 const ANTI_REPETITION = [
   'ANTI-WIEDERHOLUNG: Wähle jedes Mal eine andere Begrüßung.',
@@ -350,11 +373,9 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const agentConfig = AGENTS[agentType] || AGENTS.jony;
 
-  // Komplette user_data laden
   const userData = await fetchUserData(userProfile.user_id);
   clientWs._userData = userData;
 
-  // Standort
   let currentLocation = null;
   if (clientWs._lastLat != null && clientWs._lastLon != null) {
     currentLocation = {
@@ -519,6 +540,26 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     clientWs._geminiIsSpeaking = false;
     clientWs._lastUserSpeechTime = Date.now();
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
+
+    // ★ Token-Usage loggen (falls Gemini Live sie liefert)
+    if (sc.usageMetadata && userProfile?.user_id) {
+      const u = sc.usageMetadata;
+      const inTok = u.promptTokenCount || 0;
+      const outTok = u.candidatesTokenCount || 0;
+      console.log(`   📊 VOICE-TOKENS: input=${inTok}, output=${outTok}`);
+      logVoiceTokens(userProfile.user_id, 'gemini-live', inTok, outTok);
+    }
+  }
+
+  // Fallback: Usage manchmal auf Top-Level
+  if (message.usageMetadata && userProfile?.user_id) {
+    const u = message.usageMetadata;
+    const inTok = u.promptTokenCount || 0;
+    const outTok = u.candidatesTokenCount || 0;
+    if (inTok + outTok > 0) {
+      console.log(`   📊 VOICE-TOKENS (top): input=${inTok}, output=${outTok}`);
+      logVoiceTokens(userProfile.user_id, 'gemini-live', inTok, outTok);
+    }
   }
 }
 
