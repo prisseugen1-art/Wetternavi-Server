@@ -116,6 +116,47 @@ async function initDb() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        source TEXT NOT NULL,
+        model TEXT,
+        input_tokens INT DEFAULT 0,
+        output_tokens INT DEFAULT 0,
+        total_tokens INT DEFAULT 0,
+        tool_calls INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_token_usage_user_time
+      ON token_usage (user_id, created_at DESC)
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_token_usage_source_time
+      ON token_usage (source, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        source TEXT NOT NULL,
+        model TEXT,
+        input_tokens INT DEFAULT 0,
+        output_tokens INT DEFAULT 0,
+        total_tokens INT DEFAULT 0,
+        tool_calls INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_token_usage_user_time
+      ON token_usage (user_id, created_at DESC)
+    `);
 
     console.log('✅ Datenbank-Tabellen bereit');
   } catch (error) {
@@ -1402,6 +1443,200 @@ app.get('/api/telegram/webhook-info', async (req, res) => {
     res.json(info);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+// ========== TOKEN-TRACKING ==========
+
+// Zusammenfassung pro User
+app.get('/api/token-usage/summary/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const days = parseInt(req.query.days) || 30;
+
+    const result = await pool.query(`
+      SELECT
+        source,
+        model,
+        COUNT(*)::int AS requests,
+        SUM(input_tokens)::int AS input_total,
+        SUM(output_tokens)::int AS output_total,
+        SUM(total_tokens)::int AS total,
+        SUM(tool_calls)::int AS tools
+      FROM token_usage
+      WHERE user_id = $1
+        AND created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY source, model
+      ORDER BY total DESC
+    `, [userId]);
+
+    const grand = await pool.query(`
+      SELECT
+        COUNT(*)::int AS requests,
+        COALESCE(SUM(total_tokens), 0)::int AS tokens
+      FROM token_usage
+      WHERE user_id = $1
+        AND created_at > NOW() - INTERVAL '${days} days'
+    `, [userId]);
+
+    res.json({
+      user_id: userId,
+      days,
+      total_requests: grand.rows[0].requests,
+      total_tokens: grand.rows[0].tokens,
+      by_source: result.rows,
+    });
+  } catch (error) {
+    console.error('❌ token-usage summary:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Rohdaten (letzte N)
+app.get('/api/token-usage/raw/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+
+    const result = await pool.query(`
+      SELECT id, source, model, input_tokens, output_tokens,
+             total_tokens, tool_calls, created_at
+      FROM token_usage
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `, [userId, limit]);
+
+    res.json({ user_id: userId, count: result.rows.length, entries: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Tagesverlauf
+app.get('/api/token-usage/daily/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const days = parseInt(req.query.days) || 30;
+
+    const result = await pool.query(`
+      SELECT
+        DATE(created_at) AS day,
+        COUNT(*)::int AS requests,
+        SUM(input_tokens)::int AS input_total,
+        SUM(output_tokens)::int AS output_total,
+        SUM(total_tokens)::int AS total
+      FROM token_usage
+      WHERE user_id = $1
+        AND created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY DATE(created_at)
+      ORDER BY day DESC
+    `, [userId]);
+
+    res.json({ user_id: userId, days, daily: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Gesamt (alle User)
+app.get('/api/token-usage/all', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const result = await pool.query(`
+      SELECT
+        user_id,
+        source,
+        COUNT(*)::int AS requests,
+        SUM(total_tokens)::int AS tokens
+      FROM token_usage
+      WHERE created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY user_id, source
+      ORDER BY tokens DESC
+    `);
+    res.json({ days, users: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// ========== TOKEN-TRACKING ==========
+
+app.get('/api/token-usage/summary/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const days = parseInt(req.query.days) || 30;
+    const result = await pool.query(`
+      SELECT source, model, COUNT(*)::int AS requests,
+        SUM(input_tokens)::int AS input_total,
+        SUM(output_tokens)::int AS output_total,
+        SUM(total_tokens)::int AS total,
+        SUM(tool_calls)::int AS tools
+      FROM token_usage
+      WHERE user_id = $1 AND created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY source, model
+      ORDER BY total DESC
+    `, [userId]);
+    const grand = await pool.query(`
+      SELECT COUNT(*)::int AS requests, COALESCE(SUM(total_tokens), 0)::int AS tokens
+      FROM token_usage
+      WHERE user_id = $1 AND created_at > NOW() - INTERVAL '${days} days'
+    `, [userId]);
+    res.json({
+      user_id: userId, days,
+      total_requests: grand.rows[0].requests,
+      total_tokens: grand.rows[0].tokens,
+      by_source: result.rows,
+    });
+  } catch (error) {
+    console.error('❌ token-usage summary:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/token-usage/raw/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const result = await pool.query(`
+      SELECT id, source, model, input_tokens, output_tokens, total_tokens, tool_calls, created_at
+      FROM token_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2
+    `, [userId, limit]);
+    res.json({ user_id: userId, count: result.rows.length, entries: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/token-usage/daily/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const days = parseInt(req.query.days) || 30;
+    const result = await pool.query(`
+      SELECT DATE(created_at) AS day, COUNT(*)::int AS requests,
+        SUM(input_tokens)::int AS input_total,
+        SUM(output_tokens)::int AS output_total,
+        SUM(total_tokens)::int AS total
+      FROM token_usage
+      WHERE user_id = $1 AND created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY DATE(created_at) ORDER BY day DESC
+    `, [userId]);
+    res.json({ user_id: userId, days, daily: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/token-usage/all', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const result = await pool.query(`
+      SELECT user_id, source, COUNT(*)::int AS requests, SUM(total_tokens)::int AS tokens
+      FROM token_usage
+      WHERE created_at > NOW() - INTERVAL '${days} days'
+      GROUP BY user_id, source ORDER BY tokens DESC
+    `);
+    res.json({ days, users: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
