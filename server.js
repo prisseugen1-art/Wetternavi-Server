@@ -1760,6 +1760,134 @@ app.post('/api/telegram/unmap', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ========== BACKUP ==========
+
+app.get('/api/backup/export', async (req, res) => {
+  try {
+    console.log('💾 Backup-Export gestartet...');
+
+    const userData = await pool.query('SELECT user_id, data, updated_at FROM user_data');
+    const presence = await pool.query('SELECT * FROM user_presence');
+    const home = await pool.query('SELECT * FROM user_home');
+    const chats = await pool.query('SELECT * FROM chat_history');
+    const tokens = await pool.query('SELECT * FROM token_usage');
+    const telegramMap = await pool.query('SELECT * FROM telegram_user_map');
+
+    const backup = {
+      version: 1,
+      created_at: new Date().toISOString(),
+      counts: {
+        user_data: userData.rows.length,
+        presence: presence.rows.length,
+        home: home.rows.length,
+        chat_history: chats.rows.length,
+        token_usage: tokens.rows.length,
+        telegram_map: telegramMap.rows.length,
+      },
+      tables: {
+        user_data: userData.rows,
+        user_presence: presence.rows,
+        user_home: home.rows,
+        chat_history: chats.rows,
+        token_usage: tokens.rows,
+        telegram_user_map: telegramMap.rows,
+      },
+    };
+
+    const json = JSON.stringify(backup, null, 2);
+    const filename = `wetternavi-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+    console.log(`✅ Backup fertig: ${Math.round(json.length / 1024)} KB`);
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(json);
+  } catch (error) {
+    console.error('❌ Backup-Export-Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Info ohne Download (nur Übersicht)
+app.get('/api/backup/info', async (req, res) => {
+  try {
+    const userData = await pool.query('SELECT COUNT(*)::int AS c FROM user_data');
+    const chats = await pool.query('SELECT COUNT(*)::int AS c FROM chat_history');
+    const tokens = await pool.query('SELECT COUNT(*)::int AS c FROM token_usage');
+    const map = await pool.query('SELECT COUNT(*)::int AS c FROM telegram_user_map');
+    res.json({
+      user_data: userData.rows[0].c,
+      chat_history: chats.rows[0].c,
+      token_usage: tokens.rows[0].c,
+      telegram_map: map.rows[0].c,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Restore — nur nutzen wenn nötig!
+app.post('/api/backup/import', async (req, res) => {
+  try {
+    const backup = req.body;
+    if (!backup || !backup.tables || backup.version !== 1) {
+      return res.status(400).json({ error: 'Ungültiges Backup-Format' });
+    }
+
+    console.log('📥 Backup-Import gestartet...');
+    const stats = {};
+
+    // user_data
+    if (backup.tables.user_data) {
+      let count = 0;
+      for (const row of backup.tables.user_data) {
+        await pool.query(`
+          INSERT INTO user_data (user_id, data, updated_at)
+          VALUES ($1, $2::jsonb, $3)
+          ON CONFLICT (user_id) DO UPDATE
+          SET data = $2::jsonb, updated_at = $3
+        `, [row.user_id, JSON.stringify(row.data), row.updated_at || new Date()]);
+        count++;
+      }
+      stats.user_data = count;
+    }
+
+    // telegram_user_map
+    if (backup.tables.telegram_user_map) {
+      let count = 0;
+      for (const row of backup.tables.telegram_user_map) {
+        await pool.query(`
+          INSERT INTO telegram_user_map (chat_id, user_id, display_name, is_kids, created_at, last_seen)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (chat_id) DO NOTHING
+        `, [row.chat_id, row.user_id, row.display_name, row.is_kids, row.created_at, row.last_seen]);
+        count++;
+      }
+      stats.telegram_user_map = count;
+    }
+
+    // home
+    if (backup.tables.user_home) {
+      let count = 0;
+      for (const row of backup.tables.user_home) {
+        await pool.query(`
+          INSERT INTO user_home (user_id, home_lat, home_lon, confidence, updated_at)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (user_id) DO UPDATE
+          SET home_lat = $2, home_lon = $3, confidence = $4, updated_at = $5
+        `, [row.user_id, row.home_lat, row.home_lon, row.confidence, row.updated_at]);
+        count++;
+      }
+      stats.user_home = count;
+    }
+
+    console.log('✅ Backup-Import fertig:', stats);
+    res.json({ success: true, restored: stats });
+  } catch (error) {
+    console.error('❌ Backup-Import-Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== SENSOR-BUS ==========
 const sensorBus = new SensorBus();
