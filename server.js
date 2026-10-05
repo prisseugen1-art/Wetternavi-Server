@@ -157,6 +157,22 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_token_usage_user_time
       ON token_usage (user_id, created_at DESC)
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS telegram_user_map (
+        chat_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        display_name TEXT,
+        is_kids BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        last_seen TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_telegram_map_user
+      ON telegram_user_map (user_id)
+    `);
+
 
     console.log('✅ Datenbank-Tabellen bereit');
   } catch (error) {
@@ -1635,6 +1651,111 @@ app.get('/api/token-usage/all', async (req, res) => {
       GROUP BY user_id, source ORDER BY tokens DESC
     `);
     res.json({ days, users: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// ========== TELEGRAM USER-MAP ==========
+
+// UUID v4 Generator (ohne extra Dependency)
+function genUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// Owner-Einstellungen aus ENV
+const TELEGRAM_OWNER_CHAT_ID = process.env.TELEGRAM_OWNER_CHAT_ID || '8448058381';
+const TELEGRAM_OWNER_USER_ID = process.env.TELEGRAM_OWNER_USER_ID || '0e9d40d8-af3c-4e78-9654-0cb4f3077e19';
+const TELEGRAM_KIDS_CHAT_ID = process.env.TELEGRAM_KIDS_CHAT_ID || '';
+
+// Chat-ID → user_id nachschlagen oder neu anlegen
+app.post('/api/telegram/lookup-user', async (req, res) => {
+  try {
+    const { chat_id, from_name } = req.body || {};
+    if (!chat_id) return res.status(400).json({ error: 'chat_id required' });
+
+    const chatIdStr = String(chat_id);
+
+    // 1. Prüfen ob schon gemappt
+    const existing = await pool.query(
+      'SELECT user_id, is_kids FROM telegram_user_map WHERE chat_id = $1',
+      [chatIdStr]
+    );
+
+    if (existing.rows.length > 0) {
+      // last_seen aktualisieren
+      await pool.query(
+        'UPDATE telegram_user_map SET last_seen = NOW() WHERE chat_id = $1',
+        [chatIdStr]
+      );
+      const row = existing.rows[0];
+      console.log(`🔍 Telegram-Lookup: ${chatIdStr} → ${row.user_id.substring(0,8)}... (bekannt, kids: ${row.is_kids})`);
+      return res.json({ user_id: row.user_id, is_kids: row.is_kids, is_new: false });
+    }
+
+    // 2. Neuer User → user_id bestimmen
+    let newUserId;
+    let isKids = false;
+
+    // Owner-Sonderfall
+    if (chatIdStr === TELEGRAM_OWNER_CHAT_ID) {
+      newUserId = TELEGRAM_OWNER_USER_ID;
+    } else if (TELEGRAM_KIDS_CHAT_ID && chatIdStr === TELEGRAM_KIDS_CHAT_ID) {
+      newUserId = genUUID();
+      isKids = true;
+    } else {
+      newUserId = genUUID();
+    }
+
+    // 3. In Map eintragen
+    await pool.query(`
+      INSERT INTO telegram_user_map (chat_id, user_id, display_name, is_kids)
+      VALUES ($1, $2, $3, $4)
+    `, [chatIdStr, newUserId, from_name || 'Unbekannt', isKids]);
+
+    // 4. user_data-Eintrag anlegen (falls neu)
+    if (newUserId !== TELEGRAM_OWNER_USER_ID) {
+      await pool.query(`
+        INSERT INTO user_data (user_id, data)
+        VALUES ($1, $2::jsonb)
+        ON CONFLICT (user_id) DO NOTHING
+      `, [newUserId, JSON.stringify({
+        telegram_chat_id: chatIdStr,
+        name: from_name || 'Unbekannt',
+      })]);
+    }
+
+    console.log(`🔍 Telegram-Lookup: ${chatIdStr} → ${newUserId.substring(0,8)}... (NEU, kids: ${isKids})`);
+    res.json({ user_id: newUserId, is_kids: isKids, is_new: true });
+  } catch (error) {
+    console.error('❌ telegram-lookup-user:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug: Alle Mappings sehen
+app.get('/api/telegram/map', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT chat_id, user_id, display_name, is_kids, created_at, last_seen
+      FROM telegram_user_map ORDER BY last_seen DESC
+    `);
+    res.json({ count: result.rows.length, mappings: result.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug: Einzelnes Mapping löschen (falls was schief läuft)
+app.post('/api/telegram/unmap', async (req, res) => {
+  try {
+    const { chat_id } = req.body || {};
+    if (!chat_id) return res.status(400).json({ error: 'chat_id required' });
+    const r = await pool.query('DELETE FROM telegram_user_map WHERE chat_id = $1', [String(chat_id)]);
+    console.log(`🗑️ Telegram-Unmap: ${chat_id} (${r.rowCount} Zeile)`);
+    res.json({ success: true, removed: r.rowCount });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
