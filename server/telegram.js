@@ -24,6 +24,49 @@ function sanitizeText(text) {
   if (!text) return '';
   return String(text).trim().substring(0, 4000);
 }
+// ==================== GOOGLE TTS ====================
+
+const TTS_API_KEY = process.env.GOOGLE_TTS_API_KEY;
+
+async function textToSpeech(text) {
+  if (!TTS_API_KEY) throw new Error('GOOGLE_TTS_API_KEY fehlt');
+
+  // Text begrenzen (TTS-API max 5000 Zeichen pro Call)
+  const cleanText = String(text).trim().substring(0, 4000);
+  if (!cleanText) throw new Error('Leerer Text');
+
+  const res = await fetch(
+    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${TTS_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input: { text: cleanText },
+        voice: {
+          languageCode: 'de-DE',
+          name: 'de-DE-Neural2-B',  // Frau — Alternative: de-DE-Neural2-D (Mann)
+          ssmlGender: 'FEMALE',
+        },
+        audioConfig: {
+          audioEncoding: 'OGG_OPUS',
+          speakingRate: 1.0,
+          pitch: 0.0,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`TTS HTTP ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  if (!data.audioContent) throw new Error('Kein Audio zurückgegeben');
+
+  // Base64 → Buffer
+  return Buffer.from(data.audioContent, 'base64');
+}
 
 // ==================== GROQ WHISPER (STT) ====================
 
@@ -214,11 +257,21 @@ export async function initTelegram() {
         try { listener(payload); } catch (e) { console.error('❌ Listener:', e.message); }
       }
 
-      // 4. Antwort generieren
+           // 4. Antwort generieren
       const reply = await generateTelegramReply(chatId, text, null);
       if (reply && reply.trim()) {
-        await ctx.reply(reply);
-        console.log(`📤 Telegram-Antwort (Voice) an ${chatId}`);
+        // 5. Antwort als Sprachnachricht versuchen
+        try {
+          console.log(`   🔊 TTS...`);
+          const audioBuffer = await textToSpeech(reply);
+          await ctx.replyWithVoice(new InputFile(audioBuffer, 'reply.ogg'));
+          console.log(`📤 Telegram-Antwort (Voice) an ${chatId}`);
+        } catch (ttsErr) {
+          // Fallback: Text senden wenn TTS fehlschlägt
+          console.error('⚠️ TTS-Fehler, sende Text:', ttsErr.message);
+          await ctx.reply(reply);
+          console.log(`📤 Telegram-Antwort (Text-Fallback) an ${chatId}`);
+        }
       }
     } catch (e) {
       console.error('❌ Voice-Handler-Fehler:', e.message);
