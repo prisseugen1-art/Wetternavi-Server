@@ -5,6 +5,7 @@ import { generateTelegramReply, getTelegramSessionInfo, clearTelegramSession } f
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'jony-webhook-secret';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const ALLOWED_CHAT_IDS = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '')
   .split(',')
   .map(s => s.trim())
@@ -23,6 +24,47 @@ function sanitizeText(text) {
   if (!text) return '';
   return String(text).trim().substring(0, 4000);
 }
+
+// ==================== GROQ WHISPER (STT) ====================
+
+async function transcribeAudio(audioBuffer, filename = 'voice.ogg') {
+  if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY fehlt');
+
+  const formData = new FormData();
+  const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
+  formData.append('file', blob, filename);
+  formData.append('model', 'whisper-large-v3-turbo');
+  formData.append('response_format', 'json');
+  // language NICHT setzen → Whisper erkennt DE/RU automatisch
+
+  const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Whisper HTTP ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return (data.text || '').trim();
+}
+
+async function downloadTelegramFile(fileId) {
+  if (!bot) throw new Error('Bot nicht initialisiert');
+  const file = await bot.api.getFile(fileId);
+  const url = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download HTTP ${res.status}`);
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+// ==================== INIT ====================
 
 export async function initTelegram() {
   if (!BOT_TOKEN) {
@@ -47,7 +89,7 @@ export async function initTelegram() {
     await ctx.reply(
       `Hallo ${name}! 👋\n\n` +
       `Ich bin Jony, dein Begleiter.\n\n` +
-      `Schreib mir einfach – ich antworte direkt.\n\n` +
+      `Schreib mir – oder schick mir eine Sprachnachricht 🎤\n\n` +
       `📌 Deine Chat-ID: \`${chatId}\``,
       { parse_mode: 'Markdown' }
     );
@@ -75,6 +117,8 @@ export async function initTelegram() {
     await ctx.reply('🔄 Session zurückgesetzt.');
   });
 
+  // ==================== TEXT-NACHRICHTEN ====================
+
   bot.on('message:text', async (ctx) => {
     const chatId = String(ctx.chat.id);
     if (!isAllowed(chatId)) return;
@@ -98,11 +142,7 @@ export async function initTelegram() {
     };
 
     for (const listener of messageListeners) {
-      try {
-        listener(payload);
-      } catch (e) {
-        console.error('❌ Telegram-Listener-Fehler:', e.message);
-      }
+      try { listener(payload); } catch (e) { console.error('❌ Listener:', e.message); }
     }
 
     try {
@@ -117,6 +157,76 @@ export async function initTelegram() {
       await ctx.reply('Sorry, ich hab grad Probleme. Versuch\'s nochmal.').catch(() => {});
     }
   });
+
+  // ==================== VOICE-NACHRICHTEN ====================
+
+  bot.on('message:voice', async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    if (!isAllowed(chatId)) return;
+
+    const fromName = ctx.from?.first_name || 'Unbekannt';
+    const voice = ctx.message.voice;
+    const duration = voice.duration || 0;
+
+    console.log(`🎤 Telegram-Voice von ${fromName} (${chatId}): ${duration}s`);
+
+    // Max-Größe: ~5 Min
+    if (duration > 300) {
+      await ctx.reply('⏱️ Sprachnachricht zu lang (max 5 Min).');
+      return;
+    }
+
+    try {
+      await ctx.replyWithChatAction('typing');
+
+      // 1. Audio runterladen
+      console.log(`   ⬇️ Lade Audio...`);
+      const audioBuffer = await downloadTelegramFile(voice.file_id);
+      console.log(`   ✅ Audio: ${Math.round(audioBuffer.length / 1024)} KB`);
+
+      // 2. Whisper → Text
+      console.log(`   🎯 Whisper transkribiert...`);
+      const text = await transcribeAudio(audioBuffer);
+
+      if (!text) {
+        await ctx.reply('🤔 Konnte nichts verstehen. Nochmal?');
+        return;
+      }
+
+      console.log(`   📝 Erkannt: "${text}"`);
+
+      // Optional: zeige Transkription
+      // await ctx.reply(`_${text}_`, { parse_mode: 'Markdown' });
+
+      // 3. Payload an Listener
+      const payload = {
+        chatId,
+        fromName,
+        username: ctx.from?.username ? `@${ctx.from.username}` : '',
+        text,
+        isVoice: true,
+        timestamp: (ctx.message.date || Math.floor(Date.now() / 1000)) * 1000,
+        isGroup: ctx.chat.type !== 'private',
+        chatTitle: ctx.chat.title || null,
+      };
+
+      for (const listener of messageListeners) {
+        try { listener(payload); } catch (e) { console.error('❌ Listener:', e.message); }
+      }
+
+      // 4. Antwort generieren
+      const reply = await generateTelegramReply(chatId, text, null);
+      if (reply && reply.trim()) {
+        await ctx.reply(reply);
+        console.log(`📤 Telegram-Antwort (Voice) an ${chatId}`);
+      }
+    } catch (e) {
+      console.error('❌ Voice-Handler-Fehler:', e.message);
+      await ctx.reply('Sorry, ich konnte die Sprachnachricht nicht verarbeiten.').catch(() => {});
+    }
+  });
+
+  // ==================== BOT-START ====================
 
   try {
     const me = await bot.api.getMe();
@@ -147,9 +257,7 @@ export async function sendTelegramPhoto(chatId, base64Data, caption = '') {
   if (!bot) throw new Error('Telegram-Bot nicht initialisiert');
   if (!base64Data) throw new Error('base64Data erforderlich');
 
-  // Base64 → Buffer
   const buffer = Buffer.from(base64Data, 'base64');
-
   const inputFile = new InputFile(buffer, 'slide.jpg');
 
   console.log(`📤 Sende Telegram-Foto an ${chatId} (${Math.round(buffer.length / 1024)} KB)`);
@@ -169,7 +277,6 @@ export async function sendTelegramCarousel(chatId, topic, slides = [], images = 
 
   console.log(`📨 Sende Karussell "${topic}" an ${chatId} (${images.length} Bilder)`);
 
-  // 1. Header-Nachricht
   const headerLines = [
     `🎨 *${topic}*`,
     '',
@@ -177,7 +284,6 @@ export async function sendTelegramCarousel(chatId, topic, slides = [], images = 
   ];
   await bot.api.sendMessage(chatId, headerLines.join('\n'), { parse_mode: 'Markdown' });
 
-  // 2. Jedes Slide als Foto + Text
   let imagesSent = 0;
   const sortedImages = [...images].sort((a, b) => a.n - b.n);
 
@@ -185,20 +291,16 @@ export async function sendTelegramCarousel(chatId, topic, slides = [], images = 
     const slide = slides.find(s => s.slide === img.n) || {};
     const title = slide.title || `Slide ${img.n}`;
     const body = slide.body || '';
-
     const caption = `${img.n}. ${title}\n\n${body}`;
 
     try {
       await sendTelegramPhoto(chatId, img.data, caption);
       imagesSent++;
-
-      // Rate-Limit-Schutz: 1 Sek zwischen Bildern
       if (imagesSent < sortedImages.length) {
         await new Promise(r => setTimeout(r, 1000));
       }
     } catch (e) {
       console.error(`❌ Fehler bei Slide ${img.n}:`, e.message);
-      // Text als Fallback
       try {
         await bot.api.sendMessage(chatId, `Slide ${img.n}: ${title}\n\n${body}`);
       } catch (e2) {}
@@ -207,11 +309,7 @@ export async function sendTelegramCarousel(chatId, topic, slides = [], images = 
 
   console.log(`✅ Karussell an Telegram gesendet: ${imagesSent} Bilder`);
 
-  return {
-    success: true,
-    to: chatId,
-    imagesSent,
-  };
+  return { success: true, to: chatId, imagesSent };
 }
 
 // ==================== WEBHOOK ====================
