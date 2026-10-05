@@ -76,7 +76,7 @@ async function transcribeAudio(audioBuffer, filename = 'voice.ogg') {
   const formData = new FormData();
   const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
   formData.append('file', blob, filename);
-  formData.append('model', 'whisper-large-v3-turbo');
+  formData.append('model', 'whisper-large-v3');
   formData.append('response_format', 'json');
   // language NICHT setzen → Whisper erkennt DE/RU automatisch
 
@@ -257,21 +257,12 @@ export async function initTelegram() {
         try { listener(payload); } catch (e) { console.error('❌ Listener:', e.message); }
       }
 
-           // 4. Antwort generieren
+                 // 4. Antwort generieren
       const reply = await generateTelegramReply(chatId, text, null);
       if (reply && reply.trim()) {
-        // 5. Antwort als Sprachnachricht versuchen
-        try {
-          console.log(`   🔊 TTS...`);
-          const audioBuffer = await textToSpeech(reply);
-          await ctx.replyWithVoice(new InputFile(audioBuffer, 'reply.ogg'));
-          console.log(`📤 Telegram-Antwort (Voice) an ${chatId}`);
-        } catch (ttsErr) {
-          // Fallback: Text senden wenn TTS fehlschlägt
-          console.error('⚠️ TTS-Fehler, sende Text:', ttsErr.message);
-          await ctx.reply(reply);
-          console.log(`📤 Telegram-Antwort (Text-Fallback) an ${chatId}`);
-        }
+        // Antwort als TEXT (mit Hinweis auf Transkription)
+        await ctx.reply(`📝 _"${text}"_\n\n${reply}`, { parse_mode: 'Markdown' });
+        console.log(`📤 Telegram-Antwort (Text) an ${chatId}`);
       }
     } catch (e) {
       console.error('❌ Voice-Handler-Fehler:', e.message);
