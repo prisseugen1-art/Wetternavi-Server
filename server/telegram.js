@@ -42,10 +42,10 @@ async function textToSpeech(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         input: { text: cleanText },
-        voice: {
+              voice: {
           languageCode: 'de-DE',
-          name: 'de-DE-Neural2-B',  // Frau — Alternative: de-DE-Neural2-D (Mann)
-          ssmlGender: 'FEMALE',
+          name: 'de-DE-Neural2-D',  // Männlich, kräftig — passt zu Jony
+          ssmlGender: 'MALE',
         },
         audioConfig: {
           audioEncoding: 'OGG_OPUS',
