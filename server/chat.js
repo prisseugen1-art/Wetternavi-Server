@@ -686,8 +686,8 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
             tools: [
+             
               { functionDeclarations: toolsList },
-              { googleSearch: {} },
             ],
             temperature: 0.8,
             maxOutputTokens: 500,
