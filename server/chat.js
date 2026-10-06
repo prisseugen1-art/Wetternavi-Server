@@ -18,11 +18,11 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
+// ★ Aktuelle Modelle (alte existieren nicht mehr)
 const CHAT_MODELS = [
   'gemini-3.8-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-pro-preview',
 ];
 
 const GROQ_FALLBACKS = [
@@ -213,6 +213,8 @@ const CORE_RULES = [
   'DRAFT: Niemals als Text wiederholen. Nur "Entwurf ist da. Prüf ihn."',
   '',
   'TELEGRAM: send_telegram_message(chat_id, text). Eugen: 8448058381.',
+  '',
+  '🌐 AKTUELLES WISSEN: Du hast Zugriff auf die Google-Suche. Bei Fragen zu aktuellen Ereignissen (Bundesliga-Tabelle, Spielstände, Nachrichten, aktuelle Termine, Preise, Wetter-Vorhersagen) → nutze die Google-Suche automatisch. ERFINDE NICHTS. Wenn du etwas nicht weißt → sag es.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -644,7 +646,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
-  console.log(`🔖 BUILD-MARKER v5 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AUS`);
+  console.log(`🔖 BUILD-MARKER v6 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AN (mit toolConfig)`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
@@ -688,7 +690,13 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
           contents,
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-                        tools: [{ functionDeclarations: toolsList, googleSearch: {} }],
+            tools: [
+              { functionDeclarations: toolsList },
+              { googleSearch: {} },
+            ],
+            toolConfig: {
+              includeServerSideToolInvocations: true,
+            },
             temperature: 0.8,
             maxOutputTokens: 500,
             thinkingConfig: { thinkingLevel: 'low' },
@@ -712,7 +720,13 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
               contents,
               config: {
                 systemInstruction: { parts: [{ text: systemInstruction }] },
-                           tools: [{ functionDeclarations: toolsList, googleSearch: {} }],
+                tools: [
+                  { functionDeclarations: toolsList },
+                  { googleSearch: {} },
+                ],
+                toolConfig: {
+                  includeServerSideToolInvocations: true,
+                },
                 temperature: 0.8,
                 maxOutputTokens: 500,
               },
@@ -767,6 +781,25 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
     }
 
     finalText = parts.filter(p => p.text).map(p => p.text).join('').trim();
+
+    try {
+      const gm = candidate.groundingMetadata;
+      if (gm && Array.isArray(gm.groundingChunks)) {
+        finalSources = gm.groundingChunks
+          .filter(c => c.web && c.web.uri)
+          .slice(0, 5)
+          .map(c => ({
+            title: c.web.title || c.web.uri,
+            uri: c.web.uri,
+          }));
+        if (finalSources.length > 0) {
+          console.log(`   🌐 Grounding: ${finalSources.length} Quellen gefunden`);
+        }
+      }
+    } catch (e) {
+      console.error('⚠️ Grounding-Parse:', e.message);
+    }
+
     break;
   }
 
