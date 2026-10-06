@@ -114,7 +114,7 @@ function getTimeContext() {
   return weekday + (timeOfDay === 'Morgen' ? 'morgen' : ', ' + timeOfDay);
 }
 
-// ==================== KOMPAKTES FUNDAMENT ====================
+// ==================== FUNDAMENT ====================
 
 function buildFoundation(userData, currentLocation, attachments) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -188,7 +188,7 @@ function buildFoundation(userData, currentLocation, attachments) {
   return parts.join('\n');
 }
 
-// ==================== KOMPAKTE REGELN ====================
+// ==================== REGELN ====================
 
 const CORE_RULES = [
   'SPRACHE: Deutsch oder Russisch. Bei anderen Sprachen auf Deutsch weitermachen.',
@@ -213,8 +213,6 @@ const CORE_RULES = [
   'DRAFT: Niemals als Text wiederholen. Nur "Entwurf ist da. Prüf ihn."',
   '',
   'TELEGRAM: send_telegram_message(chat_id, text). Eugen: 8448058381.',
-  '',
-  '🌐 AKTUELLE INFOS: Bei Fragen zu aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit, Spielstände, etc.) nutze die Google-Suche (google_search-Tool ist verfügbar). Erfinde NICHTS.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -246,7 +244,7 @@ const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, save_user_prefere
 
 const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram + alle Kontakt-/Gruppen-/E-Mail-Tools';
 
-// ==================== PROMPT-BUILD ====================
+// ==================== PROMPT ====================
 
 function buildSystemPrompt(userData, role, mode, currentLocation, attachments) {
   const foundation = buildFoundation(userData, currentLocation, attachments);
@@ -280,7 +278,7 @@ function buildSystemPrompt(userData, role, mode, currentLocation, attachments) {
   ].join('\n');
 }
 
-// ==================== TOOLS ====================
+// ==================== TOOLS-DEFINITIONEN ====================
 
 const JONY_TOOLS = [
   { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
@@ -492,10 +490,11 @@ async function generateScriptAndBroadcast(topic, audience, focus, slideCount, us
       if (userId) setScript(userId, topic, slides);
       broadcastToClients({ type: 'script', topic, slides });
       return { success: true, slide_count: slides.length, message: `Skript mit ${slides.length} Slides angezeigt.` };
-          } catch (e) {
-        const errMsg = e.message || String(e);
-        console.error(`   ❌ ${modelName}-Fehler:`, errMsg.substring(0, 300));
-        if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) continue;    }
+    } catch (e) {
+      lastError = e;
+      const errMsg = e.message || String(e);
+      if (errMsg.includes('404') || errMsg.includes('does not exist')) continue;
+    }
   }
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
@@ -634,7 +633,7 @@ function detectChatMode(message, currentMode = 'jony') {
     if (/party.?modus|jony.*party|partymodus|пати/.test(t)) return { mode: 'jony', role: 'party' };
     if (/berater|sachlich|советник/.test(t)) return { mode: 'jony', role: 'berater' };
     if (/kids|kinder|niklas|детск/.test(t)) return { mode: 'jony', role: 'kids' };
-    if (/freund|normal|zur[üü]ck/.test(t)) return { mode: 'jony', role: 'freund' };
+    if (/freund|normal|zur[üu]ck/.test(t)) return { mode: 'jony', role: 'freund' };
   }
   return null;
 }
@@ -645,6 +644,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
+  console.log(`🔖 BUILD-MARKER v5 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AUS`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
@@ -663,6 +663,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
   console.log(`   📏 System-Prompt: ${systemInstruction.length} Zeichen`);
   console.log(`   📚 History: ${history.length}`);
+  console.log(`   🔧 Tools: ${toolsList.length}`);
 
   const contents = [
     ...history.map(h => ({ role: h.role === 'user' ? 'user' : 'model', parts: [{ text: h.content }] })),
@@ -672,6 +673,8 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   let finalText = null;
   let finalSources = [];
   let attempts = 0;
+
+  console.log(`   🔄 Starte Modell-Loop (${CHAT_MODELS.length} Modelle)`);
 
   while (attempts < 5) {
     attempts++;
@@ -685,10 +688,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
           contents,
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-                        tools: [
-              { functionDeclarations: toolsList },
-              { googleSearch: {} },
-            ],
+            tools: [{ functionDeclarations: toolsList }],
             temperature: 0.8,
             maxOutputTokens: 500,
             thinkingConfig: { thinkingLevel: 'low' },
@@ -703,6 +703,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
         break;
       } catch (e) {
         const errMsg = e.message || String(e);
+        console.error(`   ❌ ${modelName}-Fehler:`, errMsg.substring(0, 300));
         if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) continue;
         if (errMsg.includes('thinking') || errMsg.includes('Thinking')) {
           try {
@@ -711,32 +712,32 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
               contents,
               config: {
                 systemInstruction: { parts: [{ text: systemInstruction }] },
-                tools: [
-                  { functionDeclarations: toolsList },
-                  { googleSearch: {} },
-                ],
+                tools: [{ functionDeclarations: toolsList }],
                 temperature: 0.8,
                 maxOutputTokens: 500,
               },
             });
             usedModel = modelName;
             console.log(`   ✅ Modell: ${modelName} (ohne thinking)`);
-            if (response.usageMetadata) {
-              const u = response.usageMetadata;
-              console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
-            }
             break;
-                    } catch (e2) {
-            console.error(`   ❌ ${modelName}-Fehler (ohne thinking):`, (e2.message || String(e2)).substring(0, 300));
+          } catch (e2) {
+            console.error(`   ❌ ${modelName}-Fehler ohne thinking:`, (e2.message || String(e2)).substring(0, 300));
             continue;
-          }        }
+          }
+        }
         continue;
       }
     }
 
-    if (!response) break;
+    if (!response) {
+      console.error('   ❌ Kein Response von Modellen erhalten');
+      break;
+    }
     const candidate = response.candidates?.[0];
-    if (!candidate) break;
+    if (!candidate) {
+      console.error('   ❌ Kein candidate in Response');
+      break;
+    }
 
     const parts = candidate.content?.parts || [];
     const functionCalls = parts.filter(p => p.functionCall);
@@ -744,12 +745,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
     if (functionCalls.length > 0) {
       if (response.usageMetadata && usedModel) {
         const u = response.usageMetadata;
-        await logTokenUsage(
-          userId, 'chat_tool', usedModel,
-          u.promptTokenCount || 0,
-          u.candidatesTokenCount || 0,
-          functionCalls.length
-        );
+        await logTokenUsage(userId, 'chat_tool', usedModel, u.promptTokenCount || 0, u.candidatesTokenCount || 0, functionCalls.length);
       }
 
       contents.push({ role: 'model', parts });
@@ -767,35 +763,10 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
     if (response.usageMetadata && usedModel) {
       const u = response.usageMetadata;
-      await logTokenUsage(
-        userId, 'chat', usedModel,
-        u.promptTokenCount || 0,
-        u.candidatesTokenCount || 0,
-        0
-      );
+      await logTokenUsage(userId, 'chat', usedModel, u.promptTokenCount || 0, u.candidatesTokenCount || 0, 0);
     }
 
     finalText = parts.filter(p => p.text).map(p => p.text).join('').trim();
-
-    // 🌐 Google-Search-Grounding extrahieren
-    try {
-      const gm = candidate.groundingMetadata;
-      if (gm && Array.isArray(gm.groundingChunks)) {
-        finalSources = gm.groundingChunks
-          .filter(c => c.web && c.web.uri)
-          .slice(0, 5)
-          .map(c => ({
-            title: c.web.title || c.web.uri,
-            uri: c.web.uri,
-          }));
-        if (finalSources.length > 0) {
-          console.log(`   🌐 Grounding: ${finalSources.length} Quellen gefunden`);
-        }
-      }
-    } catch (e) {
-      console.error('⚠️ Grounding-Parse:', e.message);
-    }
-
     break;
   }
 
