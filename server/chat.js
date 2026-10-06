@@ -332,7 +332,7 @@ const BUSINESS_TOOLS = [
   { name: 'generate_script', description: 'Erstellt Karussell-Skript.', parameters: { type: 'OBJECT', properties: { topic: { type: 'STRING' }, audience: { type: 'STRING' }, focus: { type: 'STRING' }, slide_count: { type: 'INTEGER' } }, required: ['topic'] } },
   { name: 'generate_image', description: 'Generiert Bild für Karussell-Slide.', parameters: { type: 'OBJECT', properties: { prompt: { type: 'STRING' }, slide_number: { type: 'INTEGER' } }, required: ['prompt', 'slide_number'] } },
   { name: 'send_carousel_email', description: 'Sendet Karussell MIT ALLEN BILDERN als E-Mail.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' } }, required: ['to'] } },
-  { name: 'send_carousel_telegram', description: 'Sendet Karussell MIT ALLEN BILDERN an Telegram.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' } }, required: ['chat_id'] } },
+  { name: 'send_carousel_telegram', description: 'Sendet Karussell MIT ALLEN BILDERN an Telegram.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' } }, required: ['chat_id'] } },  { google_search: {} },
 ];
 
 // ==================== HILFSFUNKTIONEN ====================
@@ -697,6 +697,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   ];
 
   let finalText = null;
+  let finalSources = [];
   let attempts = 0;
 
   while (attempts < 5) {
@@ -790,8 +791,30 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
     }
 
     finalText = parts.filter(p => p.text).map(p => p.text).join('').trim();
-    break;
-  }
+
+    // 🌐 Google-Search-Grounding extrahieren
+    let sources = [];
+    try {
+      const gm = candidate.groundingMetadata;
+      if (gm && Array.isArray(gm.groundingChunks)) {
+        sources = gm.groundingChunks
+          .filter(c => c.web && c.web.uri)
+          .slice(0, 5)
+          .map(c => ({
+            title: c.web.title || c.web.uri,
+            uri: c.web.uri,
+          }));
+        if (sources.length > 0) {
+          console.log(`   🌐 Grounding: ${sources.length} Quellen gefunden`);
+        }
+      }
+    } catch (e) {
+      console.error('⚠️ Grounding-Parse:', e.message);
+    }
+
+    // Falls noch nicht gesetzt, speichern wir die Quellen für die Antwort
+    finalSources = sources;
+    break;  }
 
   if (!finalText) finalText = 'Hmm, ich hab grad nichts zu sagen. Frag nochmal.';
 
@@ -800,5 +823,5 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   await saveChatMessage(userId, 'user', userMessage);
   await saveChatMessage(userId, 'assistant', finalText);
 
-  return { reply: finalText, mode: activeMode, role: activeRole };
+    return { reply: finalText, mode: activeMode, role: activeRole, sources: finalSources };
 }
