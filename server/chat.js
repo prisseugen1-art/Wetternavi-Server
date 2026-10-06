@@ -492,11 +492,10 @@ async function generateScriptAndBroadcast(topic, audience, focus, slideCount, us
       if (userId) setScript(userId, topic, slides);
       broadcastToClients({ type: 'script', topic, slides });
       return { success: true, slide_count: slides.length, message: `Skript mit ${slides.length} Slides angezeigt.` };
-    } catch (e) {
-      lastError = e;
-      const errMsg = e.message || String(e);
-      if (errMsg.includes('404') || errMsg.includes('does not exist')) continue;
-    }
+          } catch (e) {
+        const errMsg = e.message || String(e);
+        console.error(`   ❌ ${modelName}-Fehler:`, errMsg.substring(0, 300));
+        if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) continue;    }
   }
   return { error: 'Skript-Generierung fehlgeschlagen: ' + (lastError?.message || '?') };
 }
@@ -727,8 +726,10 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
               console.log(`   📊 TOKENS: input=${u.promptTokenCount || 0}, output=${u.candidatesTokenCount || 0}, total=${u.totalTokenCount || 0}`);
             }
             break;
-          } catch (e2) { continue; }
-        }
+                    } catch (e2) {
+            console.error(`   ❌ ${modelName}-Fehler (ohne thinking):`, (e2.message || String(e2)).substring(0, 300));
+            continue;
+          }        }
         continue;
       }
     }
