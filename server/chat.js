@@ -688,7 +688,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
           contents,
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            tools: [{ functionDeclarations: toolsList }],
+                        tools: [{ functionDeclarations: toolsList, googleSearch: {} }],
             temperature: 0.8,
             maxOutputTokens: 500,
             thinkingConfig: { thinkingLevel: 'low' },
@@ -712,7 +712,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
               contents,
               config: {
                 systemInstruction: { parts: [{ text: systemInstruction }] },
-                tools: [{ functionDeclarations: toolsList }],
+                           tools: [{ functionDeclarations: toolsList, googleSearch: {} }],
                 temperature: 0.8,
                 maxOutputTokens: 500,
               },
