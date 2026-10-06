@@ -332,7 +332,7 @@ const BUSINESS_TOOLS = [
   { name: 'generate_script', description: 'Erstellt Karussell-Skript.', parameters: { type: 'OBJECT', properties: { topic: { type: 'STRING' }, audience: { type: 'STRING' }, focus: { type: 'STRING' }, slide_count: { type: 'INTEGER' } }, required: ['topic'] } },
   { name: 'generate_image', description: 'Generiert Bild für Karussell-Slide.', parameters: { type: 'OBJECT', properties: { prompt: { type: 'STRING' }, slide_number: { type: 'INTEGER' } }, required: ['prompt', 'slide_number'] } },
   { name: 'send_carousel_email', description: 'Sendet Karussell MIT ALLEN BILDERN als E-Mail.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' } }, required: ['to'] } },
-  { name: 'send_carousel_telegram', description: 'Sendet Karussell MIT ALLEN BILDERN an Telegram.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' } }, required: ['chat_id'] } },  { google_search: {} },
+  { name: 'send_carousel_telegram', description: 'Sendet Karussell MIT ALLEN BILDERN an Telegram.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' } }, required: ['chat_id'] } },  
 ];
 
 // ==================== HILFSFUNKTIONEN ====================
@@ -707,12 +707,15 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
     for (const modelName of CHAT_MODELS) {
       try {
-        response = await ai.models.generateContent({
+               response = await ai.models.generateContent({
           model: modelName,
           contents,
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            tools: [{ functionDeclarations: tools }],
+            tools: [
+              { functionDeclarations: tools },
+              { googleSearch: {} },
+            ],
             temperature: 0.8,
             maxOutputTokens: 500,
             thinkingConfig: { thinkingLevel: 'low' },
@@ -730,9 +733,15 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
         if (errMsg.includes('404') || errMsg.includes('NOT_FOUND')) continue;
         if (errMsg.includes('thinking') || errMsg.includes('Thinking')) {
           try {
-            response = await ai.models.generateContent({
-              model: modelName, contents,
-              config: { systemInstruction: { parts: [{ text: systemInstruction }] }, tools: [{ functionDeclarations: tools }], temperature: 0.8, maxOutputTokens: 500 },
+                         config: {
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                tools: [
+                  { functionDeclarations: tools },
+                  { googleSearch: {} },
+                ],
+                temperature: 0.8,
+                maxOutputTokens: 500
+              },
             });
             usedModel = modelName;
             console.log(`   ✅ Modell: ${modelName} (ohne thinking)`);
