@@ -744,6 +744,49 @@ app.get('/api/draft/get/:userId', async (req, res) => {
   }
 });
 
+// ========== DRAFT-UPDATE ==========
+
+app.post('/api/draft/update', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, to, subject, body, tone } = args;
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id required' });
+    }
+
+    const { getDraft, setDraft } = await import('./server/chat.js');
+    const existing = getDraft(user_id);
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Kein Entwurf gefunden (abgelaufen?)' });
+    }
+
+    // Nur Felder überschreiben, die mitgeschickt wurden
+    const updated = setDraft(user_id, {
+      to: to !== undefined ? to : existing.to,
+      subject: subject !== undefined ? subject : existing.subject,
+      body: body !== undefined ? body : existing.body,
+      tone: tone !== undefined ? tone : existing.tone,
+    });
+
+    console.log(`✏️ Draft aktualisiert für ${user_id.substring(0,8)}...`);
+    res.json({
+      success: true,
+      draft: {
+        id: updated.id,
+        to: updated.to,
+        subject: updated.subject,
+        body: updated.body,
+        tone: updated.tone,
+      },
+    });
+  } catch (error) {
+    console.error('❌ draft-update Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== TELEGRAM CAROUSEL SEND ==========
 
 app.post('/api/telegram/send-carousel', async (req, res) => {
