@@ -743,6 +743,38 @@ app.get('/api/draft/get/:userId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ========== RESTAURANT-KARTEN ==========
+
+app.get('/api/restaurants/last/:userId', async (req, res) => {
+  try {
+    const { getLastRestaurants } = await import('./server/chat.js');
+    const data = getLastRestaurants(req.params.userId);
+    if (!data) return res.json({ has_cards: false, restaurants: [] });
+    res.json({
+      has_cards: true,
+      query: data.query,
+      location: data.location,
+      restaurants: data.restaurants,
+      ageSeconds: Math.round((Date.now() - data.createdAt) / 1000),
+    });
+  } catch (error) {
+    console.error('❌ restaurant-last Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/restaurants/clear', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id } = args;
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+    const { clearLastRestaurants } = await import('./server/chat.js');
+    const ok = clearLastRestaurants(user_id);
+    res.json({ success: ok });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ========== DRAFT-UPDATE ==========
 

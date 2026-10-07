@@ -6,6 +6,7 @@ import OpenAI from 'openai';
 import { broadcastToClients } from './gemini_live.js';
 import { sendCarouselByEmail } from './email.js';
 import { setScript, addImage, getCarousel } from './carousel_store.js';
+import { setRestaurants, getRestaurants, clearRestaurants } from './restaurant_store.js';
 
 const { Pool } = pg;
 
@@ -18,7 +19,7 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
-// ★ Aktuelle Modelle (alte existieren nicht mehr)
+// Aktuelle Modelle
 const CHAT_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
@@ -215,6 +216,8 @@ const CORE_RULES = [
   'TELEGRAM: send_telegram_message(chat_id, text). Eugen: 8448058381.',
   '',
   '🌐 AKTUELLES WISSEN: Du hast Zugriff auf die Google-Suche. Bei Fragen zu aktuellen Ereignissen (Bundesliga-Tabelle, Spielstände, Nachrichten, aktuelle Termine, Preise, Wetter-Vorhersagen) → nutze die Google-Suche automatisch. ERFINDE NICHTS. Wenn du etwas nicht weißt → sag es.',
+  '',
+  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -284,7 +287,7 @@ function buildSystemPrompt(userData, role, mode, currentLocation, attachments) {
 
 const JONY_TOOLS = [
   { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
-  { name: 'find_restaurants', description: 'Restaurants in der Nähe.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
+  { name: 'find_restaurants', description: 'Findet Restaurants in der Nähe. Die Ergebnisse werden als Karten in der App angezeigt — lies sie NICHT vor.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
   { name: 'save_user_preference', description: 'Speichert Nutzer-Info.', parameters: { type: 'OBJECT', properties: { key: { type: 'STRING' }, value: { type: 'STRING' } }, required: ['key', 'value'] } },
   { name: 'get_user_preferences', description: 'Lädt alle Nutzer-Infos.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'find_contact', description: 'Sucht einen Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
@@ -328,12 +331,34 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-async function fetchRestaurants(location, cuisine = 'Restaurant') {
+// ★ ERWEITERT: broadcastet Restaurant-Karten
+async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
   if (!res.ok) throw new Error('Restaurant-Fehler: ' + res.status);
   const data = await res.json();
-  return { count: data.count, restaurants: (data.restaurants || []).map(r => ({ name: r.name, rating: r.rating, address: r.address, phone: r.phone })) };
+  const restaurants = (data.restaurants || []).map(r => ({
+    name: r.name,
+    rating: r.rating,
+    address: r.address,
+    phone: r.phone,
+    openNow: r.openNow,
+    reviews: r.reviews,
+  }));
+
+  // ★ Restaurant-Karten an App broadcasten
+  if (userId && restaurants.length > 0) {
+    setRestaurants(userId, restaurants, { query: cuisine, location });
+    broadcastToClients({
+      type: 'restaurant_cards',
+      restaurants: restaurants,
+      query: cuisine,
+      location: location,
+    });
+    console.log(`🍽️ Restaurant-Karten an App: ${restaurants.length}`);
+  }
+
+  return { count: restaurants.length, restaurants };
 }
 
 async function savePref(userId, key, value) {
@@ -539,7 +564,11 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 async function executeChatTool(name, args, userId, profile, currentLocation, attachments) {
   if (name === 'get_weather') { let loc = args.location; if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city; return await fetchWeather(loc, args.timeframe); }
-  if (name === 'find_restaurants') { let loc = args.location; if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city; return await fetchRestaurants(loc, args.cuisine); }
+  if (name === 'find_restaurants') {
+    let loc = args.location;
+    if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city;
+    return await fetchRestaurants(loc, args.cuisine, userId);
+  }
   if (name === 'save_user_preference') return await savePref(userId, args.key, args.value);
   if (name === 'get_user_preferences') return await getPrefs(userId);
   if (name === 'find_contact') return await findContact(userId, args.name);
@@ -625,6 +654,16 @@ async function loadUserData(userId) {
   } catch (e) { return {}; }
 }
 
+// ==================== RESTAURANT-EXPORT ====================
+
+export function getLastRestaurants(userId) {
+  return getRestaurants(userId);
+}
+
+export function clearLastRestaurants(userId) {
+  return clearRestaurants(userId);
+}
+
 // ==================== MODUS ====================
 
 function detectChatMode(message, currentMode = 'jony') {
@@ -646,7 +685,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
-  console.log(`🔖 BUILD-MARKER v6 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AN (mit toolConfig)`);
+  console.log(`🔖 BUILD-MARKER v7 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AN | Restaurant-Karten: AN`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
