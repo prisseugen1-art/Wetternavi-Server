@@ -7,6 +7,7 @@ import { detectMode, logPresence } from './supervisor.js';
 import { sendTelegramMessage, onTelegramMessage } from './telegram.js';
 import { sendCarouselByEmail } from './email.js';
 import { setScript, addImage, getCarousel } from './carousel_store.js';
+import { setRestaurants, getRestaurants, clearRestaurants } from './restaurant_store.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GROQ_FALLBACKS = [
@@ -71,7 +72,7 @@ function getTimeContext() {
   return wd + (t === 'Morgen' ? 'morgen' : ', ' + t);
 }
 
-// ==================== KOMPAKTES FUNDAMENT ====================
+// ==================== FUNDAMENT ====================
 
 function buildFoundation(userData, currentLocation, attachments) {
   const today = new Date().toLocaleDateString('de-DE', {
@@ -145,7 +146,7 @@ function buildFoundation(userData, currentLocation, attachments) {
   return parts.join('\n');
 }
 
-// ==================== KOMPAKTE REGELN ====================
+// ==================== REGELN ====================
 
 const CORE_RULES = [
   'SPRACHE: Deutsch oder Russisch. Bei anderen Sprachen auf Deutsch weitermachen.',
@@ -170,6 +171,10 @@ const CORE_RULES = [
   'DRAFT: Niemals laut vorlesen. Nur "Entwurf ist da. Schau auf den Bildschirm."',
   '',
   'TELEGRAM: send_telegram_message(chat_id, text). Eugen: 8448058381.',
+  '',
+  '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
+  '',
+  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -541,23 +546,11 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
     clientWs._lastUserSpeechTime = Date.now();
     clientWs.send(JSON.stringify({ type: 'turn_complete' }));
 
-    // ★ Token-Usage loggen (falls Gemini Live sie liefert)
     if (sc.usageMetadata && userProfile?.user_id) {
       const u = sc.usageMetadata;
       const inTok = u.promptTokenCount || 0;
       const outTok = u.candidatesTokenCount || 0;
       console.log(`   📊 VOICE-TOKENS: input=${inTok}, output=${outTok}`);
-      logVoiceTokens(userProfile.user_id, 'gemini-live', inTok, outTok);
-    }
-  }
-
-  // Fallback: Usage manchmal auf Top-Level
-  if (message.usageMetadata && userProfile?.user_id) {
-    const u = message.usageMetadata;
-    const inTok = u.promptTokenCount || 0;
-    const outTok = u.candidatesTokenCount || 0;
-    if (inTok + outTok > 0) {
-      console.log(`   📊 VOICE-TOKENS (top): input=${inTok}, output=${outTok}`);
       logVoiceTokens(userProfile.user_id, 'gemini-live', inTok, outTok);
     }
   }
@@ -570,7 +563,7 @@ function buildJonyTools() {
     {
       functionDeclarations: [
         { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'find_restaurants', description: 'Restaurants in der Nähe.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
+        { name: 'find_restaurants', description: 'Findet Restaurants in der Nähe. Ergebnisse werden als Karten in der App angezeigt — lies sie NICHT vor.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
         { name: 'save_user_preference', description: 'Speichert Nutzer-Info.', parameters: { type: 'OBJECT', properties: { key: { type: 'STRING' }, value: { type: 'STRING' } }, required: ['key', 'value'] } },
         { name: 'get_user_preferences', description: 'Lädt alle Nutzer-Infos.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
@@ -606,7 +599,7 @@ function buildBusinessTools() {
         { name: 'resolve_recipients', description: 'Löst Namen zu Empfängern auf.', parameters: { type: 'OBJECT', properties: { names: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['names'] } },
         { name: 'save_user_profile', description: 'Speichert Nutzer-Profil.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
         { name: 'get_weather', description: 'Wetter.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'find_restaurants', description: 'Restaurants.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
+        { name: 'find_restaurants', description: 'Restaurants. Ergebnisse als Karten in der App — nicht vorlesen.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
         { name: 'show_draft', description: 'Zeigt E-Mail-Entwurf als Karte (NUR normale Mails, NICHT Karussell). Nie laut vorlesen.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
         { name: 'send_email', description: 'Sendet E-Mail nach Bestätigung.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
@@ -635,7 +628,7 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
       } else if (fc.name === 'find_restaurants') {
         let loc = fc.args.location;
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
-        result = await fetchRestaurants(loc, fc.args.cuisine);
+        result = await fetchRestaurants(loc, fc.args.cuisine, userProfile.user_id);
       } else if (fc.name === 'save_user_preference') {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
@@ -839,12 +832,33 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-async function fetchRestaurants(location, cuisine = 'Restaurant') {
+// ★ ERWEITERT: broadcastet Restaurant-Karten
+async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
   if (!res.ok) throw new Error('Restaurant-Fehler');
   const data = await res.json();
-  return { count: data.count, restaurants: (data.restaurants || []).map(r => ({ name: r.name, rating: r.rating, address: r.address, phone: r.phone })) };
+  const restaurants = (data.restaurants || []).map(r => ({
+    name: r.name,
+    rating: r.rating,
+    address: r.address,
+    phone: r.phone,
+    openNow: r.openNow,
+    reviews: r.reviews,
+  }));
+
+  if (userId && restaurants.length > 0) {
+    setRestaurants(userId, restaurants, { query: cuisine, location });
+    broadcastToClients({
+      type: 'restaurant_cards',
+      restaurants: restaurants,
+      query: cuisine,
+      location: location,
+    });
+    console.log(`🍽️ Restaurant-Karten an App: ${restaurants.length}`);
+  }
+
+  return { count: restaurants.length, restaurants };
 }
 
 async function saveUserPreference(userId, key, value) {
