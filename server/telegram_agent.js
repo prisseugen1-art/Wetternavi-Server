@@ -12,6 +12,17 @@ const GROQ_FALLBACKS = [
   'qwen/qwen3.8-27b',
 ];
 
+// ==================== ROLLEN-KONFIGURATION ====================
+
+const KIDS_CHAT_ID = process.env.TELEGRAM_KIDS_CHAT_ID || '';
+
+function getRoleForChat(chatId) {
+  if (KIDS_CHAT_ID && String(chatId) === String(KIDS_CHAT_ID)) {
+    return 'kids';
+  }
+  return 'supervisor';
+}
+
 // ==================== GROQ CLIENT ====================
 
 const groq = new OpenAI({
@@ -19,23 +30,13 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// ==================== KIDS-MODUS für Niklas ====================
-
-const KIDS_CHAT_ID = process.env.TELEGRAM_KIDS_CHAT_ID || '';
-
-function isKidsMode(chatId) {
-  return KIDS_CHAT_ID && String(chatId) === String(KIDS_CHAT_ID);
-}
-
 // ==================== SESSION-STATE PRO CHAT ====================
 
 const chatSessions = new Map();
-// { chatId: { role, history: [{role, content}], userId } }
 
 function getSession(chatId, userId) {
   if (!chatSessions.has(chatId)) {
     chatSessions.set(chatId, {
-      role: 'freund',
       history: [],
       userId: userId || null,
     });
@@ -63,7 +64,7 @@ async function getOrCreateUserId(chatId, fromName) {
   }
 }
 
-// ==================== FOUNDATION (Gedächtnis) ====================
+// ==================== GEDÄCHTNIS ====================
 
 async function loadUserData(userId) {
   if (!userId) return {};
@@ -88,13 +89,10 @@ function buildMemoryBlock(userData) {
     const s = String(val).trim();
     if (!s) continue;
 
-    // System-Keys ignorieren
     if (key === 'telegram_chat_id' || key === 'telegram_username') continue;
     if (key.startsWith('user_')) continue;
 
-    // Kontakte kurz
     if (key.startsWith('contact_')) {
-      // Nur Name + Relation anzeigen (nicht E-Mail etc. — spart Tokens)
       const m = key.match(/^contact_(.+?)_(relation|tone|birthday|notes)$/);
       if (m) contacts.push(`${m[1]} (${m[2]}: ${s})`);
       continue;
@@ -118,7 +116,7 @@ function buildMemoryBlock(userData) {
   return lines.join('\n');
 }
 
-// ==================== TOOLS (reduziert!) ====================
+// ==================== TOOLS (nur 2, unverändert) ====================
 
 const TOOLS = [
   {
@@ -129,7 +127,7 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          key: { type: 'string', description: 'Kurzer Schlüssel, z.B. "niklas_hobby", "letztes_spiel"' },
+          key: { type: 'string', description: 'Kurzer Schlüssel, z.B. "hobby", "letztes_spiel"' },
           value: { type: 'string', description: 'Der Wert, z.B. "Fortnite und Fußball"' },
         },
         required: ['key', 'value'],
@@ -183,12 +181,11 @@ async function executeTool(name, args, userId) {
   }
 }
 
-// ==================== PROMPTS ====================
+// ==================== PROMPTS (ROLLEN-BASIERT) ====================
 
-const BASE_PROMPT = `Du bist Jony, der persönliche Begleiter.
-Du sprichst hier über TELEGRAM mit Sprache oder Text (kleine Chats).
+const SUPERVISOR_PROMPT = `Du bist Jony, der persönliche Begleiter.
+Du sprichst hier über TELEGRAM (kleine Chats).
 - Antworte kurz: 1-3 Sätze.
-- Kein Aufsatz-Stil.
 - Variiere — nicht immer dieselbe Begrüßung.
 - Antworte auf Deutsch oder Russisch, je nach Nutzer.
 
@@ -200,78 +197,54 @@ DEINE AUFGABE:
 ⛔ KEINE Wetter-Abfragen, KEINE Restaurants, KEINE E-Mails, KEIN Karussell.
 Du bist hier zum Reden da — nicht als Assistent.`;
 
-const FREUND_PROMPT = `MODUS: FREUND.
-- Sei wie ein guter, alter Freund.
-- Sprich aus dem Bauch.
-- Mal still, mal neugierig, mal nachdenklich.
-- Nicht immer "Wie geht's dir?".`;
-
-const KIDS_PROMPT = `MODUS: KIDS (für Kinder, 8-14 Jahre).
+const KIDS_PROMPT = `Du bist Jony und redest mit einem Kind (ca. 8-14 Jahre).
 - Sei wie ein cooler älterer Cousin (14-16).
 - Locker, entspannt, nicht herablassend.
-- Themen: Gaming, Fußball, YouTube, coole Fakten, Tiere.
-- NIE peinlich oder übertrieben.
-- Wenn er was über sich erzählt (Spiele, Freunde, Schule) → speichere es!`;
+- Kurze Antworten: 1-3 Sätze.
+
+THEMEN DIE PASSEN:
+- Gaming (Fortnite, Minecraft, Roblox)
+- Fußball und andere Sportarten
+- YouTube, coole Fakten, Tiere, Schule
+- Witze, Fun-Facts, "Wusstest du?"
+
+WAS DU TUST:
+- Wenn das Kind was über sich erzählt (Spiele, Freunde, Schule, Hobbys) → speichere es mit save_user_preference.
+- Wenn es fragt, was du über ihn weißt → antworte aus dem Gedächtnis.
+- Sei authentisch — NIE peinlich, NIE übertrieben.
+
+⛔ Keine Erwachsenen-Themen, keine E-Mails, keine Termine.`;
 
 function buildSystemPrompt(role, userData) {
-  const rolePrompt = role === 'kids' ? KIDS_PROMPT : FREUND_PROMPT;
+  const rolePrompt = role === 'kids' ? KIDS_PROMPT : SUPERVISOR_PROMPT;
   const memoryBlock = buildMemoryBlock(userData);
-  return BASE_PROMPT + '\n\n' + rolePrompt + memoryBlock + '\n\n' + [
+  return rolePrompt + '\n' + memoryBlock + '\n\n' + [
     'TOOLS:',
-    '- save_user_preference (wenn er was über sich sagt)',
+    '- save_user_preference (wenn der Nutzer was über sich sagt)',
     '- get_user_preferences (nur wenn nötig)',
   ].join('\n');
-}
-
-// ==================== ROLLEN-TRIGGER ====================
-
-function detectRoleSwitch(text, currentRole) {
-  const t = text.toLowerCase();
-  if (/kids.?modus|kinder.?modus|детск/.test(t)) return 'kids';
-  if (/freund.?modus|zur[üu]ck.*freund|normal.?modus/.test(t)) return 'freund';
-  return null;
 }
 
 // ==================== HAUPTFUNKTION ====================
 
 export async function generateTelegramReply(chatId, userText, userId) {
-  // user_id ermitteln (falls nicht übergeben)
   const session = getSession(chatId, userId);
   if (!session.userId) {
     session.userId = await getOrCreateUserId(chatId, 'User');
   }
 
-  const kidsMode = isKidsMode(chatId);
-  if (kidsMode && session.role !== 'kids') {
-    session.role = 'kids';
-  }
-
-  // Rollenwechsel? (nur wenn nicht Kids-Mode fest)
-  if (!kidsMode) {
-    const newRole = detectRoleSwitch(userText, session.role);
-    if (newRole && newRole !== session.role) {
-      session.role = newRole;
-      const confirmMsg = newRole === 'kids'
-        ? 'Kids-Modus aktiv! 🧒'
-        : 'Zurück zum Freund-Modus. 👋';
-      session.history.push({ role: 'assistant', content: confirmMsg });
-      return confirmMsg;
-    }
-  }
-
-  // Gedächtnis laden
+  const role = getRoleForChat(chatId);
   const userData = await loadUserData(session.userId);
 
-  // Historie begrenzen
   const history = session.history.slice(-8);
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(session.role, userData) },
+    { role: 'system', content: buildSystemPrompt(role, userData) },
     ...history,
     { role: 'user', content: userText },
   ];
 
-  console.log(`💬 Telegram (${chatId}, Rolle: ${session.role}, userId: ${session.userId?.substring(0,8)}..., Gedächtnis: ${Object.keys(userData).length} Keys)`);
+  console.log(`💬 Telegram (${chatId}, Rolle: ${role}, userId: ${session.userId?.substring(0,8)}..., Gedächtnis: ${Object.keys(userData).length} Keys)`);
 
   // ==================== GROQ-AUFRUF ====================
 
@@ -280,7 +253,6 @@ export async function generateTelegramReply(chatId, userText, userId) {
 
   for (const modelName of GROQ_FALLBACKS) {
     try {
-      // Bis zu 3 Runden: LLM → Tool → LLM → Antwort
       for (let round = 0; round < 3; round++) {
         const completion = await groq.chat.completions.create({
           model: modelName,
@@ -356,7 +328,7 @@ export function getTelegramSessionInfo(chatId) {
   const s = chatSessions.get(chatId);
   if (!s) return null;
   return {
-    role: s.role,
+    role: getRoleForChat(chatId),
     historyLength: s.history.length,
     userId: s.userId,
   };
