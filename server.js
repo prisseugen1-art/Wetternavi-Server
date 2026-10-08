@@ -1361,35 +1361,155 @@ app.post('/api/search-restaurant', async (req, res) => {
     const cuisine = resolveCuisine(req);
     if (!location) return res.status(400).json({ error: 'Location required' });
 
-    const query = `${cuisine} in ${location}`;
-    const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.regularOpeningHours,places.priceLevel',
-      },
-      body: JSON.stringify({ textQuery: query, languageCode: 'de', maxResultCount: 10 }),
-    });
+    // ★ NEU: lat/lon ermitteln
+    let lat = req.body?.args?.lat ?? req.body?.lat;
+    let lon = req.body?.args?.lon ?? req.body?.lon;
 
-    if (!response.ok) return res.status(500).json({ error: 'Places API error' });
-    const data = await response.json();
-    const filtered = (data.places || [])
-      .filter(p => (p.rating || 0) >= 4.0)
+    if ((lat == null || lon == null) && location) {
+      const apiKey = process.env.OPENWEATHER_API_KEY;
+      const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${apiKey}`;
+      const geoData = await (await fetch(geoUrl)).json();
+      if (geoData?.length > 0) {
+        lat = geoData[0].lat;
+        lon = geoData[0].lon;
+      }
+    }
+
+    // Radius-Stufen in Metern
+    const RADIUS_STEPS = [1000, 5000, 15000];
+    let places = [];
+    let usedRadius = null;
+
+    for (const radius of RADIUS_STEPS) {
+      const searchBody = {
+        textQuery: cuisine,
+        languageCode: 'de',
+        maxResultCount: 20,
+        locationBias: (lat != null && lon != null) ? {
+          circle: {
+            center: { latitude: Number(lat), longitude: Number(lon) },
+            radius: radius,
+          },
+        } : undefined,
+      };
+
+      if (lat == null || lon == null) {
+        searchBody.textQuery = `${cuisine} in ${location}`;
+        delete searchBody.locationBias;
+      }
+
+      const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY,
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.regularOpeningHours,places.currentOpeningHours,places.permanentlyClosed,places.businessStatus,places.location',
+        },
+        body: JSON.stringify(searchBody),
+      });
+
+      if (!response.ok) {
+        console.error(`❌ Places API (radius ${radius}): ${response.status}`);
+        continue;
+      }
+      const data = await response.json();
+
+      const openOnes = (data.places || []).filter(p => {
+        if (p.permanentlyClosed === true) return false;
+        if (p.businessStatus === 'CLOSED_PERMANENTLY') return false;
+
+        const rating = p.rating || 0;
+        if (rating < 4.0) return false;
+
+        const hours = p.currentOpeningHours || p.regularOpeningHours;
+        if (!hours) return true;
+
+        if (hours.openNow === true) return true;
+
+        const periods = hours.periods || [];
+        const now = new Date();
+        const today = now.getDay();
+
+        for (const period of periods) {
+          const openInfo = period.open;
+          if (!openInfo) continue;
+          if (openInfo.day === today) {
+            const openTime = new Date(now);
+            openTime.setHours(openInfo.hour ?? 0, openInfo.minute ?? 0, 0, 0);
+            if (openTime > now) return true;
+          }
+        }
+        return false;
+      });
+
+      if (openOnes.length >= 1) {
+        places = openOnes;
+        usedRadius = radius;
+        console.log(`🍽️ Radius ${radius/1000} km: ${openOnes.length} offene Treffer`);
+        break;
+      }
+      console.log(`🍽️ Radius ${radius/1000} km: keine offenen Treffer`);
+    }
+
+    const filtered = places
       .sort((a, b) => (b.rating || 0) - (a.rating || 0))
       .slice(0, 3);
 
-    const results = filtered.map(p => ({
-      name: p.displayName?.text || 'Unbekannt',
-      address: p.formattedAddress || '',
-      rating: p.rating || 0,
-      reviews: p.userRatingCount || 0,
-      phone: p.internationalPhoneNumber || normalizePhone(p.nationalPhoneNumber || ''),
-      openNow: p.regularOpeningHours?.openNow ?? null,
-    }));
+    function getOpenStatus(p) {
+      const hours = p.currentOpeningHours || p.regularOpeningHours;
+      if (!hours) return { openNow: null, opensAt: null };
 
-    res.json({ count: results.length, restaurants: results });
+      if (hours.openNow === true) {
+        return { openNow: true, opensAt: null };
+      }
+
+      const periods = hours.periods || [];
+      const now = new Date();
+      const today = now.getDay();
+      let nextOpen = null;
+
+      for (const period of periods) {
+        const openInfo = period.open;
+        if (!openInfo || openInfo.day !== today) continue;
+        const openTime = new Date(now);
+        openTime.setHours(openInfo.hour ?? 0, openInfo.minute ?? 0, 0, 0);
+        if (openTime > now) {
+          if (!nextOpen || openTime < nextOpen) nextOpen = openTime;
+        }
+      }
+
+      if (nextOpen) {
+        const hh = String(nextOpen.getHours()).padStart(2, '0');
+        const mm = String(nextOpen.getMinutes()).padStart(2, '0');
+        return { openNow: false, opensAt: `${hh}:${mm}` };
+      }
+      return { openNow: false, opensAt: null };
+    }
+
+    const results = filtered.map(p => {
+      const status = getOpenStatus(p);
+      return {
+        name: p.displayName?.text || 'Unbekannt',
+        address: p.formattedAddress || '',
+        rating: p.rating || 0,
+        reviews: p.userRatingCount || 0,
+        phone: p.internationalPhoneNumber || normalizePhone(p.nationalPhoneNumber || ''),
+        openNow: status.openNow,
+        opensAt: status.opensAt,
+        lat: p.location?.latitude ?? null,
+        lon: p.location?.longitude ?? null,
+      };
+    });
+
+    console.log(`✅ ${results.length} Restaurants (Radius ${usedRadius ? usedRadius/1000 + ' km' : 'unbekannt'})`);
+
+    res.json({
+      count: results.length,
+      restaurants: results,
+      radiusUsed: usedRadius,
+    });
   } catch (error) {
+    console.error('❌ search-restaurant:', error);
     res.status(500).json({ error: error.message });
   }
 });

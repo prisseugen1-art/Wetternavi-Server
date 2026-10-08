@@ -347,9 +347,9 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
+async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null, lat = null, lon = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine, lat, lon }) });
   if (!res.ok) throw new Error('Restaurant-Fehler: ' + res.status);
   const data = await res.json();
   const restaurants = (data.restaurants || []).map(r => ({
@@ -578,10 +578,16 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
 
 async function executeChatTool(name, args, userId, profile, currentLocation, attachments) {
   if (name === 'get_weather') { let loc = args.location; if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city; return await fetchWeather(loc, args.timeframe); }
-  if (name === 'find_restaurants') {
+    if (name === 'find_restaurants') {
     let loc = args.location;
     if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city;
-    return await fetchRestaurants(loc, args.cuisine, userId);
+    return await fetchRestaurants(
+      loc,
+      args.cuisine,
+      userId,
+      currentLocation?.lat,
+      currentLocation?.lon,
+    );
   }
   if (name === 'save_user_preference') return await savePref(userId, args.key, args.value);
   if (name === 'get_user_preferences') return await getPrefs(userId);

@@ -645,10 +645,17 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         let loc = fc.args.location;
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
         result = await fetchWeather(loc, fc.args.timeframe);
-      } else if (fc.name === 'find_restaurants') {
+            } else if (fc.name === 'find_restaurants') {
         let loc = fc.args.location;
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
-        result = await fetchRestaurants(loc, fc.args.cuisine, userProfile.user_id);
+        result = await fetchRestaurants(
+          loc,
+          fc.args.cuisine,
+          userProfile.user_id,
+          clientWs._lastLat,
+          clientWs._lastLon,
+        );
+      
       } else if (fc.name === 'save_user_preference') {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
@@ -852,9 +859,10 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
+async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null, lat = null, lon = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine, lat, lon }) });
+
   if (!res.ok) throw new Error('Restaurant-Fehler');
   const data = await res.json();
   const restaurants = (data.restaurants || []).map(r => ({
