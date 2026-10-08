@@ -1362,9 +1362,17 @@ app.post('/api/search-restaurant', async (req, res) => {
     if (!location) return res.status(400).json({ error: 'Location required' });
 
     // ★ NEU: lat/lon ermitteln
-    let lat = req.body?.args?.lat ?? req.body?.lat;
-    let lon = req.body?.args?.lon ?? req.body?.lon;
+        // lat/lon aus mehreren möglichen Quellen
+    let lat = req.body?.args?.lat
+      ?? req.body?.lat
+      ?? req.query?.lat
+      ?? null;
+    let lon = req.body?.args?.lon
+      ?? req.body?.lon
+      ?? req.query?.lon
+      ?? null;
 
+    console.log(`📍 Restaurant-Suche: cuisine="${cuisine}", location="${location}", lat=${lat}, lon=${lon}`);
     if ((lat == null || lon == null) && location) {
       const apiKey = process.env.OPENWEATHER_API_KEY;
       const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${apiKey}`;
@@ -1422,8 +1430,10 @@ app.post('/api/search-restaurant', async (req, res) => {
         if (rating < 4.0) return false;
 
         const hours = p.currentOpeningHours || p.regularOpeningHours;
-        if (!hours) return true;
-
+        if (!hours) {
+          console.log(`   ⚠️ Keine Öffnungszeiten-Info für "${p.displayName?.text}" → raus`);
+          return false;  // ← RAUS statt durchlassen
+        }
         if (hours.openNow === true) return true;
 
         const periods = hours.periods || [];
