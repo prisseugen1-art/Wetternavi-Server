@@ -1417,7 +1417,8 @@ app.post('/api/search-restaurant', async (req, res) => {
       });
 
       if (!response.ok) {
-        console.error(`❌ Places API (radius ${radius}): ${response.status}`);
+        const errBody = await response.text();
+        console.error(`❌ Places API (radius ${radius}): ${response.status} — ${errBody.substring(0, 300)}`);
         continue;
       }
       const data = await response.json();
