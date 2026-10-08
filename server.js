@@ -743,6 +743,140 @@ app.get('/api/draft/get/:userId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ========== ROUTE-KARTEN ==========
+
+async function calculateRoute(fromLat, fromLon, toAddress) {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY fehlt');
+
+  const body = {
+    origin: {
+      location: {
+        latLng: {
+          latitude: Number(fromLat),
+          longitude: Number(fromLon),
+        },
+      },
+    },
+    destination: {
+      address: toAddress,
+    },
+    travelMode: 'DRIVE',
+    routingPreference: 'TRAFFIC_AWARE',
+    computeAlternativeRoutes: false,
+    languageCode: 'de',
+    units: 'METRIC',
+  };
+
+  const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.legs.endLocation,routes.legs.startLocation',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Routes API ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const route = data.routes?.[0];
+  if (!route) throw new Error('Keine Route gefunden');
+
+  const distanceMeters = route.distanceMeters || 0;
+  const durationStr = route.duration || '0s';
+  const durationSeconds = parseInt(durationStr.replace('s', ''), 10) || 0;
+
+  return {
+    distance_km: Math.round(distanceMeters / 100) / 10,
+    duration_min: Math.round(durationSeconds / 60),
+    destination_lat: route.legs?.[0]?.endLocation?.latLng?.latitude ?? null,
+    destination_lon: route.legs?.[0]?.endLocation?.latLng?.longitude ?? null,
+  };
+}
+
+app.post('/api/route/calc', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id, from_lat, from_lon, to_address, destination_label } = args;
+
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+    if (!to_address) return res.status(400).json({ error: 'to_address required' });
+    if (from_lat == null || from_lon == null) {
+      return res.status(400).json({ error: 'from_lat, from_lon required' });
+    }
+
+    console.log(`🗺️ Route: (${from_lat}, ${from_lon}) → "${to_address}"`);
+
+    const result = await calculateRoute(from_lat, from_lon, to_address);
+
+    const routeData = {
+      from_lat: Number(from_lat),
+      from_lon: Number(from_lon),
+      to_address,
+      destination_label: destination_label || to_address,
+      distance_km: result.distance_km,
+      duration_min: result.duration_min,
+      destination_lat: result.destination_lat,
+      destination_lon: result.destination_lon,
+    };
+
+    const { setRoute } = await import('./server/route_store.js');
+    setRoute(user_id, routeData);
+
+    broadcastToClients({
+      type: 'route_card',
+      route: routeData,
+    });
+
+    console.log(`✅ Route berechnet: ${result.distance_km} km, ${result.duration_min} Min`);
+
+    res.json({
+      success: true,
+      route: routeData,
+    });
+  } catch (error) {
+    console.error('❌ route-calc Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/route/last/:userId', async (req, res) => {
+  try {
+    const { getRoute } = await import('./server/route_store.js');
+    const data = getRoute(req.params.userId);
+    if (!data) return res.json({ has_route: false });
+    res.json({
+      has_route: true,
+      route: data,
+      ageSeconds: Math.round((Date.now() - data.createdAt) / 1000),
+    });
+  } catch (error) {
+    console.error('❌ route-last Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/route/clear', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { user_id } = args;
+    if (!user_id) return res.status(400).json({ error: 'user_id required' });
+    const { clearRoute } = await import('./server/route_store.js');
+    const ok = clearRoute(user_id);
+    res.json({ success: ok });
+  } catch (error) {
+    console.error('❌ route-clear Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 // ========== RESTAURANT-KARTEN ==========
 
 app.get('/api/restaurants/last/:userId', async (req, res) => {

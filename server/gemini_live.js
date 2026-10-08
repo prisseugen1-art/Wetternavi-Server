@@ -8,6 +8,7 @@ import { sendTelegramMessage, onTelegramMessage } from './telegram.js';
 import { sendCarouselByEmail } from './email.js';
 import { setScript, addImage, getCarousel } from './carousel_store.js';
 import { setRestaurants, getRestaurants, clearRestaurants } from './restaurant_store.js';
+import { setRoute, getRoute, clearRoute } from './route_store.js';
 
 const GEMINI_MODEL = 'gemini-3.8-live';
 const GROQ_FALLBACKS = [
@@ -88,7 +89,7 @@ function buildFoundation(userData, currentLocation, attachments) {
   const contactNames = new Set();
   const groupNames = new Set();
   for (const key of Object.keys(userData || {})) {
-    const cm = key.match(/^contact_(.+?)_(email|telegram|phone|aliases|relation|birthday|tone|notes|learned)$/);
+    const cm = key.match(/^contact_(.+?)_(email|telegram|phone|aliases|relation|birthday|tone|notes|address|learned)$/);
     if (cm) contactNames.add(cm[1]);
     const gm = key.match(/^group_(.+?)_members$/);
     if (gm) groupNames.add(gm[1]);
@@ -113,6 +114,7 @@ function buildFoundation(userData, currentLocation, attachments) {
     if (userData[p + 'email']) parts.push('Mail: ' + userData[p + 'email']);
     if (userData[p + 'telegram']) parts.push('TG: ' + userData[p + 'telegram']);
     if (userData[p + 'phone']) parts.push('Tel: ' + userData[p + 'phone']);
+    if (userData[p + 'address']) parts.push('Adresse: ' + userData[p + 'address']);
     if (userData[p + 'relation']) parts.push('(' + userData[p + 'relation'] + ')');
     if (userData[p + 'aliases']) parts.push('Alias: ' + userData[p + 'aliases']);
     if (userData[p + 'tone']) parts.push('Ton: ' + userData[p + 'tone']);
@@ -126,7 +128,7 @@ function buildFoundation(userData, currentLocation, attachments) {
     if (m) groups.push('- ' + gn + ': ' + m);
   }
 
-  // ★ STANDORT-FIX: Live vs. Heimat
+  // ★ STANDORT: Live vs. Heimat
   let locationLine;
   if (currentLocation?.city) {
     locationLine = '📍 AKTUELLER Standort: ' + currentLocation.city;
@@ -141,9 +143,16 @@ function buildFoundation(userData, currentLocation, attachments) {
     locationLine = '📍 AKTUELLER Standort: (nicht verfügbar) — Heimatort ist ' + (userData.hometown || 'unbekannt');
   }
 
+  // Heimatadresse prüfen
+  const homeAddress = userData.user_address || userData.home_address;
+  const homeLine = homeAddress
+    ? '🏠 Heimatadresse: ' + homeAddress
+    : '🏠 Heimatadresse: (nicht gespeichert — frage nach, wenn Route nach Hause gefragt wird)';
+
   const parts = [
     'HEUTE: ' + today + ' (' + timeCtx + ')',
     locationLine,
+    homeLine,
   ];
 
   if (profile.length > 0) { parts.push(''); parts.push('PROFIL:'); parts.push(...profile); }
@@ -186,7 +195,16 @@ const CORE_RULES = [
   '',
   '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
   '',
-  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
+  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab die besten gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor. Restaurants die geschlossen sind, werden automatisch rausgefiltert.',
+  '',
+  '🗺️ ROUTE & NAVIGATION:',
+  '- "Weg nach Hause" / "Route nach Hause" → rufe show_route(destination="home", destination_type="home")',
+  '- "Route nach [Stadt]" → rufe show_route(destination="[Stadt]", destination_type="city")',
+  '- "Route zu [Kontakt]" / "Wie komme ich zu [Kontakt]" → rufe show_route(destination="[Kontakt]", destination_type="contact")',
+  '',
+  'WICHTIG bei fehlenden Adressen:',
+  '- Wenn user_address fehlt und home-Route gefragt → frage: "Ich kenne deine Heimatadresse nicht. Wie lautet sie?" → WARTE → speichere mit save_user_profile(address="...") → rufe show_route erneut auf.',
+  '- Wenn contact_X_address fehlt und contact-Route gefragt → frage: "Ich kenne [Name]s Adresse nicht. Wie lautet sie?" → WARTE → speichere mit save_contact(name="X", address="...") → rufe show_route erneut auf.',
   '',
   '📍 STANDORT:',
   '- Wenn der Nutzer fragt "wo bin ich" → nutze den aktuellen Live-Standort (GPS) aus dem Prompt.',
@@ -231,9 +249,9 @@ const ROLES = {
 
 const JONY_BASE = 'Du bist Jony, persönlicher Begleiter von Eugen (auch Jackson). Ehrlich, warmherzig, humorvoll. Kein Assistent – ein Freund. Beim Voice-Modus: sprich natürlich, kurz, variiere.';
 
-const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, save_user_preference, get_user_preferences, find_contact, save_contact, forget_contact, list_contacts, find_group, save_group, forget_group, list_groups, resolve_recipients, save_user_profile, show_draft, send_email, send_telegram_message';
+const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, show_route, save_user_preference, get_user_preferences, find_contact, save_contact, forget_contact, list_contacts, find_group, save_group, forget_group, list_groups, resolve_recipients, save_user_profile, show_draft, send_email, send_telegram_message';
 
-const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram + alle Kontakt-/Gruppen-/E-Mail-Tools';
+const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram, show_route + alle Kontakt-/Gruppen-/E-Mail-Tools';
 
 // ==================== ANTI-REPETITION ====================
 
@@ -584,11 +602,12 @@ function buildJonyTools() {
       functionDeclarations: [
         { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Findet Restaurants in der Nähe. Ergebnisse werden als Karten in der App angezeigt — lies sie NICHT vor.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
         { name: 'save_user_preference', description: 'Speichert Nutzer-Info.', parameters: { type: 'OBJECT', properties: { key: { type: 'STRING' }, value: { type: 'STRING' } }, required: ['key', 'value'] } },
         { name: 'get_user_preferences', description: 'Lädt alle Nutzer-Infos.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
         { name: 'find_contact', description: 'Sucht Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
-        { name: 'save_contact', description: 'Speichert Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, email: { type: 'STRING' }, telegram: { type: 'STRING' }, phone: { type: 'STRING' }, aliases: { type: 'STRING' }, relation: { type: 'STRING' }, birthday: { type: 'STRING' }, tone: { type: 'STRING' }, notes: { type: 'STRING' } }, required: ['name'] } },
+        { name: 'save_contact', description: 'Speichert Kontakt. Nutze "address" für die Postadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, email: { type: 'STRING' }, telegram: { type: 'STRING' }, phone: { type: 'STRING' }, aliases: { type: 'STRING' }, relation: { type: 'STRING' }, birthday: { type: 'STRING' }, tone: { type: 'STRING' }, notes: { type: 'STRING' }, address: { type: 'STRING' } }, required: ['name'] } },
         { name: 'forget_contact', description: 'Löscht Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
         { name: 'list_contacts', description: 'Listet Kontakte.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'find_group', description: 'Sucht Gruppe.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
@@ -596,7 +615,7 @@ function buildJonyTools() {
         { name: 'forget_group', description: 'Löscht Gruppe.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
         { name: 'list_groups', description: 'Listet Gruppen.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'resolve_recipients', description: 'Löst Namen zu Empfängern auf.', parameters: { type: 'OBJECT', properties: { names: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['names'] } },
-        { name: 'save_user_profile', description: 'Speichert Nutzer-Profil.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
+        { name: 'save_user_profile', description: 'Speichert Nutzer-Profil. Nutze "address" für Heimatadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
         { name: 'show_draft', description: 'Zeigt E-Mail-Entwurf als Karte (NUR normale Mails, NICHT Karussell). Nie laut vorlesen.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
         { name: 'send_email', description: 'Sendet E-Mail nach Bestätigung.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
       ],
@@ -609,7 +628,7 @@ function buildBusinessTools() {
     {
       functionDeclarations: [
         { name: 'find_contact', description: 'Sucht Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
-        { name: 'save_contact', description: 'Speichert Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, email: { type: 'STRING' }, telegram: { type: 'STRING' }, phone: { type: 'STRING' }, aliases: { type: 'STRING' }, relation: { type: 'STRING' }, birthday: { type: 'STRING' }, tone: { type: 'STRING' }, notes: { type: 'STRING' } }, required: ['name'] } },
+        { name: 'save_contact', description: 'Speichert Kontakt. Nutze "address" für die Postadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, email: { type: 'STRING' }, telegram: { type: 'STRING' }, phone: { type: 'STRING' }, aliases: { type: 'STRING' }, relation: { type: 'STRING' }, birthday: { type: 'STRING' }, tone: { type: 'STRING' }, notes: { type: 'STRING' }, address: { type: 'STRING' } }, required: ['name'] } },
         { name: 'forget_contact', description: 'Löscht Kontakt.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
         { name: 'list_contacts', description: 'Listet Kontakte.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'find_group', description: 'Sucht Gruppe.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
@@ -617,9 +636,10 @@ function buildBusinessTools() {
         { name: 'forget_group', description: 'Löscht Gruppe.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' } }, required: ['name'] } },
         { name: 'list_groups', description: 'Listet Gruppen.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'resolve_recipients', description: 'Löst Namen zu Empfängern auf.', parameters: { type: 'OBJECT', properties: { names: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['names'] } },
-        { name: 'save_user_profile', description: 'Speichert Nutzer-Profil.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
+        { name: 'save_user_profile', description: 'Speichert Nutzer-Profil. Nutze "address" für Heimatadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
         { name: 'get_weather', description: 'Wetter.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Restaurants. Ergebnisse als Karten in der App — nicht vorlesen.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
         { name: 'show_draft', description: 'Zeigt E-Mail-Entwurf als Karte (NUR normale Mails, NICHT Karussell). Nie laut vorlesen.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
         { name: 'send_email', description: 'Sendet E-Mail nach Bestätigung.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
@@ -631,6 +651,103 @@ function buildBusinessTools() {
     },
   ];
 }
+
+// ==================== ROUTE-HELPER ====================
+
+async function resolveRouteDestination(destination, destination_type, userId, userData) {
+  if (destination_type === 'home') {
+    const homeAddress = userData.user_address || userData.home_address;
+    if (!homeAddress) {
+      return {
+        missing: true,
+        question: 'Ich kenne deine Heimatadresse nicht. Wie lautet sie?',
+      };
+    }
+    return { to_address: homeAddress, destination_label: 'Zuhause' };
+  }
+
+  if (destination_type === 'contact') {
+    try {
+      const res = await fetch(SELF_URL + '/api/contacts/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, name: destination }),
+      });
+      const data = await res.json();
+      if (data.found && data.contact) {
+        const contact = data.contact;
+        const contactAddress = contact.address || userData['contact_' + contact.name + '_address'];
+        if (!contactAddress) {
+          return {
+            missing: true,
+            question: `Ich kenne ${contact.name}s Adresse nicht. Wie lautet sie?`,
+            contact_name: contact.name,
+          };
+        }
+        return { to_address: contactAddress, destination_label: contact.name };
+      }
+      return {
+        missing: true,
+        question: `Ich kenne ${destination} nicht. Wer ist das?`,
+      };
+    } catch (e) {
+      return { missing: true, question: `Ich konnte ${destination} nicht finden.` };
+    }
+  }
+
+  return { to_address: destination, destination_label: destination };
+}
+
+async function showRouteTool(userId, destination, destination_type, userData) {
+  if (!userData._currentLat || !userData._currentLon) {
+    return { error: 'Ich brauche deinen aktuellen Standort für die Route.' };
+  }
+
+  const resolved = await resolveRouteDestination(destination, destination_type, userId, userData || {});
+
+  if (resolved.missing) {
+    return {
+      action_required: 'ask_user',
+      question: resolved.question,
+      pending_route: {
+        destination,
+        destination_type,
+        contact_name: resolved.contact_name || null,
+      },
+    };
+  }
+
+  try {
+    const res = await fetch(SELF_URL + '/api/route/calc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        from_lat: userData._currentLat,
+        from_lon: userData._currentLon,
+        to_address: resolved.to_address,
+        destination_label: resolved.destination_label,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      message: `Route angezeigt: ${data.route.distance_km} km, ${data.route.duration_min} Min.`,
+      distance_km: data.route.distance_km,
+      duration_min: data.route.duration_min,
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// ==================== TOOL-HANDLER ====================
 
 async function handleToolCall(clientWs, session, userProfile, toolCall, agentType) {
   const functionCalls = toolCall.functionCalls;
@@ -645,17 +762,17 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         let loc = fc.args.location;
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
         result = await fetchWeather(loc, fc.args.timeframe);
-            } else if (fc.name === 'find_restaurants') {
+      } else if (fc.name === 'find_restaurants') {
         let loc = fc.args.location;
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
-        result = await fetchRestaurants(
-          loc,
-          fc.args.cuisine,
-          userProfile.user_id,
-          clientWs._lastLat,
-          clientWs._lastLon,
-        );
-      
+        result = await fetchRestaurants(loc, fc.args.cuisine, userProfile.user_id, clientWs._lastLat, clientWs._lastLon);
+      } else if (fc.name === 'show_route') {
+        const userDataForRoute = {
+          ...(clientWs._userData || {}),
+          _currentLat: clientWs._lastLat,
+          _currentLon: clientWs._lastLon,
+        };
+        result = await showRouteTool(userProfile.user_id, fc.args.destination, fc.args.destination_type, userDataForRoute);
       } else if (fc.name === 'save_user_preference') {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
@@ -862,7 +979,6 @@ async function fetchWeather(location, timeframe = 'aktuell') {
 async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null, lat = null, lon = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine, lat, lon }) });
-
   if (!res.ok) throw new Error('Restaurant-Fehler');
   const data = await res.json();
   const restaurants = (data.restaurants || []).map(r => ({
@@ -871,6 +987,7 @@ async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null,
     address: r.address,
     phone: r.phone,
     openNow: r.openNow,
+    opensAt: r.opensAt,
     reviews: r.reviews,
   }));
 

@@ -7,6 +7,7 @@ import { broadcastToClients } from './gemini_live.js';
 import { sendCarouselByEmail } from './email.js';
 import { setScript, addImage, getCarousel } from './carousel_store.js';
 import { setRestaurants, getRestaurants, clearRestaurants } from './restaurant_store.js';
+import { setRoute, getRoute, clearRoute } from './route_store.js';
 
 const { Pool } = pg;
 
@@ -230,6 +231,15 @@ const CORE_RULES = [
   '',
   '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
   '',
+  '🗺️ ROUTE & NAVIGATION:',
+  '- "Weg nach Hause" / "Route nach Hause" → rufe show_route(destination="home", destination_type="home")',
+  '- "Route nach [Stadt]" → rufe show_route(destination="[Stadt]", destination_type="city")',
+  '- "Route zu [Kontakt]" / "Wie komme ich zu [Kontakt]" → rufe show_route(destination="[Kontakt]", destination_type="contact")',
+  '',
+  'WICHTIG bei fehlenden Adressen:',
+  '- Wenn user_address fehlt und home-Route gefragt → frage: "Ich kenne deine Heimatadresse nicht. Wie lautet sie?" → WARTE → speichere mit save_user_profile(address="...") → rufe show_route erneut auf.',
+  '- Wenn contact_X_address fehlt und contact-Route gefragt → frage: "Ich kenne [Name]s Adresse nicht. Wie lautet sie?" → WARTE → speichere mit save_contact(name="X", address="...") → rufe show_route erneut auf.',
+  '',
   '📍 STANDORT:',
   '- Wenn der Nutzer fragt "wo bin ich" → nutze den aktuellen Live-Standort (GPS) aus dem Prompt.',
   '- Wenn kein Live-Standort verfügbar ist → sage ehrlich "Ich weiß gerade nicht genau wo du bist".',
@@ -318,9 +328,9 @@ const JONY_TOOLS = [
   { name: 'save_user_profile', description: 'Speichert Nutzer-Profil.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
   { name: 'show_draft', description: 'Zeigt E-Mail-Entwurf als Karte (NUR normale Mails, NICHT Karussell).', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
   { name: 'send_email', description: 'Sendet E-Mail nach Bestätigung.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
-  { name: 'send_telegram_message', description: 'Sendet Telegram-Text.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
+    { name: 'send_telegram_message', description: 'Sendet Telegram-Text.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
+  { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
 ];
-
 const BUSINESS_TOOLS = [
   ...JONY_TOOLS,
   { name: 'generate_script', description: 'Erstellt Karussell-Skript.', parameters: { type: 'OBJECT', properties: { topic: { type: 'STRING' }, audience: { type: 'STRING' }, focus: { type: 'STRING' }, slide_count: { type: 'INTEGER' } }, required: ['topic'] } },
@@ -574,8 +584,109 @@ async function generateImageAndBroadcast(prompt, slideNumber, userId) {
   }
 }
 
-// ==================== TOOL DISPATCH ====================
 
+// ==================== ROUTE ====================
+
+async function resolveRouteDestination(destination, destination_type, userId, userData) {
+  // Liefert: { to_address, destination_label } oder { missing: true, question: '...' }
+
+  if (destination_type === 'home') {
+    const homeAddress = userData.user_address || userData.home_address;
+    if (!homeAddress) {
+      return {
+        missing: true,
+        question: 'Ich kenne deine Heimatadresse nicht. Wie lautet sie?',
+      };
+    }
+    return { to_address: homeAddress, destination_label: 'Zuhause' };
+  }
+
+  if (destination_type === 'contact') {
+    // Kontakt suchen
+    try {
+      const res = await fetch(SELF_URL + '/api/contacts/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, name: destination }),
+      });
+      const data = await res.json();
+      if (data.found && data.contact) {
+        const contact = data.contact;
+        const contactAddress = contact.address || userData['contact_' + contact.name + '_address'];
+        if (!contactAddress) {
+          return {
+            missing: true,
+            question: `Ich kenne ${contact.name}s Adresse nicht. Wie lautet sie?`,
+            contact_name: contact.name,
+          };
+        }
+        return { to_address: contactAddress, destination_label: contact.name };
+      }
+      return {
+        missing: true,
+        question: `Ich kenne ${destination} nicht. Wer ist das?`,
+      };
+    } catch (e) {
+      return { missing: true, question: `Ich konnte ${destination} nicht finden.` };
+    }
+  }
+
+  // City: direkt verwenden
+  return { to_address: destination, destination_label: destination };
+}
+
+async function showRouteTool(userId, destination, destination_type, userData, currentLocation) {
+  // Standort prüfen
+  if (!currentLocation?.lat || !currentLocation?.lon) {
+    return { error: 'Ich brauche deinen aktuellen Standort für die Route.' };
+  }
+
+  // Ziel auflösen
+  const resolved = await resolveRouteDestination(destination, destination_type, userId, userData || {});
+
+  if (resolved.missing) {
+    return {
+      action_required: 'ask_user',
+      question: resolved.question,
+      pending_route: {
+        destination,
+        destination_type,
+        contact_name: resolved.contact_name || null,
+      },
+    };
+  }
+
+  // Route berechnen
+  try {
+    const res = await fetch(SELF_URL + '/api/route/calc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        from_lat: currentLocation.lat,
+        from_lon: currentLocation.lon,
+        to_address: resolved.to_address,
+        destination_label: resolved.destination_label,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      message: `Route angezeigt: ${data.route.distance_km} km, ${data.route.duration_min} Min.`,
+      distance_km: data.route.distance_km,
+      duration_min: data.route.duration_min,
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+// ==================== TOOL DISPATCH ====================
 async function executeChatTool(name, args, userId, profile, currentLocation, attachments) {
   if (name === 'get_weather') { let loc = args.location; if (isHereKeyword(loc) && currentLocation?.city) loc = currentLocation.city; return await fetchWeather(loc, args.timeframe); }
     if (name === 'find_restaurants') {
@@ -604,6 +715,7 @@ async function executeChatTool(name, args, userId, profile, currentLocation, att
   if (name === 'show_draft') return await showDraft(userId, args.to, args.subject, args.body, args.tone, attachments);
   if (name === 'send_email') { const p = { ...profile, user_id: userId }; return await sendFreeEmail(args.to, args.subject, args.body, p, args.tone || 'persönlich'); }
   if (name === 'send_telegram_message') return await sendTelegram(args.chat_id, args.text);
+  if (name === 'show_route') return await showRouteTool(userId, args.destination, args.destination_type, profile, currentLocation);
   if (name === 'generate_script') return await generateScriptAndBroadcast(args.topic, args.audience, args.focus, args.slide_count, userId);
   if (name === 'generate_image') return await generateImageAndBroadcast(args.prompt, args.slide_number, userId);
   if (name === 'send_carousel_email') return await sendCarouselEmailTool(userId, args.to, profile);
