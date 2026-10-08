@@ -1411,7 +1411,7 @@ app.post('/api/search-restaurant', async (req, res) => {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY,
-          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.regularOpeningHours,places.currentOpeningHours,places.permanentlyClosed,places.businessStatus,places.location',
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.nationalPhoneNumber,places.internationalPhoneNumber,places.regularOpeningHours,places.currentOpeningHours,places.businessStatus,places.location',
         },
         body: JSON.stringify(searchBody),
       });
@@ -1424,7 +1424,7 @@ app.post('/api/search-restaurant', async (req, res) => {
       const data = await response.json();
 
       const openOnes = (data.places || []).filter(p => {
-        if (p.permanentlyClosed === true) return false;
+        
         if (p.businessStatus === 'CLOSED_PERMANENTLY') return false;
 
         const rating = p.rating || 0;
