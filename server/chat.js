@@ -19,7 +19,6 @@ const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   ? 'https://' + process.env.RAILWAY_PUBLIC_DOMAIN
   : 'http://localhost:' + (process.env.PORT || 8080);
 
-// Aktuelle Modelle
 const CHAT_MODELS = [
   'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
@@ -169,8 +168,20 @@ function buildFoundation(userData, currentLocation, attachments) {
     if (m) groups.push('- ' + gn + ': ' + m);
   }
 
-  let locationLine = 'Standort: ' + (userData.hometown || 'unbekannt');
-  if (currentLocation?.city) locationLine = 'Standort: ' + currentLocation.city;
+  // ★ STANDORT-FIX: Heimat vs. aktueller Standort
+  let locationLine;
+  if (currentLocation?.city) {
+    locationLine = '📍 AKTUELLER Standort: ' + currentLocation.city;
+    if (currentLocation.lat != null && currentLocation.lon != null) {
+      const lat = Number(currentLocation.lat);
+      const lon = Number(currentLocation.lon);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        locationLine += ` (GPS: ${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+      }
+    }
+  } else {
+    locationLine = '📍 AKTUELLER Standort: (nicht verfügbar) — Heimatort ist ' + (userData.hometown || 'unbekannt');
+  }
 
   const parts = [
     'HEUTE: ' + today + ' (' + timeCtx + ')',
@@ -215,9 +226,14 @@ const CORE_RULES = [
   '',
   'TELEGRAM: send_telegram_message(chat_id, text). Eugen: 8448058381.',
   '',
-  '🌐 AKTUELLES WISSEN: Du hast Zugriff auf die Google-Suche. Bei Fragen zu aktuellen Ereignissen (Bundesliga-Tabelle, Spielstände, Nachrichten, aktuelle Termine, Preise, Wetter-Vorhersagen) → nutze die Google-Suche automatisch. ERFINDE NICHTS. Wenn du etwas nicht weißt → sag es.',
+  '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
   '',
   '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
+  '',
+  '📍 STANDORT:',
+  '- Wenn der Nutzer fragt "wo bin ich" → nutze den aktuellen Live-Standort (GPS) aus dem Prompt.',
+  '- Wenn kein Live-Standort verfügbar ist → sage ehrlich "Ich weiß gerade nicht genau wo du bist".',
+  '- Nenne NICHT einfach den Heimatort aus dem Gedächtnis — der ist nur die Heimat, nicht der aktuelle Ort.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -331,7 +347,6 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-// ★ ERWEITERT: broadcastet Restaurant-Karten
 async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
@@ -346,7 +361,6 @@ async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null)
     reviews: r.reviews,
   }));
 
-  // ★ Restaurant-Karten an App broadcasten
   if (userId && restaurants.length > 0) {
     setRestaurants(userId, restaurants, { query: cuisine, location });
     broadcastToClients({
@@ -685,7 +699,7 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   console.log(`💬 Chat (${currentMode}/${currentRole}): "${userMessage.substring(0, 60)}"`);
-  console.log(`🔖 BUILD-MARKER v7 | JONY_TOOLS: ${JONY_TOOLS.length} | Grounding: AN | Restaurant-Karten: AN`);
+  console.log(`🔖 BUILD-MARKER v8 | Standort-Fix: AN`);
 
   let activeMode = currentMode;
   let activeRole = currentRole;
@@ -698,6 +712,13 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
 
   const userData = await loadUserData(userId);
   const history = await loadChatHistory(userId, 8);
+
+  // ★ STANDORT-LOG
+  if (currentLocation?.city) {
+    console.log(`📍 Live-Standort: ${currentLocation.city} (${currentLocation.lat}, ${currentLocation.lon})`);
+  } else {
+    console.log(`📍 Kein Live-Standort empfangen`);
+  }
 
   const systemInstruction = buildSystemPrompt(userData, activeRole, activeMode, currentLocation, attachments);
   const toolsList = activeMode === 'business' ? BUSINESS_TOOLS : JONY_TOOLS;
@@ -714,8 +735,6 @@ export async function handleChatMessage(userId, userMessage, currentRole = 'freu
   let finalText = null;
   let finalSources = [];
   let attempts = 0;
-
-  console.log(`   🔄 Starte Modell-Loop (${CHAT_MODELS.length} Modelle)`);
 
   while (attempts < 5) {
     attempts++;

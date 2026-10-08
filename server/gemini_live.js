@@ -126,8 +126,20 @@ function buildFoundation(userData, currentLocation, attachments) {
     if (m) groups.push('- ' + gn + ': ' + m);
   }
 
-  let locationLine = 'Standort: ' + (userData.hometown || 'unbekannt');
-  if (currentLocation?.city) locationLine = 'Standort: ' + currentLocation.city;
+  // ★ STANDORT-FIX: Live vs. Heimat
+  let locationLine;
+  if (currentLocation?.city) {
+    locationLine = '📍 AKTUELLER Standort: ' + currentLocation.city;
+    if (currentLocation.lat != null && currentLocation.lon != null) {
+      const lat = Number(currentLocation.lat);
+      const lon = Number(currentLocation.lon);
+      if (!isNaN(lat) && !isNaN(lon)) {
+        locationLine += ` (GPS: ${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+      }
+    }
+  } else {
+    locationLine = '📍 AKTUELLER Standort: (nicht verfügbar) — Heimatort ist ' + (userData.hometown || 'unbekannt');
+  }
 
   const parts = [
     'HEUTE: ' + today + ' (' + timeCtx + ')',
@@ -175,6 +187,11 @@ const CORE_RULES = [
   '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
   '',
   '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab 3 gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor.',
+  '',
+  '📍 STANDORT:',
+  '- Wenn der Nutzer fragt "wo bin ich" → nutze den aktuellen Live-Standort (GPS) aus dem Prompt.',
+  '- Wenn kein Live-Standort verfügbar ist → sage ehrlich "Ich weiß gerade nicht genau wo du bist".',
+  '- Nenne NICHT einfach den Heimatort aus dem Gedächtnis — der ist nur die Heimat, nicht der aktuelle Ort.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -186,7 +203,7 @@ const BUSINESS_RULES = [
   '3. "Karussell per Mail an Y" → send_carousel_email(to) — NICHT show_draft!',
   '4. "Karussell auf Telegram" → send_carousel_telegram(chat_id)',
   '5. "Normale Mail an Y" → show_draft + send_email',
-  '6. Skript NIEMALS laut vorlesen. Skript erscheint in der App als Karte.',
+  '6. Skript NIEMALS vorlesen. Skript erscheint in der App als Karte.',
   '',
   'STANDARD-EMP: "an mich" → eugen.priss@yahoo.com',
   '',
@@ -396,6 +413,9 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   clientWs._currentAttachments = attachments;
 
   console.log(`🔌 Gemini Live (${agentType}, Voice: ${agentConfig.voice}, Anhänge: ${attachments.length})...`);
+  if (currentLocation?.city) {
+    console.log(`📍 Live-Standort: ${currentLocation.city} (${currentLocation.lat}, ${currentLocation.lon})`);
+  }
 
   const systemInstruction = agentConfig.buildPrompt(
     userData,
@@ -832,7 +852,6 @@ async function fetchWeather(location, timeframe = 'aktuell') {
   return { location: data.location, current_temp: data.current?.temp, current_desc: data.current?.description, today_min: data.today?.min, today_max: data.today?.max, tomorrow_desc: data.tomorrow?.description, rain_chance: data.today?.rain_chance };
 }
 
-// ★ ERWEITERT: broadcastet Restaurant-Karten
 async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null) {
   const url = SELF_URL + '/api/search-restaurant?location=' + encodeURIComponent(location);
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cuisine }) });
