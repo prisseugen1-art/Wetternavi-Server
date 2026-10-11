@@ -10,7 +10,7 @@ import { setupGeminiWebSocket, broadcastToClients } from './server/gemini_live.j
 import { initTelegram, setTelegramWebhook, getTelegramWebhookCallback, getTelegramWebhookPath, getTelegramStatus, getTelegramWebhookInfo, sendTelegramMessage } from './server/telegram.js';
 import { handleChatMessage, getChatHistory, initChatTable, getDraft, clearDraft } from './server/chat.js';
 import { initEmail, getEmailStatus, sendEmail } from './server/email.js';
-
+import { reverseGeocodeCity, reverseGeocodeFull, distanceMeters, formatDistance } from './server/location_service.js';
 dotenv.config();
 
 const { Pool } = pg;
@@ -743,6 +743,56 @@ app.get('/api/draft/get/:userId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ========== LOCATION-REVERSE-GEOCODING ==========
+
+app.post('/api/location/reverse-city', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { lat, lon } = args;
+
+    if (lat == null || lon == null) {
+      return res.status(400).json({ error: 'lat, lon required' });
+    }
+
+    console.log(`📍 Reverse (city): (${lat}, ${lon})`);
+    const result = await reverseGeocodeCity(Number(lat), Number(lon));
+
+    if (!result) {
+      return res.status(404).json({ error: 'Kein Ort gefunden' });
+    }
+
+    console.log(`   → ${result.city}, ${result.state} (${result.country})`);
+    res.json({ success: true, location: result });
+  } catch (error) {
+    console.error('❌ reverse-city Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/location/reverse-full', async (req, res) => {
+  try {
+    const args = req.body?.args || req.body || {};
+    const { lat, lon } = args;
+
+    if (lat == null || lon == null) {
+      return res.status(400).json({ error: 'lat, lon required' });
+    }
+
+    console.log(`📍 Reverse (full): (${lat}, ${lon})`);
+    const result = await reverseGeocodeFull(Number(lat), Number(lon));
+
+    if (!result) {
+      return res.status(404).json({ error: 'Keine Adresse gefunden' });
+    }
+
+    console.log(`   → ${result.formatted}`);
+    res.json({ success: true, location: result });
+  } catch (error) {
+    console.error('❌ reverse-full Fehler:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 // ========== ROUTE-KARTEN ==========
 
@@ -774,7 +824,7 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.legs.endLocation,routes.legs.startLocation',
+      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.legs.endLocation,routes.legs.startLocation',
     },
     body: JSON.stringify(body),
   });
@@ -792,14 +842,98 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const durationStr = route.duration || '0s';
   const durationSeconds = parseInt(durationStr.replace('s', ''), 10) || 0;
 
+  const staticDurationStr = route.staticDuration || durationStr;
+  const staticDurationSeconds = parseInt(staticDurationStr.replace('s', ''), 10) || 0;
+
+  // ★ STAU: Differenz zwischen mit-Verkehr und ohne-Verkehr
+  const trafficDelaySec = Math.max(0, durationSeconds - staticDurationSeconds);
+  const trafficDelayMin = Math.round(trafficDelaySec / 60);
+
   return {
     distance_km: Math.round(distanceMeters / 100) / 10,
     duration_min: Math.round(durationSeconds / 60),
+    duration_without_traffic_min: Math.round(staticDurationSeconds / 60),
+    traffic_delay_min: trafficDelayMin,
     destination_lat: route.legs?.[0]?.endLocation?.latLng?.latitude ?? null,
     destination_lon: route.legs?.[0]?.endLocation?.latLng?.longitude ?? null,
   };
 }
+// ========== SIGHTSEEING ALONG ROUTE ==========
 
+async function searchSightsAlongRoute(fromLat, fromLon, toAddress, routeData) {
+  try {
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!apiKey) return [];
+
+    const destLat = routeData.destination_lat;
+    const destLon = routeData.destination_lon;
+    if (destLat == null || destLon == null) return [];
+
+    // ★ Places API v1: searchAlongRoute
+    const body = {
+      textQuery: 'Sehenswürdigkeit',
+      includedType: 'tourist_attraction',
+      maxResultCount: 5,
+      route: {
+        origin: {
+          latLng: {
+            latitude: Number(fromLat),
+            longitude: Number(fromLon),
+          },
+        },
+        destination: {
+          latLng: {
+            latitude: Number(destLat),
+            longitude: Number(destLon),
+          },
+        },
+        travelMode: 'DRIVE',
+      },
+      maxDetourDuration: '1200s',   // max 20 Min Umweg
+      maxDetourDistance: 20000,      // max 20 km Umweg
+      languageCode: 'de',
+    };
+
+    const res = await fetch('https://places.googleapis.com/v1/places:searchAlongRoute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.location',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`❌ searchAlongRoute ${res.status}: ${errText.substring(0, 200)}`);
+      return [];
+    }
+
+    const data = await res.json();
+    const places = data.places || [];
+
+    // ★ Filter: rating ≥ 4.5 + reviews ≥ 100
+    const filtered = places
+      .filter(p => (p.rating || 0) >= 4.5 && (p.userRatingCount || 0) >= 100)
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+      .slice(0, 2);
+
+    console.log(`🏰 Sehenswürdigkeiten gefunden: ${filtered.length}`);
+
+    return filtered.map(p => ({
+      name: p.displayName?.text || 'Sehenswürdigkeit',
+      address: p.formattedAddress || '',
+      rating: p.rating || 0,
+      reviews: p.userRatingCount || 0,
+      lat: p.location?.latitude ?? null,
+      lon: p.location?.longitude ?? null,
+    }));
+  } catch (e) {
+    console.error('❌ searchSightsAlongRoute:', e.message);
+    return [];
+  }
+}
 app.post('/api/route/calc', async (req, res) => {
   try {
     const args = req.body?.args || req.body || {};
@@ -813,7 +947,16 @@ app.post('/api/route/calc', async (req, res) => {
 
     console.log(`🗺️ Route: (${from_lat}, ${from_lon}) → "${to_address}"`);
 
-    const result = await calculateRoute(from_lat, from_lon, to_address);
+        const result = await calculateRoute(from_lat, from_lon, to_address);
+
+    // ★ Sightseeing nur bei Route ≥ 50 km
+    let sights = [];
+    if (result.distance_km >= 50) {
+      console.log(`🏰 Route ≥ 50 km → suche Sehenswürdigkeiten`);
+      sights = await searchSightsAlongRoute(from_lat, from_lon, to_address, result);
+    } else {
+      console.log(`📍 Route < 50 km → keine Sehenswürdigkeiten`);
+    }
 
     const routeData = {
       from_lat: Number(from_lat),
@@ -822,8 +965,12 @@ app.post('/api/route/calc', async (req, res) => {
       destination_label: destination_label || to_address,
       distance_km: result.distance_km,
       duration_min: result.duration_min,
+      duration_without_traffic_min: result.duration_without_traffic_min,
+      traffic_delay_min: result.traffic_delay_min,
+      has_traffic: result.traffic_delay_min > 0,
       destination_lat: result.destination_lat,
       destination_lon: result.destination_lon,
+      sights: sights,
     };
 
     const { setRoute } = await import('./server/route_store.js');
@@ -1587,7 +1734,7 @@ app.post('/api/search-restaurant', async (req, res) => {
         return false;
       });
 
-      if (openOnes.length >= 1) {
+            if (openOnes.length >= 1) {
         places = openOnes;
         usedRadius = radius;
         console.log(`🍽️ Radius ${radius/1000} km: ${openOnes.length} offene Treffer`);
@@ -1596,9 +1743,22 @@ app.post('/api/search-restaurant', async (req, res) => {
       console.log(`🍽️ Radius ${radius/1000} km: keine offenen Treffer`);
     }
 
-    const filtered = places
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+    // ★ NEU: Entfernung berechnen + nach Entfernung sortieren
+    const withDistance = places.map(p => {
+      let dist = null;
+      if (lat != null && lon != null && p.location?.latitude && p.location?.longitude) {
+        dist = distanceMeters(Number(lat), Number(lon), p.location.latitude, p.location.longitude);
+      }
+      return { ...p, _distance: dist };
+    });
+
+    // Nur die mit Entfernung, nach Entfernung sortiert
+    const filtered = withDistance
+      .filter(p => p._distance != null)
+      .sort((a, b) => a._distance - b._distance)
       .slice(0, 3);
+
+    console.log(`🍽️ Top 3 nach Entfernung: ${filtered.map(p => p._distance + 'm').join(', ')}`);
 
     function getOpenStatus(p) {
       const hours = p.currentOpeningHours || p.regularOpeningHours;

@@ -128,7 +128,7 @@ function buildFoundation(userData, currentLocation, attachments) {
     if (m) groups.push('- ' + gn + ': ' + m);
   }
 
-  // ★ STANDORT: Live vs. Heimat
+  // Standort
   let locationLine;
   if (currentLocation?.city) {
     locationLine = '📍 AKTUELLER Standort: ' + currentLocation.city;
@@ -139,11 +139,12 @@ function buildFoundation(userData, currentLocation, attachments) {
         locationLine += ` (GPS: ${lat.toFixed(3)}, ${lon.toFixed(3)})`;
       }
     }
+  } else if (currentLocation?.lat != null && currentLocation?.lon != null) {
+    locationLine = `📍 AKTUELLER Standort (GPS): ${Number(currentLocation.lat).toFixed(3)}, ${Number(currentLocation.lon).toFixed(3)}`;
   } else {
     locationLine = '📍 AKTUELLER Standort: (nicht verfügbar) — Heimatort ist ' + (userData.hometown || 'unbekannt');
   }
 
-  // Heimatadresse prüfen
   const homeAddress = userData.user_address || userData.home_address;
   const homeLine = homeAddress
     ? '🏠 Heimatadresse: ' + homeAddress
@@ -195,21 +196,28 @@ const CORE_RULES = [
   '',
   '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
   '',
-  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab die besten gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor. Restaurants die geschlossen sind, werden automatisch rausgefiltert.',
+  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab die besten in der Nähe gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor. Die Karten sind nach Entfernung sortiert, enthalten die genaue Entfernung in Metern/Kilometern, und es sind nur offene oder heute öffnende Restaurants mit mindestens 4.0 Sternen.',
   '',
   '🗺️ ROUTE & NAVIGATION:',
   '- "Weg nach Hause" / "Route nach Hause" → rufe show_route(destination="home", destination_type="home")',
   '- "Route nach [Stadt]" → rufe show_route(destination="[Stadt]", destination_type="city")',
   '- "Route zu [Kontakt]" / "Wie komme ich zu [Kontakt]" → rufe show_route(destination="[Kontakt]", destination_type="contact")',
   '',
+  'ROUTE-INFO:',
+  '- Nach der Route-Berechnung bekommst du distance_km, duration_min, traffic_delay_min.',
+  '- Wenn traffic_delay_min > 0 → erwähne den Stau: "X km, ca. Y Min — davon Z Min Stau."',
+  '- Wenn traffic_delay_min = 0 → nur "X km, ca. Y Min."',
+  '- Wenn sights im Ergebnis (nur bei Routen ≥ 50 km) → erwähne kurz: "Unterwegs gibt es X und Y, beide mit max. 20 km Umweg."',
+  '',
   'WICHTIG bei fehlenden Adressen:',
   '- Wenn user_address fehlt und home-Route gefragt → frage: "Ich kenne deine Heimatadresse nicht. Wie lautet sie?" → WARTE → speichere mit save_user_profile(address="...") → rufe show_route erneut auf.',
   '- Wenn contact_X_address fehlt und contact-Route gefragt → frage: "Ich kenne [Name]s Adresse nicht. Wie lautet sie?" → WARTE → speichere mit save_contact(name="X", address="...") → rufe show_route erneut auf.',
   '',
   '📍 STANDORT:',
-  '- Wenn der Nutzer fragt "wo bin ich" → nutze den aktuellen Live-Standort (GPS) aus dem Prompt.',
-  '- Wenn kein Live-Standort verfügbar ist → sage ehrlich "Ich weiß gerade nicht genau wo du bist".',
-  '- Nenne NICHT einfach den Heimatort aus dem Gedächtnis — der ist nur die Heimat, nicht der aktuelle Ort.',
+  '- "Wo bin ich?" → rufe get_location_city() auf. Wenn Stadt gefunden → nenne sie.',
+  '- "Genauer" / "Wo genau?" → rufe get_location_full() auf. Nenne die volle Adresse.',
+  '- Wenn keine GPS-Daten verfügbar → sage ehrlich "Ich weiß gerade nicht genau wo du bist".',
+  '- Nenne NICHT einfach den Heimatort aus dem Gedächtnis.',
 ].join('\n');
 
 const BUSINESS_RULES = [
@@ -249,9 +257,9 @@ const ROLES = {
 
 const JONY_BASE = 'Du bist Jony, persönlicher Begleiter von Eugen (auch Jackson). Ehrlich, warmherzig, humorvoll. Kein Assistent – ein Freund. Beim Voice-Modus: sprich natürlich, kurz, variiere.';
 
-const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, show_route, save_user_preference, get_user_preferences, find_contact, save_contact, forget_contact, list_contacts, find_group, save_group, forget_group, list_groups, resolve_recipients, save_user_profile, show_draft, send_email, send_telegram_message';
+const JONY_TOOLS_LIST = 'TOOLS: get_weather, find_restaurants, show_route, get_location_city, get_location_full, save_user_preference, get_user_preferences, find_contact, save_contact, forget_contact, list_contacts, find_group, save_group, forget_group, list_groups, resolve_recipients, save_user_profile, show_draft, send_email, send_telegram_message';
 
-const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram, show_route + alle Kontakt-/Gruppen-/E-Mail-Tools';
+const BUSINESS_TOOLS_LIST = 'TOOLS: generate_script, generate_image, send_carousel_email, send_carousel_telegram, show_route, get_location_city, get_location_full + alle Kontakt-/Gruppen-/E-Mail-Tools';
 
 // ==================== ANTI-REPETITION ====================
 
@@ -416,12 +424,14 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   const userData = await fetchUserData(userProfile.user_id);
   clientWs._userData = userData;
 
+  // ★ GPS hat Priorität vor hometown
   let currentLocation = null;
   if (clientWs._lastLat != null && clientWs._lastLon != null) {
     currentLocation = {
       lat: clientWs._lastLat,
       lon: clientWs._lastLon,
-      city: userData.hometown || userProfile.hometown,
+      // city wird NICHT mehr aus userData.hometown übernommen — nur reine GPS-Daten.
+      // Jony nutzt reverse-Geocoding-Tools für Stadt/Adresse.
     };
   } else if (userData.hometown) {
     currentLocation = { city: userData.hometown };
@@ -431,8 +441,10 @@ export async function createGeminiSession(clientWs, userProfile, agentType = 'jo
   clientWs._currentAttachments = attachments;
 
   console.log(`🔌 Gemini Live (${agentType}, Voice: ${agentConfig.voice}, Anhänge: ${attachments.length})...`);
-  if (currentLocation?.city) {
-    console.log(`📍 Live-Standort: ${currentLocation.city} (${currentLocation.lat}, ${currentLocation.lon})`);
+  if (currentLocation?.lat != null) {
+    console.log(`📍 GPS: (${currentLocation.lat}, ${currentLocation.lon})`);
+  } else if (currentLocation?.city) {
+    console.log(`📍 Fallback-Stadt: ${currentLocation.city}`);
   }
 
   const systemInstruction = agentConfig.buildPrompt(
@@ -594,6 +606,134 @@ async function handleGeminiMessage(clientWs, message, session, userProfile, agen
   }
 }
 
+// ==================== LOCATION TOOLS ====================
+
+async function getLocationCityTool(currentLocation) {
+  if (!currentLocation?.lat || !currentLocation?.lon) {
+    return { error: 'Kein GPS-Standort verfügbar.' };
+  }
+  try {
+    const res = await fetch(SELF_URL + '/api/location/reverse-city', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: currentLocation.lat, lon: currentLocation.lon }),
+    });
+    if (!res.ok) return { error: `Reverse-Geocoding fehlgeschlagen (${res.status})` };
+    const data = await res.json();
+    return { success: true, city: data.location?.city, state: data.location?.state, country: data.location?.country };
+  } catch (e) { return { error: e.message }; }
+}
+
+async function getLocationFullTool(currentLocation) {
+  if (!currentLocation?.lat || !currentLocation?.lon) {
+    return { error: 'Kein GPS-Standort verfügbar.' };
+  }
+  try {
+    const res = await fetch(SELF_URL + '/api/location/reverse-full', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: currentLocation.lat, lon: currentLocation.lon }),
+    });
+    if (!res.ok) return { error: `Reverse-Geocoding fehlgeschlagen (${res.status})` };
+    const data = await res.json();
+    return {
+      success: true,
+      street: data.location?.street,
+      city: data.location?.city,
+      postal_code: data.location?.postal_code,
+      country: data.location?.country,
+      formatted: data.location?.formatted,
+    };
+  } catch (e) { return { error: e.message }; }
+}
+
+// ==================== ROUTE ====================
+
+async function resolveRouteDestination(destination, destination_type, userId, userData) {
+  if (destination_type === 'home') {
+    const homeAddress = userData.user_address || userData.home_address;
+    if (!homeAddress) {
+      return { missing: true, question: 'Ich kenne deine Heimatadresse nicht. Wie lautet sie?' };
+    }
+    return { to_address: homeAddress, destination_label: 'Zuhause' };
+  }
+
+  if (destination_type === 'contact') {
+    try {
+      const res = await fetch(SELF_URL + '/api/contacts/find', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, name: destination }),
+      });
+      const data = await res.json();
+      if (data.found && data.contact) {
+        const contact = data.contact;
+        const contactAddress = contact.address || userData['contact_' + contact.name + '_address'];
+        if (!contactAddress) {
+          return { missing: true, question: `Ich kenne ${contact.name}s Adresse nicht. Wie lautet sie?`, contact_name: contact.name };
+        }
+        return { to_address: contactAddress, destination_label: contact.name };
+      }
+      return { missing: true, question: `Ich kenne ${destination} nicht. Wer ist das?` };
+    } catch (e) {
+      return { missing: true, question: `Ich konnte ${destination} nicht finden.` };
+    }
+  }
+
+  return { to_address: destination, destination_label: destination };
+}
+
+async function showRouteTool(userId, destination, destination_type, userData, currentLat, currentLon) {
+  if (!currentLat || !currentLon) {
+    return { error: 'Ich brauche deinen aktuellen Standort für die Route.' };
+  }
+
+  const resolved = await resolveRouteDestination(destination, destination_type, userId, userData || {});
+  if (resolved.missing) {
+    return {
+      action_required: 'ask_user',
+      question: resolved.question,
+      pending_route: { destination, destination_type, contact_name: resolved.contact_name || null },
+    };
+  }
+
+  try {
+    const res = await fetch(SELF_URL + '/api/route/calc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        from_lat: currentLat,
+        from_lon: currentLon,
+        to_address: resolved.to_address,
+        destination_label: resolved.destination_label,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
+    }
+
+    const data = await res.json();
+    const r = data.route;
+    let msg = `${r.distance_km} km, ca. ${r.duration_min} Min`;
+    if (r.traffic_delay_min > 0) msg += ` — davon ${r.traffic_delay_min} Min Stau`;
+    if (Array.isArray(r.sights) && r.sights.length > 0) {
+      msg += `. Unterwegs: ${r.sights.map(s => s.name).join(', ')}`;
+    }
+
+    return {
+      success: true,
+      message: `Route angezeigt: ${msg}.`,
+      distance_km: r.distance_km,
+      duration_min: r.duration_min,
+      traffic_delay_min: r.traffic_delay_min || 0,
+      sights: r.sights || [],
+    };
+  } catch (e) { return { error: e.message }; }
+}
+
 // ==================== TOOLS ====================
 
 function buildJonyTools() {
@@ -602,7 +742,9 @@ function buildJonyTools() {
       functionDeclarations: [
         { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Findet Restaurants in der Nähe. Ergebnisse werden als Karten in der App angezeigt — lies sie NICHT vor.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit + Stau + Sehenswürdigkeiten (ab 50 km). destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'get_location_city', description: 'Gibt die aktuelle Stadt des Nutzers zurück (aus GPS). Nutze das bei "Wo bin ich?".', parameters: { type: 'OBJECT', properties: {} } },
+        { name: 'get_location_full', description: 'Gibt die vollständige Adresse (Straße + Hausnummer) zurück. Nutze das bei "Genauer" / "Wo genau?".', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'save_user_preference', description: 'Speichert Nutzer-Info.', parameters: { type: 'OBJECT', properties: { key: { type: 'STRING' }, value: { type: 'STRING' } }, required: ['key', 'value'] } },
         { name: 'get_user_preferences', description: 'Lädt alle Nutzer-Infos.', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
@@ -639,115 +781,20 @@ function buildBusinessTools() {
         { name: 'save_user_profile', description: 'Speichert Nutzer-Profil. Nutze "address" für Heimatadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
         { name: 'get_weather', description: 'Wetter.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Restaurants. Ergebnisse als Karten in der App — nicht vorlesen.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit + Stau + Sehenswürdigkeiten (ab 50 km). destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'get_location_city', description: 'Aktuelle Stadt des Nutzers (aus GPS).', parameters: { type: 'OBJECT', properties: {} } },
+        { name: 'get_location_full', description: 'Vollständige Adresse (aus GPS).', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
         { name: 'show_draft', description: 'Zeigt E-Mail-Entwurf als Karte (NUR normale Mails, NICHT Karussell). Nie laut vorlesen.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
         { name: 'send_email', description: 'Sendet E-Mail nach Bestätigung.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' }, tone: { type: 'STRING' } }, required: ['to', 'subject', 'body', 'tone'] } },
         { name: 'generate_script', description: 'Erstellt Karussell-Skript.', parameters: { type: 'OBJECT', properties: { topic: { type: 'STRING' }, audience: { type: 'STRING' }, focus: { type: 'STRING' }, slide_count: { type: 'INTEGER' } }, required: ['topic'] } },
         { name: 'generate_image', description: 'Generiert Bild für Karussell-Slide.', parameters: { type: 'OBJECT', properties: { prompt: { type: 'STRING' }, slide_number: { type: 'INTEGER' } }, required: ['prompt', 'slide_number'] } },
-        { name: 'send_carousel_email', description: 'Sendet Karussell MIT ALLEN BILDERN als E-Mail. Nutze das IMMER für Karussell-Versand, NICHT show_draft.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' } }, required: ['to'] } },
+        { name: 'send_carousel_email', description: 'Sendet Karussell MIT ALLEN BILDERN als E-Mail.', parameters: { type: 'OBJECT', properties: { to: { type: 'STRING' } }, required: ['to'] } },
         { name: 'send_carousel_telegram', description: 'Sendet Karussell MIT ALLEN BILDERN an Telegram.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' } }, required: ['chat_id'] } },
       ],
     },
   ];
 }
-
-// ==================== ROUTE-HELPER ====================
-
-async function resolveRouteDestination(destination, destination_type, userId, userData) {
-  if (destination_type === 'home') {
-    const homeAddress = userData.user_address || userData.home_address;
-    if (!homeAddress) {
-      return {
-        missing: true,
-        question: 'Ich kenne deine Heimatadresse nicht. Wie lautet sie?',
-      };
-    }
-    return { to_address: homeAddress, destination_label: 'Zuhause' };
-  }
-
-  if (destination_type === 'contact') {
-    try {
-      const res = await fetch(SELF_URL + '/api/contacts/find', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, name: destination }),
-      });
-      const data = await res.json();
-      if (data.found && data.contact) {
-        const contact = data.contact;
-        const contactAddress = contact.address || userData['contact_' + contact.name + '_address'];
-        if (!contactAddress) {
-          return {
-            missing: true,
-            question: `Ich kenne ${contact.name}s Adresse nicht. Wie lautet sie?`,
-            contact_name: contact.name,
-          };
-        }
-        return { to_address: contactAddress, destination_label: contact.name };
-      }
-      return {
-        missing: true,
-        question: `Ich kenne ${destination} nicht. Wer ist das?`,
-      };
-    } catch (e) {
-      return { missing: true, question: `Ich konnte ${destination} nicht finden.` };
-    }
-  }
-
-  return { to_address: destination, destination_label: destination };
-}
-
-async function showRouteTool(userId, destination, destination_type, userData) {
-  if (!userData._currentLat || !userData._currentLon) {
-    return { error: 'Ich brauche deinen aktuellen Standort für die Route.' };
-  }
-
-  const resolved = await resolveRouteDestination(destination, destination_type, userId, userData || {});
-
-  if (resolved.missing) {
-    return {
-      action_required: 'ask_user',
-      question: resolved.question,
-      pending_route: {
-        destination,
-        destination_type,
-        contact_name: resolved.contact_name || null,
-      },
-    };
-  }
-
-  try {
-    const res = await fetch(SELF_URL + '/api/route/calc', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        from_lat: userData._currentLat,
-        from_lon: userData._currentLon,
-        to_address: resolved.to_address,
-        destination_label: resolved.destination_label,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
-    }
-
-    const data = await res.json();
-    return {
-      success: true,
-      message: `Route angezeigt: ${data.route.distance_km} km, ${data.route.duration_min} Min.`,
-      distance_km: data.route.distance_km,
-      duration_min: data.route.duration_min,
-    };
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
-// ==================== TOOL-HANDLER ====================
 
 async function handleToolCall(clientWs, session, userProfile, toolCall, agentType) {
   const functionCalls = toolCall.functionCalls;
@@ -756,6 +803,12 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
   for (const fc of functionCalls) {
     console.log('🔧 Tool:', fc.name, JSON.stringify(fc.args));
     let result = { status: 'ok' };
+
+    // GPS-Werte für Location-Tools
+    const currentLocation = {
+      lat: clientWs._lastLat,
+      lon: clientWs._lastLon,
+    };
 
     try {
       if (fc.name === 'get_weather') {
@@ -767,12 +820,19 @@ async function handleToolCall(clientWs, session, userProfile, toolCall, agentTyp
         if (isHereKeyword(loc)) loc = clientWs._userData?.hometown || userProfile.hometown || loc;
         result = await fetchRestaurants(loc, fc.args.cuisine, userProfile.user_id, clientWs._lastLat, clientWs._lastLon);
       } else if (fc.name === 'show_route') {
-        const userDataForRoute = {
-          ...(clientWs._userData || {}),
-          _currentLat: clientWs._lastLat,
-          _currentLon: clientWs._lastLon,
-        };
-        result = await showRouteTool(userProfile.user_id, fc.args.destination, fc.args.destination_type, userDataForRoute);
+        const userDataForRoute = clientWs._userData || {};
+        result = await showRouteTool(
+          userProfile.user_id,
+          fc.args.destination,
+          fc.args.destination_type,
+          userDataForRoute,
+          clientWs._lastLat,
+          clientWs._lastLon,
+        );
+      } else if (fc.name === 'get_location_city') {
+        result = await getLocationCityTool(currentLocation);
+      } else if (fc.name === 'get_location_full') {
+        result = await getLocationFullTool(currentLocation);
       } else if (fc.name === 'save_user_preference') {
         result = await saveUserPreference(userProfile.user_id, fc.args.key, fc.args.value);
       } else if (fc.name === 'get_user_preferences') {
@@ -989,6 +1049,7 @@ async function fetchRestaurants(location, cuisine = 'Restaurant', userId = null,
     openNow: r.openNow,
     opensAt: r.opensAt,
     reviews: r.reviews,
+    distance_m: r.distance_m ?? null,
   }));
 
   if (userId && restaurants.length > 0) {
@@ -1142,6 +1203,13 @@ export function setupGeminiWebSocket(server) {
           console.log(`🎛️ Init-Modus: ${clientWs._uiMode}`);
 
           if (clientWs._uiMode === 'voice') {
+            // ★ Warte auf erstes GPS-Signal (max 3 Sek)
+            let waited = 0;
+            while (clientWs._lastLat == null && waited < 3000) {
+              await new Promise(r => setTimeout(r, 200));
+              waited += 200;
+            }
+            console.log(`📍 GPS vor Voice-Start: lat=${clientWs._lastLat}, lon=${clientWs._lastLon}`);
             clientWs._session = await createGeminiSession(clientWs, userProfile, 'jony');
           } else {
             clientWs.send(JSON.stringify({ type: 'status', status: 'connected', agent: 'jony' }));
