@@ -800,7 +800,7 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY fehlt');
 
-  const body = {
+  const baseBody = {
     origin: {
       location: {
         latLng: {
@@ -813,73 +813,90 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
       address: toAddress,
     },
     travelMode: 'DRIVE',
-    routingPreference: 'TRAFFIC_AWARE',
     computeAlternativeRoutes: false,
     languageCode: 'de',
     units: 'METRIC',
   };
 
-  const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': apiKey,
+    'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+  };
+
+  // ★ CALL 1: Mit Live-Verkehr
+  const resTraffic = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration',
-    },
-    body: JSON.stringify(body),
+    headers,
+    body: JSON.stringify({
+      ...baseBody,
+      routingPreference: 'TRAFFIC_AWARE',
+    }),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Routes API ${res.status}: ${errText.substring(0, 200)}`);
+  if (!resTraffic.ok) {
+    const errText = await resTraffic.text();
+    throw new Error(`Routes API (traffic) ${resTraffic.status}: ${errText.substring(0, 200)}`);
   }
 
-  const data = await res.json();
-  const route = data.routes?.[0];
-  if (!route) throw new Error('Keine Route gefunden');
+  const dataTraffic = await resTraffic.json();
+  const routeTraffic = dataTraffic.routes?.[0];
+  if (!routeTraffic) throw new Error('Keine Route gefunden');
 
-  // ★ DEBUG: Zeigt komplett, was Google liefert
-  console.log('🚗 Routes API Response:', JSON.stringify({
-    distanceMeters: route.distanceMeters,
-    duration: route.duration,
-    staticDuration: route.staticDuration,
-    hasStaticDuration: !!route.staticDuration,
-  }));
+  // ★ CALL 2: Ohne Verkehr
+  const resNoTraffic = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...baseBody,
+      routingPreference: 'TRAFFIC_UNAWARE',
+    }),
+  });
 
-  const distanceMeters = route.distanceMeters || 0;
-  const durationStr = route.duration || '0s';
-  const durationSeconds = parseInt(durationStr.replace('s', ''), 10) || 0;
+  if (!resNoTraffic.ok) {
+    const errText = await resNoTraffic.text();
+    throw new Error(`Routes API (no-traffic) ${resNoTraffic.status}: ${errText.substring(0, 200)}`);
+  }
 
-  const staticDurationStr = route.staticDuration || durationStr;
-  const staticDurationSeconds = parseInt(staticDurationStr.replace('s', ''), 10) || 0;
+  const dataNoTraffic = await resNoTraffic.json();
+  const routeNoTraffic = dataNoTraffic.routes?.[0];
+  if (!routeNoTraffic) throw new Error('Keine Route ohne Verkehr gefunden');
 
-    // ★ STAU-BERECHNUNG mit Ampelfarbe
-  const trafficDelaySec = Math.max(0, durationSeconds - staticDurationSeconds);
-  const trafficDelayMin = Math.round(trafficDelaySec / 60);
+  // Parse
+  const distanceMeters = routeTraffic.distanceMeters || 0;
+  const durationTrafficSec = parseInt((routeTraffic.duration || '0s').replace('s', ''), 10) || 0;
+  const durationNoTrafficSec = parseInt((routeNoTraffic.duration || '0s').replace('s', ''), 10) || 0;
 
-  // Ampel-Logik:
-  //   ≤ 5 Min  → green (kein Stau, nur Schwankung)
-  //   6-15 Min → yellow (leichter Stau)
-  //   > 15 Min → red (Stau)
+  // ★ VERZÖGERUNG
+  const delaySec = Math.max(0, durationTrafficSec - durationNoTrafficSec);
+  const delayMin = Math.round(delaySec / 60);
+
+  // ★ AMPEL-LOGIK (nach deinen Regeln)
+  //   ≤ 0 Min  → grün
+  //   1-5 Min  → gelb
+  //   > 5 Min  → rot
   let trafficLevel = 'green';
   let trafficLabel = 'Kein Stau';
-  if (trafficDelayMin > 15) {
+  if (delayMin > 5) {
     trafficLevel = 'red';
-    trafficLabel = `Stau (${trafficDelayMin} Min)`;
-  } else if (trafficDelayMin > 5) {
+    trafficLabel = `+${delayMin} Min`;
+  } else if (delayMin > 0) {
     trafficLevel = 'yellow';
-    trafficLabel = `Leichter Stau (${trafficDelayMin} Min)`;
+    trafficLabel = `+${delayMin} Min`;
   }
 
-  console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km, ${Math.round(durationSeconds/60)} Min (mit Verkehr), ${Math.round(staticDurationSeconds/60)} Min (ohne), Stau: ${trafficDelayMin} Min → ${trafficLevel.toUpperCase()}`);
+  console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km`);
+  console.log(`   Mit Verkehr: ${Math.round(durationTrafficSec/60)} Min`);
+  console.log(`   Ohne Verkehr: ${Math.round(durationNoTrafficSec/60)} Min`);
+  console.log(`   Verzögerung: ${delayMin} Min → ${trafficLevel.toUpperCase()} (${trafficLabel})`);
 
   return {
     distance_km: Math.round(distanceMeters / 100) / 10,
-    duration_min: Math.round(durationSeconds / 60),
-    duration_without_traffic_min: Math.round(staticDurationSeconds / 60),
-    traffic_delay_min: trafficDelayMin,
-    traffic_level: trafficLevel,        // 'green' | 'yellow' | 'red'
-    traffic_label: trafficLabel,        // "Kein Stau" | "Leichter Stau (X Min)" | "Stau (X Min)"
+    duration_min: Math.round(durationTrafficSec / 60),
+    duration_without_traffic_min: Math.round(durationNoTrafficSec / 60),
+    traffic_delay_min: delayMin,
+    traffic_level: trafficLevel,
+    traffic_label: trafficLabel,
     destination_lat: null,
     destination_lon: null,
   };
@@ -984,7 +1001,7 @@ app.post('/api/route/calc', async (req, res) => {
       console.log(`📍 Route < 50 km → keine Sehenswürdigkeiten`);
     }
 
-       const routeData = {
+           const routeData = {
       from_lat: Number(from_lat),
       from_lon: Number(from_lon),
       to_address,
@@ -993,13 +1010,13 @@ app.post('/api/route/calc', async (req, res) => {
       duration_min: result.duration_min,
       duration_without_traffic_min: result.duration_without_traffic_min,
       traffic_delay_min: result.traffic_delay_min,
-      traffic_level: result.traffic_level,       // ★ NEU
-      traffic_label: result.traffic_label,       // ★ NEU
-      has_traffic: result.traffic_delay_min > 5, // ★ NEU (nur ab 5 Min)
+      traffic_level: result.traffic_level,
+      traffic_label: result.traffic_label,
       destination_lat: result.destination_lat,
       destination_lon: result.destination_lon,
       sights: sights,
     };
+
 
     const { setRoute } = await import('./server/route_store.js');
     setRoute(user_id, routeData);
