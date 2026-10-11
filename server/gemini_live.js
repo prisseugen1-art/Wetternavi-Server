@@ -715,10 +715,9 @@ async function showRouteTool(userId, destination, destination_type, userData, cu
       return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
     }
 
-    const data = await res.json();
+       const data = await res.json();
     const r = data.route;
     let msg = `${r.distance_km} km, ca. ${r.duration_min} Min`;
-    if (r.traffic_delay_min > 0) msg += ` — davon ${r.traffic_delay_min} Min Stau`;
     if (Array.isArray(r.sights) && r.sights.length > 0) {
       msg += `. Unterwegs: ${r.sights.map(s => s.name).join(', ')}`;
     }
@@ -728,7 +727,6 @@ async function showRouteTool(userId, destination, destination_type, userData, cu
       message: `Route angezeigt: ${msg}.`,
       distance_km: r.distance_km,
       duration_min: r.duration_min,
-      traffic_delay_min: r.traffic_delay_min || 0,
       sights: r.sights || [],
     };
   } catch (e) { return { error: e.message }; }
