@@ -853,16 +853,33 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const staticDurationStr = route.staticDuration || durationStr;
   const staticDurationSeconds = parseInt(staticDurationStr.replace('s', ''), 10) || 0;
 
+    // ★ STAU-BERECHNUNG mit Ampelfarbe
   const trafficDelaySec = Math.max(0, durationSeconds - staticDurationSeconds);
   const trafficDelayMin = Math.round(trafficDelaySec / 60);
 
-  console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km, ${Math.round(durationSeconds/60)} Min (mit Verkehr), ${Math.round(staticDurationSeconds/60)} Min (ohne), Stau: ${trafficDelayMin} Min`);
+  // Ampel-Logik:
+  //   ≤ 5 Min  → green (kein Stau, nur Schwankung)
+  //   6-15 Min → yellow (leichter Stau)
+  //   > 15 Min → red (Stau)
+  let trafficLevel = 'green';
+  let trafficLabel = 'Kein Stau';
+  if (trafficDelayMin > 15) {
+    trafficLevel = 'red';
+    trafficLabel = `Stau (${trafficDelayMin} Min)`;
+  } else if (trafficDelayMin > 5) {
+    trafficLevel = 'yellow';
+    trafficLabel = `Leichter Stau (${trafficDelayMin} Min)`;
+  }
+
+  console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km, ${Math.round(durationSeconds/60)} Min (mit Verkehr), ${Math.round(staticDurationSeconds/60)} Min (ohne), Stau: ${trafficDelayMin} Min → ${trafficLevel.toUpperCase()}`);
 
   return {
     distance_km: Math.round(distanceMeters / 100) / 10,
     duration_min: Math.round(durationSeconds / 60),
     duration_without_traffic_min: Math.round(staticDurationSeconds / 60),
     traffic_delay_min: trafficDelayMin,
+    traffic_level: trafficLevel,        // 'green' | 'yellow' | 'red'
+    traffic_label: trafficLabel,        // "Kein Stau" | "Leichter Stau (X Min)" | "Stau (X Min)"
     destination_lat: null,
     destination_lon: null,
   };
@@ -967,7 +984,7 @@ app.post('/api/route/calc', async (req, res) => {
       console.log(`📍 Route < 50 km → keine Sehenswürdigkeiten`);
     }
 
-    const routeData = {
+       const routeData = {
       from_lat: Number(from_lat),
       from_lon: Number(from_lon),
       to_address,
@@ -976,7 +993,9 @@ app.post('/api/route/calc', async (req, res) => {
       duration_min: result.duration_min,
       duration_without_traffic_min: result.duration_without_traffic_min,
       traffic_delay_min: result.traffic_delay_min,
-      has_traffic: result.traffic_delay_min > 0,
+      traffic_level: result.traffic_level,       // ★ NEU
+      traffic_label: result.traffic_label,       // ★ NEU
+      has_traffic: result.traffic_delay_min > 5, // ★ NEU (nur ab 5 Min)
       destination_lat: result.destination_lat,
       destination_lon: result.destination_lon,
       sights: sights,
