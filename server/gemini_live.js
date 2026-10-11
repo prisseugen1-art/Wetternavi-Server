@@ -196,7 +196,25 @@ const CORE_RULES = [
   '',
   '🌐 AKTUELLES WISSEN: Bei aktuellen Ereignissen (Bundesliga, Nachrichten, Wetter weltweit) nutze die Google-Suche automatisch. ERFINDE NICHTS.',
   '',
-  '🍽️ RESTAURANTS: Wenn der Nutzer nach Restaurants fragt → rufe find_restaurants auf. Du siehst die Ergebnisse NICHT selbst — sie werden als Karten in der App angezeigt. Sage kurz: "Ich hab die besten in der Nähe gefunden — schau auf den Bildschirm." Lies die Namen NICHT vor. Die Karten sind nach Entfernung sortiert, enthalten die genaue Entfernung in Metern/Kilometern, und es sind nur offene oder heute öffnende Restaurants mit mindestens 4.0 Sternen.',
+  '🍽️ RESTAURANTS — WICHTIGE UNTERSCHEIDUNG:',
+  '',
+  'A) "Ich hab Hunger" / "Ich will was essen" / "Ich brauch Essen" OHNE Angabe was:',
+  '   → FRAGE ZUERST: "Worauf hast du Lust? Döner, Pizza, Asiatisch, Burger, ...?"',
+  '   → WARTE auf die Antwort.',
+  '   → Dann rufe find_restaurants(cuisine="<Antwort>", location=<Standort>) auf.',
+  '',
+  'B) "Ich hab Hunger, mir egal" / "Egal was" / "Irgendwas" / "Such einfach was":',
+  '   → SOFORT find_restaurants(cuisine="Restaurant", location=<Standort>) aufrufen.',
+  '   → NICHT nachfragen.',
+  '',
+  'C) "Ich hab Hunger auf <Küche>" (z. B. Döner, Pizza, Sushi):',
+  '   → SOFORT find_restaurants(cuisine="<Küche>", location=<Standort>) aufrufen.',
+  '',
+  'WICHTIG bei der Ausgabe:',
+  '- Du siehst die Ergebnisse NICHT selbst — sie erscheinen als Karten in der App.',
+  '- Sage kurz: "Ich hab die besten in der Nähe gefunden — schau auf den Bildschirm."',
+  '- Lies die Namen NICHT vor.',
+  '- Die Karten sind nach Entfernung sortiert, enthalten die Entfernung in Metern, und es sind nur offene oder heute öffnende Restaurants mit mindestens 4.0 Sternen.',
   '',
   '🗺️ ROUTE & NAVIGATION:',
   '- "Weg nach Hause" / "Route nach Hause" → rufe show_route(destination="home", destination_type="home")',
@@ -204,10 +222,10 @@ const CORE_RULES = [
   '- "Route zu [Kontakt]" / "Wie komme ich zu [Kontakt]" → rufe show_route(destination="[Kontakt]", destination_type="contact")',
   '',
   'ROUTE-INFO:',
-  '- Nach der Route-Berechnung bekommst du distance_km, duration_min, traffic_delay_min.',
-  '- Wenn traffic_delay_min > 0 → erwähne den Stau: "X km, ca. Y Min — davon Z Min Stau."',
-  '- Wenn traffic_delay_min = 0 → nur "X km, ca. Y Min."',
-  '- Wenn sights im Ergebnis (nur bei Routen ≥ 50 km) → erwähne kurz: "Unterwegs gibt es X und Y, beide mit max. 20 km Umweg."',
+  '- Nach der Route-Berechnung bekommst du distance_km und duration_min.',
+  '- Sage kurz: "X km, ca. Y Min."',
+  '- Keine Stau-Erwähnung (haben wir nicht).',
+  '- Keine Sehenswürdigkeiten-Erwähnung (haben wir nicht).',
   '',
   'WICHTIG bei fehlenden Adressen:',
   '- Wenn user_address fehlt und home-Route gefragt → frage: "Ich kenne deine Heimatadresse nicht. Wie lautet sie?" → WARTE → speichere mit save_user_profile(address="...") → rufe show_route erneut auf.',
@@ -715,19 +733,15 @@ async function showRouteTool(userId, destination, destination_type, userData, cu
       return { error: 'Route-Berechnung fehlgeschlagen: ' + err.substring(0, 100) };
     }
 
-       const data = await res.json();
+    const data = await res.json();
     const r = data.route;
     let msg = `${r.distance_km} km, ca. ${r.duration_min} Min`;
-    if (Array.isArray(r.sights) && r.sights.length > 0) {
-      msg += `. Unterwegs: ${r.sights.map(s => s.name).join(', ')}`;
-    }
 
     return {
       success: true,
       message: `Route angezeigt: ${msg}.`,
       distance_km: r.distance_km,
       duration_min: r.duration_min,
-      sights: r.sights || [],
     };
   } catch (e) { return { error: e.message }; }
 }
@@ -740,7 +754,7 @@ function buildJonyTools() {
       functionDeclarations: [
         { name: 'get_weather', description: 'Wetter für einen Ort.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Findet Restaurants in der Nähe. Ergebnisse werden als Karten in der App angezeigt — lies sie NICHT vor.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit + Stau + Sehenswürdigkeiten (ab 50 km). destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
         { name: 'get_location_city', description: 'Gibt die aktuelle Stadt des Nutzers zurück (aus GPS). Nutze das bei "Wo bin ich?".', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'get_location_full', description: 'Gibt die vollständige Adresse (Straße + Hausnummer) zurück. Nutze das bei "Genauer" / "Wo genau?".', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'save_user_preference', description: 'Speichert Nutzer-Info.', parameters: { type: 'OBJECT', properties: { key: { type: 'STRING' }, value: { type: 'STRING' } }, required: ['key', 'value'] } },
@@ -779,7 +793,7 @@ function buildBusinessTools() {
         { name: 'save_user_profile', description: 'Speichert Nutzer-Profil. Nutze "address" für Heimatadresse.', parameters: { type: 'OBJECT', properties: { name: { type: 'STRING' }, address: { type: 'STRING' }, birthdate: { type: 'STRING' }, phone: { type: 'STRING' }, default_email: { type: 'STRING' } } } },
         { name: 'get_weather', description: 'Wetter.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, timeframe: { type: 'STRING' } }, required: ['location'] } },
         { name: 'find_restaurants', description: 'Restaurants. Ergebnisse als Karten in der App — nicht vorlesen.', parameters: { type: 'OBJECT', properties: { location: { type: 'STRING' }, cuisine: { type: 'STRING' } }, required: ['location'] } },
-        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit + Stau + Sehenswürdigkeiten (ab 50 km). destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
+        { name: 'show_route', description: 'Zeigt eine Route-Karte mit Entfernung + Fahrzeit. destination_type: "home" | "city" | "contact".', parameters: { type: 'OBJECT', properties: { destination: { type: 'STRING' }, destination_type: { type: 'STRING', enum: ['home', 'city', 'contact'] } }, required: ['destination', 'destination_type'] } },
         { name: 'get_location_city', description: 'Aktuelle Stadt des Nutzers (aus GPS).', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'get_location_full', description: 'Vollständige Adresse (aus GPS).', parameters: { type: 'OBJECT', properties: {} } },
         { name: 'send_telegram_message', description: 'Sendet Telegram-Text. Frage IMMER zuerst.', parameters: { type: 'OBJECT', properties: { chat_id: { type: 'STRING' }, text: { type: 'STRING' } }, required: ['chat_id', 'text'] } },
