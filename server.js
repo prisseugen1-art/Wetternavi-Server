@@ -824,7 +824,7 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.legs.endLocation,routes.legs.startLocation',
+      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration',
     },
     body: JSON.stringify(body),
   });
@@ -838,6 +838,14 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const route = data.routes?.[0];
   if (!route) throw new Error('Keine Route gefunden');
 
+  // ★ DEBUG: Zeigt komplett, was Google liefert
+  console.log('🚗 Routes API Response:', JSON.stringify({
+    distanceMeters: route.distanceMeters,
+    duration: route.duration,
+    staticDuration: route.staticDuration,
+    hasStaticDuration: !!route.staticDuration,
+  }));
+
   const distanceMeters = route.distanceMeters || 0;
   const durationStr = route.duration || '0s';
   const durationSeconds = parseInt(durationStr.replace('s', ''), 10) || 0;
@@ -845,17 +853,18 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const staticDurationStr = route.staticDuration || durationStr;
   const staticDurationSeconds = parseInt(staticDurationStr.replace('s', ''), 10) || 0;
 
-  // ★ STAU: Differenz zwischen mit-Verkehr und ohne-Verkehr
   const trafficDelaySec = Math.max(0, durationSeconds - staticDurationSeconds);
   const trafficDelayMin = Math.round(trafficDelaySec / 60);
+
+  console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km, ${Math.round(durationSeconds/60)} Min (mit Verkehr), ${Math.round(staticDurationSeconds/60)} Min (ohne), Stau: ${trafficDelayMin} Min`);
 
   return {
     distance_km: Math.round(distanceMeters / 100) / 10,
     duration_min: Math.round(durationSeconds / 60),
     duration_without_traffic_min: Math.round(staticDurationSeconds / 60),
     traffic_delay_min: trafficDelayMin,
-    destination_lat: route.legs?.[0]?.endLocation?.latLng?.latitude ?? null,
-    destination_lon: route.legs?.[0]?.endLocation?.latLng?.longitude ?? null,
+    destination_lat: null,
+    destination_lon: null,
   };
 }
 // ========== SIGHTSEEING ALONG ROUTE ==========
@@ -1642,18 +1651,9 @@ app.post('/api/search-restaurant', async (req, res) => {
     const cuisine = resolveCuisine(req);
     if (!location) return res.status(400).json({ error: 'Location required' });
 
-    // ★ NEU: lat/lon ermitteln
-        // lat/lon aus mehreren möglichen Quellen
-    let lat = req.body?.args?.lat
-      ?? req.body?.lat
-      ?? req.query?.lat
-      ?? null;
-    let lon = req.body?.args?.lon
-      ?? req.body?.lon
-      ?? req.query?.lon
-      ?? null;
+    let lat = req.body?.args?.lat ?? req.body?.lat ?? req.query?.lat ?? null;
+    let lon = req.body?.args?.lon ?? req.body?.lon ?? req.query?.lon ?? null;
 
-    console.log(`📍 Restaurant-Suche: cuisine="${cuisine}", location="${location}", lat=${lat}, lon=${lon}`);
     if ((lat == null || lon == null) && location) {
       const apiKey = process.env.OPENWEATHER_API_KEY;
       const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${apiKey}`;
@@ -1664,7 +1664,8 @@ app.post('/api/search-restaurant', async (req, res) => {
       }
     }
 
-    // Radius-Stufen in Metern
+    console.log(`📍 Restaurant-Suche: cuisine="${cuisine}", location="${location}", lat=${lat}, lon=${lon}`);
+
     const RADIUS_STEPS = [1000, 5000, 15000];
     let places = [];
     let usedRadius = null;
@@ -1705,17 +1706,14 @@ app.post('/api/search-restaurant', async (req, res) => {
       const data = await response.json();
 
       const openOnes = (data.places || []).filter(p => {
-        
         if (p.businessStatus === 'CLOSED_PERMANENTLY') return false;
 
         const rating = p.rating || 0;
         if (rating < 4.0) return false;
 
         const hours = p.currentOpeningHours || p.regularOpeningHours;
-        if (!hours) {
-          console.log(`   ⚠️ Keine Öffnungszeiten-Info für "${p.displayName?.text}" → raus`);
-          return false;  // ← RAUS statt durchlassen
-        }
+        if (!hours) return false;
+
         if (hours.openNow === true) return true;
 
         const periods = hours.periods || [];
@@ -1734,7 +1732,7 @@ app.post('/api/search-restaurant', async (req, res) => {
         return false;
       });
 
-            if (openOnes.length >= 1) {
+      if (openOnes.length >= 1) {
         places = openOnes;
         usedRadius = radius;
         console.log(`🍽️ Radius ${radius/1000} km: ${openOnes.length} offene Treffer`);
@@ -1743,7 +1741,7 @@ app.post('/api/search-restaurant', async (req, res) => {
       console.log(`🍽️ Radius ${radius/1000} km: keine offenen Treffer`);
     }
 
-    // ★ NEU: Entfernung berechnen + nach Entfernung sortieren
+    // ★ Entfernung berechnen
     const withDistance = places.map(p => {
       let dist = null;
       if (lat != null && lon != null && p.location?.latitude && p.location?.longitude) {
@@ -1752,7 +1750,7 @@ app.post('/api/search-restaurant', async (req, res) => {
       return { ...p, _distance: dist };
     });
 
-    // Nur die mit Entfernung, nach Entfernung sortiert
+    // ★ Nach Entfernung sortieren
     const filtered = withDistance
       .filter(p => p._distance != null)
       .sort((a, b) => a._distance - b._distance)
@@ -1803,10 +1801,11 @@ app.post('/api/search-restaurant', async (req, res) => {
         opensAt: status.opensAt,
         lat: p.location?.latitude ?? null,
         lon: p.location?.longitude ?? null,
+        distance_m: p._distance ?? null,
       };
     });
 
-    console.log(`✅ ${results.length} Restaurants (Radius ${usedRadius ? usedRadius/1000 + ' km' : 'unbekannt'})`);
+    console.log(`✅ ${results.length} Restaurants zurückgegeben (Radius ${usedRadius ? usedRadius/1000 + ' km' : 'unbekannt'})`);
 
     res.json({
       count: results.length,
