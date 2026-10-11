@@ -800,7 +800,7 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY fehlt');
 
-  const body = {
+  const baseBody = {
     origin: {
       location: {
         latLng: {
@@ -813,80 +813,85 @@ async function calculateRoute(fromLat, fromLon, toAddress) {
       address: toAddress,
     },
     travelMode: 'DRIVE',
-    routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
     computeAlternativeRoutes: false,
     languageCode: 'de',
     units: 'METRIC',
-    // ★ Fordert Verkehrs-Intervalle auf der Route an
-    extraComputations: ['TRAFFIC_ON_POLYLINE'],
   };
 
-  const res = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': apiKey,
+    'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+  };
+
+  // ★ CALL 1: Ohne Verkehr
+  const resNo = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.staticDuration,routes.travelAdvisory.speedReadingIntervals',
-    },
-    body: JSON.stringify(body),
+    headers,
+    body: JSON.stringify({
+      ...baseBody,
+      routingPreference: 'TRAFFIC_UNAWARE',
+    }),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Routes API ${res.status}: ${errText.substring(0, 300)}`);
+  if (!resNo.ok) {
+    const errText = await resNo.text();
+    throw new Error(`Routes API (no-traffic) ${resNo.status}: ${errText.substring(0, 200)}`);
   }
+  const dataNo = await resNo.json();
+  const routeNo = dataNo.routes?.[0];
+  if (!routeNo) throw new Error('Keine Route ohne Verkehr gefunden');
 
-  const data = await res.json();
-  const route = data.routes?.[0];
-  if (!route) throw new Error('Keine Route gefunden');
+  // ★ CALL 2: Mit Verkehr
+  const resYes = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...baseBody,
+      routingPreference: 'TRAFFIC_AWARE_OPTIMAL',
+    }),
+  });
 
-  const distanceMeters = route.distanceMeters || 0;
-  const durationSec = parseInt((route.duration || '0s').replace('s', ''), 10) || 0;
-  const staticSec = parseInt((route.staticDuration || route.duration || '0s').replace('s', ''), 10) || 0;
+  if (!resYes.ok) {
+    const errText = await resYes.text();
+    throw new Error(`Routes API (traffic) ${resYes.status}: ${errText.substring(0, 200)}`);
+  }
+  const dataYes = await resYes.json();
+  const routeYes = dataYes.routes?.[0];
+  if (!routeYes) throw new Error('Keine Route mit Verkehr gefunden');
 
-  // ★ Verkehrs-Intervalle auswerten
-  const intervals = route.travelAdvisory?.speedReadingIntervals || [];
+  const distanceMeters = routeYes.distanceMeters || 0;
+  const durationNoTrafficSec = parseInt((routeNo.duration || '0s').replace('s', ''), 10) || 0;
+  const durationTrafficSec = parseInt((routeYes.duration || '0s').replace('s', ''), 10) || 0;
 
-  let normalCount = 0;
-  let slowCount = 0;
-  let jamCount = 0;
+  // ★ Verzögerung = Mit Verkehr - Ohne Verkehr
+  const delaySec = durationTrafficSec - durationNoTrafficSec;
+  const delayMin = Math.round(delaySec / 60);
 
-  for (const intv of intervals) {
-    const speed = intv.speed || 'NORMAL';
-    if (speed === 'TRAFFIC_JAM') jamCount++;
-    else if (speed === 'SLOW') slowCount++;
-    else normalCount++;
+  // ★ Ampel basiert auf absoluter Verzögerung
+  let trafficLevel = 'green';
+  let trafficLabel = 'Kein Stau';
+  if (delayMin > 5) {
+    trafficLevel = 'red';
+    trafficLabel = `+${delayMin} Min`;
+  } else if (delayMin >= 1) {
+    trafficLevel = 'yellow';
+    trafficLabel = `+${delayMin} Min`;
   }
 
   console.log(`🚗 Route: ${Math.round(distanceMeters/1000*10)/10} km`);
-  console.log(`   Dauer: ${Math.round(durationSec/60)} Min (mit Verkehr)`);
-  console.log(`   Ohne Verkehr: ${Math.round(staticSec/60)} Min`);
-  console.log(`   Intervalle: ${intervals.length} (NORMAL: ${normalCount}, SLOW: ${slowCount}, JAM: ${jamCount})`);
-
-  // ★ Ampel-Logik aus den Verkehrs-Intervallen
-  let trafficLevel = 'green';
-  let trafficLabel = 'Kein Stau';
-
-  if (jamCount > 0) {
-    trafficLevel = 'red';
-    trafficLabel = `Stau (${jamCount} Abschnitt${jamCount > 1 ? 'e' : ''})`;
-  } else if (slowCount > 0) {
-    trafficLevel = 'yellow';
-    trafficLabel = `Zähfließend (${slowCount} Abschnitt${slowCount > 1 ? 'e' : ''})`;
-  }
-
+  console.log(`   Ohne Verkehr: ${Math.round(durationNoTrafficSec/60)} Min`);
+  console.log(`   Mit Verkehr: ${Math.round(durationTrafficSec/60)} Min`);
+  console.log(`   Verzögerung: ${delayMin > 0 ? '+' : ''}${delayMin} Min`);
   console.log(`   Ampel: ${trafficLevel.toUpperCase()} (${trafficLabel})`);
 
   return {
     distance_km: Math.round(distanceMeters / 100) / 10,
-    duration_min: Math.round(durationSec / 60),
-    duration_without_traffic_min: Math.round(staticSec / 60),
-    traffic_delay_min: 0,
+    duration_min: Math.round(durationTrafficSec / 60),
+    duration_without_traffic_min: Math.round(durationNoTrafficSec / 60),
+    traffic_delay_min: delayMin,
     traffic_level: trafficLevel,
     traffic_label: trafficLabel,
-    jam_count: jamCount,
-    slow_count: slowCount,
-    normal_count: normalCount,
     destination_lat: null,
     destination_lon: null,
   };
@@ -991,7 +996,7 @@ app.post('/api/route/calc', async (req, res) => {
       console.log(`📍 Route < 50 km → keine Sehenswürdigkeiten`);
     }
 
-           const routeData = {
+               const routeData = {
       from_lat: Number(from_lat),
       from_lon: Number(from_lon),
       to_address,
